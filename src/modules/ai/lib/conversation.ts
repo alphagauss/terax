@@ -20,7 +20,10 @@ import {
   mergeFileEdits,
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
-import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
+import {
+  attachmentReferenceText,
+  type AttachmentDisplay,
+} from "@/modules/ai/lib/messageAttachments";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
 import type { DeliveryRecord } from "@/modules/channels/history";
 import type { ModelMessage, UIMessage } from "ai";
@@ -468,7 +471,7 @@ export async function convertToAgentModelMessages(
       });
       continue;
     }
-    const parts = meta.subagentResult
+    let parts = meta.subagentResult
       ? [
           {
             type: "text" as const,
@@ -485,6 +488,26 @@ export async function convertToAgentModelMessages(
             part.type === "dynamic-tool" ||
             part.type.startsWith("tool-"),
         );
+    const attachmentText =
+      message.role === "user"
+        ? attachmentReferenceText(meta.attachments ?? [])
+        : "";
+    if (attachmentText) {
+      parts = [...parts];
+      const textIndex = parts.findIndex((part) => part.type === "text");
+      if (textIndex >= 0) {
+        const textPart = parts[textIndex] as Extract<
+          (typeof parts)[number],
+          { type: "text" }
+        >;
+        parts[textIndex] = {
+          ...textPart,
+          text: `${attachmentText}\n\n${textPart.text}`,
+        };
+      } else {
+        parts.unshift({ type: "text", text: attachmentText });
+      }
+    }
     if (
       message.role === "assistant" &&
       !parts.some((part) => part.type !== "step-start")

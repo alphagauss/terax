@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
 import { planCompaction, type CompactionEvent } from "@/modules/ai/lib/compact";
-import { appendTextAttachment } from "@/modules/ai/lib/messageAttachments";
 import {
   convertToAgentModelMessages,
   conversationEventPart,
   expandConversationMessages,
+  messageMetadata,
   projectSessionMessages,
   serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
@@ -49,15 +49,9 @@ const event = (value: CompactionEvent): UIMessage => ({
 
 describe("compaction checkpoints", () => {
   it("keeps original history, removes covered attachments/process only, and replays multiple summaries identically", async () => {
-    const attachment = appendTextAttachment("request", {
-      name: "a.txt",
-      mediaType: "text/plain",
-      size: 4,
-      text: "file-body",
-    });
     const first = user("u1");
     first.parts = [
-      { type: "text", text: attachment.text },
+      { type: "text", text: "request" },
       {
         type: "file",
         mediaType: "image/png",
@@ -66,7 +60,13 @@ describe("compaction checkpoints", () => {
     ];
     first.metadata = {
       attachments: [
-        attachment.attachment,
+        {
+          kind: "file",
+          name: "a.txt",
+          size: 4,
+          path: "/work/a.txt",
+          environmentKey: "local",
+        },
         { kind: "image", name: "image", size: 1, mediaIndex: 0 },
       ],
     };
@@ -78,7 +78,7 @@ describe("compaction checkpoints", () => {
     const context = JSON.stringify(
       await convertToAgentModelMessages(firstPass),
     );
-    expect(context).not.toContain("file-body");
+    expect(context).not.toContain("/work/a.txt");
     expect(context).not.toContain("image/png");
     expect(context).not.toContain("code-a1");
     expect(context).toContain("final-a1");
@@ -109,7 +109,7 @@ describe("compaction checkpoints", () => {
       await convertToAgentModelMessages(projectSessionMessages("s", records)),
     ).toEqual(model);
     expect(original).toEqual(snapshot);
-    expect(JSON.stringify(records)).toContain("file-body");
+    expect(JSON.stringify(records)).toContain("/work/a.txt");
   });
 
   it("protects the entire active turn including guidance and produces no checkpoint for plain conversation", () => {
@@ -148,5 +148,32 @@ describe("compaction checkpoints", () => {
       ],
     };
     expect(planCompaction([message], false)).toBeNull();
+  });
+
+  it("removes an attachment-only model message while retaining the stored fact", async () => {
+    const message: UIMessage = {
+      id: "attachment-only",
+      role: "user",
+      parts: [],
+      metadata: {
+        attachments: [
+          {
+            kind: "file",
+            name: "report.pdf",
+            size: 42,
+            path: "/work/report.pdf",
+            environmentKey: "local",
+          },
+        ],
+      },
+    };
+    expect(planCompaction([message], false)?.throughUserMessageId).toBe(
+      message.id,
+    );
+    const compacted = [message, event(checkpoint("only", message.id))];
+    expect(
+      JSON.stringify(await convertToAgentModelMessages(compacted)),
+    ).not.toContain("/work/report.pdf");
+    expect(messageMetadata(message).attachments).toHaveLength(1);
   });
 });

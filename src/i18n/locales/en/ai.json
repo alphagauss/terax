@@ -89,7 +89,6 @@
     "workingDirectoryUnavailable": "The session working directory is unavailable.",
     "connectDescription": "Connect any AI provider or use a local model. Your key stays in the OS keychain.",
     "connectProvider": "Connect provider",
-    "fileTooLarge": "{{name}} is too large to attach ({{size}}).",
     "unsupportedFile": "{{name}} is not a supported text or image file.",
     "attachFailed": "Could not attach the file: {{error}}",
     "channelReadOnly": "This session receives messages from its Channel.",
@@ -316,9 +315,6 @@
     "zoomIn": "Zoom in",
     "copyImage": "Copy image",
     "copied": "Copied",
-    "failed": "Unable to copy image",
-    "saveSnapshot": "Save sent content as…",
-    "textFile": "Text file",
-    "saveFailed": "Unable to save attachment"
+    "failed": "Unable to copy image"
   }
 }

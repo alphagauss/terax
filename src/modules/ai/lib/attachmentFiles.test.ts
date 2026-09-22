@@ -25,7 +25,7 @@ it("WSL 和 SSH 不得打开本机选择器，本机按绝对路径附加，取�
   expect(attach).toHaveBeenCalledTimes(2);
 });
 
-it("图片只读取一次二进制，特殊扩展名走文本读取，原生错误不触发再次读取", async () => {
+it("图片只读取一次二进制，其他文件只读取属性", async () => {
   const workspace = { kind: "local" } as const;
   invoke.mockResolvedValueOnce({ bytes: [65], size: 1 });
   const image = await readPathAttachment("C:/work/图.PNG", workspace);
@@ -38,11 +38,11 @@ it("图片只读取一次二进制，特殊扩展名走文本读取，原生错�
   expect(invoke.mock.calls).toEqual([
     ["fs_read_binary", { path: "C:/work/图.PNG", workspace }],
   ]);
-  invoke.mockResolvedValueOnce({ kind: "text", content: "代码", size: 6 });
+  invoke.mockResolvedValueOnce({ kind: "file", size: 6 });
   expect(await readPathAttachment("/work/test.constructor", workspace)).toEqual(
-    { kind: "text", content: "代码", size: 6 },
+    { kind: "file", size: 6 },
   );
-  expect(invoke).toHaveBeenLastCalledWith("fs_read_file", {
+  expect(invoke).toHaveBeenLastCalledWith("fs_stat", {
     path: "/work/test.constructor",
     workspace,
   });
@@ -86,4 +86,27 @@ it("无扩展名的未知内容不伪装为图片", async () => {
   expect(
     await readPathAttachment("image", { kind: "local" }, { image: true }),
   ).toEqual({ kind: "binary", size: 3 });
+});
+
+it("符号链接保留原路径，但只接受指向普通文件的目标", async () => {
+  const workspace = { kind: "local" } as const;
+  invoke
+    .mockResolvedValueOnce({ kind: "symlink", size: 0 })
+    .mockResolvedValueOnce("C:/actual/file.bin")
+    .mockResolvedValueOnce({ kind: "file", size: 42 });
+  expect(await readPathAttachment("C:/link.bin", workspace)).toEqual({
+    kind: "file",
+    size: 42,
+  });
+  expect(invoke.mock.calls.slice(-3)).toEqual([
+    ["fs_stat", { path: "C:/link.bin", workspace }],
+    ["fs_canonicalize", { path: "C:/link.bin", workspace }],
+    ["fs_stat", { path: "C:/actual/file.bin", workspace }],
+  ]);
+
+  invoke.mockResolvedValueOnce({ kind: "dir", size: 0 });
+  expect(await readPathAttachment("C:/folder", workspace)).toEqual({
+    kind: "unsupported",
+    size: 0,
+  });
 });

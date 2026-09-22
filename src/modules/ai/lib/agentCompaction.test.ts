@@ -34,9 +34,18 @@ const user = (id: string): UIMessage => ({
   role: "user",
   parts: [{ type: "text", text: id }],
 });
+const attachment = {
+  kind: "file" as const,
+  name: "old.txt",
+  size: 8,
+  path: "/workspace/old.txt",
+  environmentKey: "local",
+};
 function history(): UIMessage[] {
+  const oldUser = user("old-user");
+  oldUser.metadata = { attachments: [attachment] };
   return [
-    user("old-user"),
+    oldUser,
     {
       id: "old-answer",
       role: "assistant",
@@ -153,6 +162,71 @@ async function consume(opts: RunAgentOptions) {
 afterEach(() => releaseUsage(sessionId));
 
 describe("Agent compaction", () => {
+  it("accepts an attachment-only message through the SDK Chat boundary", async () => {
+    activeModel = new MockLanguageModelV4({
+      doStream: async () => stream(),
+    });
+    const opts = options();
+    opts.uiMessages = [];
+    let submitted: UIMessage[] = [];
+    const chat = new Chat<UIMessage>({
+      id: sessionId,
+      transport: {
+        sendMessages: async ({ messages }) => {
+          submitted = messages;
+          opts.uiMessages = messages;
+          return (await runAgentStream(opts)).toUIMessageStream({
+            originalMessages: messages,
+          });
+        },
+        reconnectToStream: async () => null,
+      },
+    });
+    await chat.sendMessage({
+      role: "user",
+      parts: [],
+      metadata: { attachments: [attachment] },
+    });
+    expect(chat.error).toBeUndefined();
+    expect(submitted[submitted.length - 1]?.parts).toEqual([]);
+    expect(JSON.stringify(activeModel.doStreamCalls[0].prompt)).toContain(
+      attachment.path,
+    );
+  });
+
+  it("keeps an attachment-only user prefix stable across persistence and tool continuation", async () => {
+    activeModel = new MockLanguageModelV4({
+      doStream: async () =>
+        stream(activeModel.doStreamCalls.length === 1, false),
+    });
+    const opts = options();
+    opts.uiMessages = [
+      {
+        id: "attachment-only",
+        role: "user",
+        parts: [],
+        metadata: { attachments: [attachment] },
+      },
+    ];
+    const { errors } = await consume(opts);
+    expect(errors).toEqual([]);
+    expect(activeModel.doStreamCalls).toHaveLength(2);
+    const first = activeModel.doStreamCalls[0].prompt;
+    const second = activeModel.doStreamCalls[1].prompt;
+    expect(JSON.stringify(first)).toContain(attachment.path);
+    expect(second.slice(0, first.length)).toEqual(first);
+
+    const records = serializeSessionMessages(opts.uiMessages, {
+      turnId: "turn",
+      timestamp: "now",
+    });
+    expect(
+      await convertToAgentModelMessages(
+        projectSessionMessages(sessionId, records),
+      ),
+    ).toEqual(first.slice(1));
+  });
+
   it("preserves the request prefix and tool definitions, waits for persistence, then consumes queued guidance", async () => {
     let finishSummary!: () => void;
     activeModel = new MockLanguageModelV4({
@@ -182,6 +256,7 @@ describe("Agent compaction", () => {
     const request = activeModel.doGenerateCalls[0];
     expect(request.prompt.slice(1, -1)).toEqual(prefix);
     expect(JSON.stringify(request.prompt)).toContain("old terminal output");
+    expect(JSON.stringify(request.prompt)).toContain("/workspace/old.txt");
     expect(request.tools?.map((tool) => tool.name)).toContain(
       "get_terminal_output",
     );
@@ -200,6 +275,7 @@ describe("Agent compaction", () => {
     expect(next).toContain("handoff");
     expect(next).toContain("old final answer");
     expect(next).not.toContain("old terminal output");
+    expect(next).not.toContain("/workspace/old.txt");
     expect(next).toContain("correction");
     expect(message?.parts.some((part) => part.type === "data-compaction")).toBe(
       true,
@@ -230,9 +306,11 @@ describe("Agent compaction", () => {
     expect(summary.prompt.slice(0, previous.prompt.length)).toEqual(
       previous.prompt,
     );
+    expect(JSON.stringify(previous.prompt)).toContain("/workspace/old.txt");
     expect(summary.tools).toEqual(previous.tools);
     const finalPrompt = JSON.stringify(activeModel.doStreamCalls[1].prompt);
     expect(finalPrompt).not.toContain("old terminal output");
+    expect(finalPrompt).not.toContain("/workspace/old.txt");
     expect(finalPrompt).toContain("new terminal output");
     const parts = message?.parts ?? [];
     expect(

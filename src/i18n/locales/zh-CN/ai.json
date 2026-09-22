@@ -89,7 +89,6 @@
     "workingDirectoryUnavailable": "会话工作目录不可用。",
     "connectDescription": "连接任意 AI 提供方或使用本地模型。密钥只保存在系统钥匙串中。",
     "connectProvider": "连接提供方",
-    "fileTooLarge": "{{name}} 太大，无法附加（{{size}}）。",
     "unsupportedFile": "{{name}} 不是支持的文本或图片文件。",
     "attachFailed": "无法附加文件：{{error}}",
     "channelReadOnly": "此会话通过 Channel 接收消息",
@@ -316,9 +315,6 @@
     "zoomIn": "放大",
     "copyImage": "复制图片",
     "copied": "已复制",
-    "failed": "无法复制图片",
-    "saveSnapshot": "发送内容另存为…",
-    "textFile": "文本文件",
-    "saveFailed": "无法保存附件"
+    "failed": "无法复制图片"
   }
 }
