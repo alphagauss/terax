@@ -64,6 +64,18 @@
   padding-block: 0;
 }
 
+.markdown-content [data-streamdown="list-item"] + [data-streamdown="list-item"] {
+  margin-top: 4px;
+}
+
+.markdown-content [data-streamdown="list-item"] > p {
+  margin-bottom: 8px;
+}
+
+.markdown-content [data-streamdown="list-item"] > p:last-child {
+  margin-bottom: 0;
+}
+
 .markdown-content
   :is(
     [data-streamdown="ordered-list"],
@@ -73,7 +85,7 @@
     [data-streamdown="ordered-list"],
     [data-streamdown="unordered-list"]
   ) {
-  margin-top: 0;
+  margin-top: 4px;
   margin-bottom: 0;
 }
 
@@ -240,20 +252,23 @@
 }
 
 .markdown-content [data-streamdown="inline-code"] {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
   padding: 0.1em 0.35em;
   color: inherit;
   font-family: var(--font-mono);
-  font-size: 1em;
+  font-size: 0.94em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .markdown-content [data-markdown-code-block] {
   position: relative;
   margin: 16px 0;
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--foreground) 8%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 
 .markdown-content :where(
@@ -293,6 +308,9 @@
   margin: 0;
   min-width: max-content;
   padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre;
   tab-size: 4;
 }
@@ -305,11 +323,6 @@
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  transition: border-color var(--dur-control) var(--ease-standard);
-}
-
-.markdown-content [data-streamdown="table-wrapper"]:is(:hover, :focus-within) {
-  border-color: color-mix(in srgb, var(--foreground) 18%, transparent);
 }
 
 .markdown-content [data-streamdown="table-wrapper"] > div:last-child {
@@ -326,6 +339,13 @@
 
 .markdown-content [data-streamdown="table-header"] {
   background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.markdown-content [data-markdown-table-scroll] [data-streamdown="table-header"] {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--foreground) 8%, var(--background));
 }
 
 .markdown-content :is(
@@ -380,7 +400,6 @@
     [data-markdown-code-block] > :first-child,
     [data-streamdown="table-wrapper"] > div:first-child:not(:last-child),
     [data-markdown-visual-toolbar],
-    [data-streamdown="table-wrapper"],
     [data-streamdown="table-row"]
   ) {
     transition: none;

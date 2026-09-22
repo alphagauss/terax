@@ -561,6 +561,7 @@ export const MarkdownDocumentRenderer = forwardRef<
                   remarkPlugins={progressiveRemarkPlugins}
                   mode="streaming"
                   parseIncompleteMarkdown={false}
+                  tableMaxHeight="none"
                   isAnimating={false}
                   BlockComponent={MemoizedProgressiveMarkdownBlock}
                   parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocks}
@@ -570,6 +571,7 @@ export const MarkdownDocumentRenderer = forwardRef<
               </ProgressiveBlockContext.Provider>
             ) : (
               <Streamdown
+                tableMaxHeight="none"
                 className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                 components={markdownComponents}
                 plugins={streamdownPlugins}

@@ -33,6 +33,10 @@ it.each([false, true])(
       "",
       "## After",
       "",
+      "| Name | Value |",
+      "| --- | --- |",
+      "| Terax | 1 |",
+      "",
       large ? "Padding text. ".repeat(42_000) : "End.",
     ].join("\n");
     const model = prepareMarkdownDocument(source);
@@ -51,6 +55,13 @@ it.each([false, true])(
       }),
     );
     expect(model.progressive).toBe(large);
+    const tableViewport = document.querySelector(
+      '[data-streamdown="table-wrapper"] > div:last-child',
+    );
+    expect(tableViewport).not.toBeNull();
+    expect(tableViewport?.getAttribute("style") ?? "").not.toContain("max-height");
+    expect(tableViewport?.hasAttribute("data-markdown-table-scroll")).toBe(false);
+    expect(tableViewport?.classList.contains("overflow-auto")).toBe(true);
     expect(document.querySelector("li")?.textContent?.trim()).toBe(
       '货币为 "$"（加元），标价 $16.95。',
     );

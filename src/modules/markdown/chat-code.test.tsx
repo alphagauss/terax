@@ -24,6 +24,20 @@ describe("isDiagramLanguage", () => {
 });
 
 describe("MarkdownCode", () => {
+  it("marks inline code for shared styling without treating fences as inline", () => {
+    const html = renderToStaticMarkup(
+      <Streamdown components={{ code: MarkdownCode }} mode="static">
+        {"运行 `pnpm test`。\n\n```\npnpm test\n```"}
+      </Streamdown>,
+    );
+
+    expect(html).toMatch(
+      /<code[^>]*data-streamdown="inline-code"[^>]*>pnpm test<\/code>/,
+    );
+    expect(html.match(/data-streamdown="inline-code"/g)).toHaveLength(1);
+    expect(html).toContain("data-markdown-code-block");
+  });
+
   it("preserves unlabeled fenced blocks and their line breaks", () => {
     const html = renderToStaticMarkup(
       <Streamdown components={{ code: MarkdownCode }} mode="static">
