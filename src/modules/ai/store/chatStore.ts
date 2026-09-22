@@ -150,11 +150,11 @@ export function createIdleAgentMeta(): AgentMeta {
 
 const IDLE_AGENT_META = createIdleAgentMeta();
 
-export type PendingSelection = {
-  id: string;
-  text: string;
-  source: "terminal" | "editor";
-};
+type PendingSelectionInput =
+  | { text: string; source: "terminal" }
+  | { text: string; source: "editor"; path: string };
+
+export type PendingSelection = PendingSelectionInput & { id: string };
 
 export type PendingFileAttachment = {
   path: string;
@@ -196,7 +196,7 @@ type StoreState = {
   consumePrefill: () => string | null;
 
   pendingSelections: PendingSelection[];
-  attachSelection: (text: string, source: "terminal" | "editor") => void;
+  attachSelection: (selection: PendingSelectionInput) => void;
   consumeSelections: () => PendingSelection[];
   pendingFileAttachments: PendingFileAttachment[];
   attachFile: (path: string) => void;
@@ -674,17 +674,17 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   pendingSelections: [],
-  attachSelection: (text, source) => {
+  attachSelection: (selection) => {
     const activeId = get().activeSessionId;
     if (activeId && !isSessionWritable(activeId)) return;
-    const trimmed = text.trim();
+    const trimmed = selection.text.trim();
     if (!trimmed) return;
     const id = `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     set((s) => ({
       focusSignal: s.focusSignal + 1,
       pendingSelections: [
         ...s.pendingSelections,
-        { id, text: trimmed, source },
+        { ...selection, id, text: trimmed },
       ],
     }));
   },

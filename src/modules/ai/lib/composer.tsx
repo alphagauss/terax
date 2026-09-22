@@ -12,7 +12,7 @@ import {
   readPathAttachment,
   readAsDataURL,
 } from "@/modules/ai/lib/attachmentFiles";
-import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
+import type { MessageAttachment } from "@/modules/ai/lib/messageAttachments";
 import {
   createContext,
   useCallback,
@@ -40,14 +40,14 @@ import type { OpenFileGroup } from "@/modules/ai/lib/openFileCandidates";
 
 type AttachmentBase = {
   id: string;
-  name: string;
-  size: number;
 };
 
 export type FileAttachment = AttachmentBase &
   (
     | {
         kind: "image";
+        name: string;
+        size: number;
         mediaType: string;
         url: string;
         sourcePath?: string;
@@ -55,15 +55,21 @@ export type FileAttachment = AttachmentBase &
       }
     | {
         kind: "file";
+        name: string;
+        size: number;
         sourcePath: string;
         environmentKey: string;
       }
     | {
         kind: "selection";
-        mediaType: "text/plain";
         text: string;
-        /** 选区所属的工作区表面。 */
-        source: "terminal" | "editor";
+        source: "terminal";
+      }
+    | {
+        kind: "selection";
+        text: string;
+        source: "editor";
+        path: string;
       }
   );
 
@@ -319,16 +325,22 @@ export function AiComposerProvider({
       const next: FileAttachment[] = [];
       for (const sel of drained) {
         if (existing.has(sel.id)) continue;
-        next.push({
-          id: sel.id,
-          name:
-            sel.source === "editor" ? "Editor selection" : "Terminal selection",
-          kind: "selection",
-          mediaType: "text/plain",
-          text: sel.text,
-          size: sel.text.length,
-          source: sel.source,
-        });
+        next.push(
+          sel.source === "editor"
+            ? {
+                id: sel.id,
+                kind: "selection",
+                text: sel.text,
+                source: "editor",
+                path: sel.path,
+              }
+            : {
+                id: sel.id,
+                kind: "selection",
+                text: sel.text,
+                source: "terminal",
+              },
+        );
       }
       return next.length ? [...prev, ...next] : prev;
     });
@@ -378,48 +390,58 @@ export function AiComposerProvider({
     const isCommand = !usesExternalAgent && Boolean(parseCommand(trimmed));
 
     const parts: MessagePart[] = [];
-    const attachments: AttachmentDisplay[] = [];
-    const selectionBlocks = files
-      .filter((f) => f.kind === "selection")
-      .map(
-        (f) =>
-          `<selection source="${f.source ?? "terminal"}">\n${f.text ?? ""}\n</selection>`,
-      );
-    const { body: bodyAfterTokens, blocks: snippetBlocks } =
+    const attachments: MessageAttachment[] = [];
+    const { body: bodyAfterTokens, snippets: tokenSnippets } =
       expandSnippetTokens(trimmed, useSnippetsStore.getState().snippets);
     const seenHandles = new Set<string>();
-    const allSnippetBlocks: string[] = [];
+    const messageSnippets: Snippet[] = [];
     for (const s of pickedSnippets) {
       if (seenHandles.has(s.handle)) continue;
       seenHandles.add(s.handle);
-      allSnippetBlocks.push(
-        `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
-      );
+      messageSnippets.push(s);
     }
-    for (const block of snippetBlocks) {
-      const m = block.match(/^<snippet name="([^"]+)"/);
-      if (m && seenHandles.has(m[1])) continue;
-      if (m) seenHandles.add(m[1]);
-      allSnippetBlocks.push(block);
+    for (const snippet of tokenSnippets) {
+      if (seenHandles.has(snippet.handle)) continue;
+      seenHandles.add(snippet.handle);
+      messageSnippets.push(snippet);
     }
-    const composed = [
-      allSnippetBlocks.join("\n\n"),
-      selectionBlocks.join("\n\n"),
-      bodyAfterTokens,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
     for (const file of files) {
-      if (file.kind !== "file") continue;
+      if (file.kind === "file") {
+        attachments.push({
+          kind: "file",
+          name: file.name,
+          size: file.size,
+          path: file.sourcePath,
+          environmentKey: file.environmentKey,
+        });
+      } else if (file.kind === "selection") {
+        attachments.push(
+          file.source === "editor"
+            ? {
+                kind: "selection",
+                id: file.id,
+                text: file.text,
+                source: "editor",
+                path: file.path,
+              }
+            : {
+                kind: "selection",
+                id: file.id,
+                text: file.text,
+                source: "terminal",
+              },
+        );
+      }
+    }
+    for (const snippet of messageSnippets) {
       attachments.push({
-        kind: "file",
-        name: file.name,
-        size: file.size,
-        path: file.sourcePath,
-        environmentKey: file.environmentKey,
+        kind: "snippet",
+        id: snippet.id,
+        handle: snippet.handle,
+        content: snippet.content,
       });
     }
-    if (composed) parts.push({ type: "text", text: composed });
+    if (bodyAfterTokens) parts.push({ type: "text", text: bodyAfterTokens });
 
     let mediaIndex = 0;
     for (const f of files) {
@@ -469,7 +491,7 @@ export function AiComposerProvider({
               attachments,
             },
           },
-          files.length > 0 || pickedSnippets.length > 0,
+          files.length > 0 || messageSnippets.length > 0,
         );
         if (!sent) {
           toast.info(t("composer.sessionBusy"));

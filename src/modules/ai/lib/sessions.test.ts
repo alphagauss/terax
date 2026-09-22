@@ -12,11 +12,34 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: ipc }));
 import {
   canRevealSessionCwd,
   commitSession,
+  deriveTitle,
   listSessions,
   mergeSessionMetadata,
   resolveSessionCwd,
   type SessionMeta,
 } from "./sessions";
+
+it("从真实用户正文生成标题，不读取结构化片段", () => {
+  expect(
+    deriveTitle([
+      {
+        id: "user",
+        role: "user",
+        parts: [{ type: "text", text: "Review this" }],
+        metadata: {
+          attachments: [
+            {
+              kind: "snippet",
+              id: "review",
+              handle: "review",
+              content: "internal context",
+            },
+          ],
+        },
+      },
+    ]),
+  ).toBe("Review this");
+});
 
 const meta = (
   id: string,

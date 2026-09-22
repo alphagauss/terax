@@ -17,7 +17,7 @@ import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { messageMetadata } from "@/modules/ai/lib/conversation";
-import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
+import type { MessageAttachment } from "@/modules/ai/lib/messageAttachments";
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
@@ -27,7 +27,7 @@ const AttachmentPreview = lazy(
 
 export type ImageAttachmentItem = {
   kind: "image";
-  display: Extract<AttachmentDisplay, { kind: "image" }>;
+  display: Extract<MessageAttachment, { kind: "image" }>;
   url: string;
 };
 
@@ -38,7 +38,7 @@ export function MessageAttachments({ message }: { message: UIMessage }) {
   const items: Array<
     | {
         kind: "file";
-        display: Extract<AttachmentDisplay, { kind: "file" }>;
+        display: Extract<MessageAttachment, { kind: "file" }>;
       }
     | ImageAttachmentItem
   > = displays.flatMap((display) =>
@@ -50,7 +50,7 @@ export function MessageAttachments({ message }: { message: UIMessage }) {
     const display = displays.find(
       (
         attachment,
-      ): attachment is Extract<AttachmentDisplay, { kind: "image" }> =>
+      ): attachment is Extract<MessageAttachment, { kind: "image" }> =>
         attachment.kind === "image" && attachment.mediaIndex === mediaIndex,
     ) ?? {
       kind: "image" as const,

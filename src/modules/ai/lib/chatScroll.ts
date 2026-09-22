@@ -7,8 +7,6 @@ import type { UIMessage } from "ai";
 import { messageRawText } from "@/modules/ai/lib/messageAttachments";
 import { messageMetadata } from "@/modules/ai/lib/conversation";
 
-const USER_CONTEXT_BLOCK_RE = /<(selection|snippet)\b[^>]*>[\s\S]*?<\/\1>/gi;
-
 export interface UserMessageAnchor {
   id: string;
   index: number;
@@ -37,8 +35,7 @@ export function shouldShowChatScrollControls(isAtBottom: boolean): boolean {
 }
 
 function userMessageText(message: UIMessage): string {
-  const rawText = messageRawText(message);
-  return rawText.replace(USER_CONTEXT_BLOCK_RE, "").trim();
+  return messageRawText(message).trim();
 }
 
 /**
