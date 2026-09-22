@@ -3,12 +3,11 @@
  * 注册表集中管理面板元数据、配置边界和懒加载组件，并保证每种面板的组件身份稳定。
  */
 
-import {
-  ALPHA_WORKSTATION_GRID_COLUMNS,
-  type AlphaPanelCategory,
-  type AlphaPanelConfig,
-  type AlphaPanelProps,
-  type AlphaPanelSize,
+import type {
+  AlphaPanelCategory,
+  AlphaPanelConfig,
+  AlphaPanelProps,
+  AlphaPanelSize,
 } from "@/modules/alpha/workstation/model";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
@@ -40,7 +39,6 @@ function assertPanelSize(type: string, size: AlphaPanelSize): void {
   const values = [size.w, size.h, size.minW, size.minH];
   if (
     values.some((value) => !Number.isInteger(value) || value <= 0) ||
-    size.w > ALPHA_WORKSTATION_GRID_COLUMNS ||
     size.minW > size.w ||
     size.minH > size.h
   ) {

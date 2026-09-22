@@ -60,7 +60,7 @@ it("折叠保持内容尺寸和身份，立即禁止命中，结束隐藏并清�
   const shell = container.firstElementChild as HTMLElement;
   expect(shell.inert).toBe(true);
   expect(shell.style.height).toBe("400px");
-  expect(shell.style.visibility).toBe("visible");
+  expect(shell.style.visibility).toBe("");
   expect(container.querySelector("input")).toBe(input);
   expect(animate).toHaveBeenCalledTimes(2);
   for (const [frames] of animate.mock.calls) {
@@ -83,7 +83,7 @@ it("折叠保持内容尺寸和身份，立即禁止命中，结束隐藏并清�
   ).toBe(true);
   render(false);
   expect(shell.inert).toBe(false);
-  expect(shell.style.visibility).toBe("visible");
+  expect(shell.style.visibility).toBe("");
   expect(container.querySelector("input")).toBe(input);
 });
 
@@ -131,7 +131,7 @@ it("减少动态效果时立即到达最终状态", () => {
   );
   render(false);
   expect((container.firstElementChild as HTMLElement).style.visibility).toBe(
-    "visible",
+    "",
   );
 });
 
@@ -146,4 +146,34 @@ it("普通尺寸更新和已结束的动画不额外读取布局", () => {
   );
   render(false, 500);
   expect(HTMLElement.prototype.getBoundingClientRect).not.toHaveBeenCalled();
+});
+
+it("父页面隐藏时外壳和边框同步隐藏，展开动画结束也不能重新显示", () => {
+  render(false);
+  const shell = container.firstElementChild as HTMLElement;
+  const content = container.querySelector("input");
+  container.style.visibility = "hidden";
+  container.inert = true;
+  expect(getComputedStyle(shell).visibility).toBe("hidden");
+  expect(getComputedStyle(content as HTMLElement).visibility).toBe("hidden");
+
+  container.style.visibility = "visible";
+  container.inert = false;
+  render(true);
+  act(() =>
+    animations[0].onfinish?.call(animations[0], {} as AnimationPlaybackEvent),
+  );
+  render(false);
+  container.style.visibility = "hidden";
+  container.inert = true;
+  expect(getComputedStyle(shell).visibility).toBe("hidden");
+  const expanding = animations.find((animation) => animation.onfinish);
+  act(() => expanding?.onfinish?.call(expanding, {} as AnimationPlaybackEvent));
+  expect(getComputedStyle(shell).visibility).toBe("hidden");
+  expect(getComputedStyle(content as HTMLElement).visibility).toBe("hidden");
+
+  container.style.visibility = "visible";
+  container.inert = false;
+  expect(getComputedStyle(shell).visibility).toBe("visible");
+  expect(container.querySelector("input")).toBe(content);
 });

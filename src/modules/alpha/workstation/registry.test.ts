@@ -50,14 +50,24 @@ describe("Alpha Panel Registry", () => {
     );
   });
 
-  it("拒绝越界或小于最小值的默认尺寸", () => {
+  it("拒绝小于最小值的默认尺寸", () => {
     expect(() =>
       createAlphaPanelRegistry([
         {
           ...descriptor("chart"),
-          defaultSize: { w: 25, h: 4, minW: 6, minH: 5 },
+          defaultSize: { w: 8, h: 4, minW: 6, minH: 5 },
         },
       ]),
     ).toThrow("Invalid default size for Alpha panel type: chart");
+  });
+
+  it("面板默认宽度不再受固定画布列数约束", () => {
+    const registry = createAlphaPanelRegistry([
+      {
+        ...descriptor("wide"),
+        defaultSize: { w: 200, h: 8, minW: 100, minH: 4 },
+      },
+    ]);
+    expect(registry.get("wide")?.defaultSize.w).toBe(200);
   });
 });

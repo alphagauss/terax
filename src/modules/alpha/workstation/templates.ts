@@ -1,6 +1,6 @@
 /**
  * 本文件定义 Alpha 工作台的内置布局模板和实例化入口。
- * 模板只描述初始面板与 24 列坐标，每次应用都会生成新的布局和面板身份。
+ * 模板只描述初始面板与固定步长坐标，每次应用都会生成新的布局和面板身份。
  */
 
 import { createDefaultAlphaChartPanelConfig } from "@/modules/alpha/workstation/chartPanelConfig";
@@ -40,7 +40,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
           binding: { mode: "follow" },
           config: createDefaultAlphaChartPanelConfig(),
         },
-        grid: { x: 0, y: 0, w: 24, h: 16 },
+        grid: { x: 0, y: 0, w: 80, h: 38 },
       },
     ],
   },
@@ -55,7 +55,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
           binding: { mode: "follow" },
           config: createDefaultAlphaChartPanelConfig(),
         },
-        grid: { x: 0, y: 0, w: 12, h: 16 },
+        grid: { x: 0, y: 0, w: 40, h: 38 },
       },
       {
         panel: {
@@ -63,7 +63,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
           binding: { mode: "pinned", vtSymbol: "600000.SSE" },
           config: createDefaultAlphaChartPanelConfig(),
         },
-        grid: { x: 12, y: 0, w: 12, h: 16 },
+        grid: { x: 40, y: 0, w: 40, h: 38 },
       },
     ],
   },

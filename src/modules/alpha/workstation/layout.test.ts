@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 工作台布局的结构和语义校验。
- * 重点锁定版本、身份、24 列几何、singleton、未知类型和纯 JSON 配置不变量。
+ * 重点锁定版本、身份、无横向上限的几何、singleton、未知类型和纯 JSON 配置不变量。
  */
 
 import type { AlphaWorkstationLayout } from "@/modules/alpha/workstation/model";
@@ -48,7 +48,7 @@ const registry = createAlphaPanelRegistry([
 
 function validLayout(): AlphaWorkstationLayout {
   return {
-    schemaVersion: 1,
+    schemaVersion: 4,
     id: "layout-1",
     name: "Default",
     panels: [
@@ -87,10 +87,16 @@ describe("Alpha workstation layout", () => {
   });
 
   it("拒绝未知 schema 版本和非法结构", () => {
+    expect(issueCodes({ ...validLayout(), schemaVersion: 1 })).toContain(
+      "schema-version",
+    );
     expect(issueCodes({ ...validLayout(), schemaVersion: 2 })).toContain(
       "schema-version",
     );
-    expect(issueCodes({ schemaVersion: 1 })).toContain("structure");
+    expect(issueCodes({ ...validLayout(), schemaVersion: 3 })).toContain(
+      "schema-version",
+    );
+    expect(issueCodes({ schemaVersion: 4 })).toContain("structure");
   });
 
   it("拒绝重复身份以及 panel/grid 不对应", () => {
@@ -108,20 +114,23 @@ describe("Alpha workstation layout", () => {
     );
   });
 
-  it("拒绝 24 列越界和尺寸不足", () => {
+  it("允许远端坐标，但拒绝尺寸不足", () => {
     const invalid = validLayout();
-    invalid.grid[0] = { panelId: "panel-chart", x: 22, y: 0, w: 3, h: 3 };
+    invalid.grid[0] = { panelId: "panel-chart", x: 46, y: 0, w: 3, h: 3 };
     invalid.grid[1] = {
       panelId: "panel-watchlist",
-      x: 22,
+      x: 46,
       y: 0,
       w: 4,
       h: 8,
     };
 
     expect(issueCodes(invalid)).toEqual(
-      expect.arrayContaining(["grid-bounds", "panel-min-size"]),
+      expect.arrayContaining(["panel-min-size"]),
     );
+    const wide = validLayout();
+    wide.grid[0] = { ...wide.grid[0], x: 250, w: 100 };
+    expect(parseAlphaWorkstationLayout(wide, registry).ok).toBe(true);
   });
 
   it("允许重叠和空位，恢复时保留坐标、折叠状态及层级", () => {
@@ -150,7 +159,7 @@ describe("Alpha workstation layout", () => {
       ...original.grid[0],
       x: 5,
       y: 10,
-      h: 1,
+      h: 2,
     });
     const expanded = toggleAlphaPanelCollapsed(dragged, "panel-chart");
     expect(expanded.panels[0].collapsed).toBe(false);
@@ -176,7 +185,7 @@ describe("Alpha workstation layout", () => {
     );
     const collapsed = toggleAlphaPanelCollapsed(layout, "panel-chart");
     expect(
-      updateAlphaPanelGeometry(collapsed, { ...layout.grid[0], h: 1 }),
+      updateAlphaPanelGeometry(collapsed, { ...layout.grid[0], h: 2 }),
     ).toBe(collapsed);
   });
 

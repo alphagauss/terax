@@ -1,11 +1,10 @@
 /**
  * 本文件定义 Alpha 工作台的可序列化公共协议。
- * 布局保存面板和 24 列坐标，工作台状态只保存同步配置，不承载事件、React、DOM、查询或控制器实例。
+ * 布局保存面板和固定步长的网格坐标，不设横向列数上限，不承载事件、React、DOM、查询或控制器实例。
  */
 
-export const ALPHA_WORKSTATION_SCHEMA_VERSION = 1;
+export const ALPHA_WORKSTATION_SCHEMA_VERSION = 4;
 export const ALPHA_WORKSTATION_STATE_SCHEMA_VERSION = 2;
-export const ALPHA_WORKSTATION_GRID_COLUMNS = 24;
 
 export type AlphaJsonValue =
   | string

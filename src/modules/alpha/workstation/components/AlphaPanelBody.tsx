@@ -39,9 +39,10 @@ export function AlphaPanelBody({ panelId, collapsed, height }: Props) {
       motion = new RevealMotion(() => {
         running = false;
         fromHeight.current = toHeight;
-        shell.style.visibility = collapsed ? "hidden" : "visible";
+        shell.style.visibility = collapsed ? "hidden" : "";
       }, true);
-      shell.style.visibility = "visible";
+      // 必须继承 Workbench 页面的可见性，显式 visible 会穿透隐藏页面。
+      shell.style.visibility = "";
       motion.style(shell, "height", `${height}px`);
       motion.reveal(viewport, content, {
         fromHeight: Math.min(height, fromHeight.current),
@@ -51,7 +52,7 @@ export function AlphaPanelBody({ panelId, collapsed, height }: Props) {
       motion.start();
     } else {
       fromHeight.current = toHeight;
-      shell.style.visibility = collapsed ? "hidden" : "visible";
+      shell.style.visibility = collapsed ? "hidden" : "";
     }
     return () => {
       // 只有打断进行中的过渡才测量视觉边界，普通缩放与卸载无需强制布局。

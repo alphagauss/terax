@@ -9,6 +9,11 @@ import {
 } from "@/modules/alpha/workstation/model";
 import { alphaPanelRegistry } from "@/modules/alpha/workstation/panelRegistry";
 import {
+  alphaPanelBodyHeight,
+  ALPHA_PANEL_COLLAPSED_ROWS,
+  ALPHA_PANEL_HEADER_HEIGHT,
+} from "@/modules/alpha/workstation/panelGeometry";
+import {
   parseAlphaWorkstationState,
   resolveAlphaPanelSymbol,
 } from "@/modules/alpha/workstation/state";
@@ -28,6 +33,28 @@ function ids(prefix: string): (scope: "layout" | "panel") => string {
 }
 
 describe("Alpha workstation state", () => {
+  it("加密网格后模板仍保持全宽或等分宽度及原有图表内容高度", () => {
+    const initial = createDefaultAlphaWorkstationState();
+    for (const template of ALPHA_WORKSTATION_TEMPLATES) {
+      const layout = instantiateAlphaWorkstationTemplate(template.id);
+      expect(
+        parseAlphaWorkstationState({ ...initial, layout }, alphaPanelRegistry),
+      ).not.toBeNull();
+      expect(layout.grid.reduce((sum, item) => sum + item.w, 0)).toBe(80);
+      expect(
+        layout.grid.every((item) => alphaPanelBodyHeight(item.h) === 540),
+      ).toBe(true);
+    }
+    expect(alphaPanelBodyHeight(ALPHA_PANEL_COLLAPSED_ROWS)).toBe(0);
+    expect(ALPHA_PANEL_HEADER_HEIGHT).toBe(29);
+    expect(alphaPanelBodyHeight(ALPHA_PANEL_COLLAPSED_ROWS + 1)).toBe(15);
+    expect(
+      parseAlphaWorkstationState(
+        { ...initial, layout: { ...initial.layout, schemaVersion: 1 } },
+        alphaPanelRegistry,
+      ),
+    ).toBeNull();
+  });
   it("从模板生成新的布局和面板身份且不修改模板", () => {
     const source = JSON.stringify(ALPHA_WORKSTATION_TEMPLATES);
     const first = instantiateAlphaWorkstationTemplate("comparison", ids("a"));

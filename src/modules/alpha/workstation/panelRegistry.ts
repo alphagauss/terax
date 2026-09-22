@@ -16,7 +16,7 @@ export const alphaPanelRegistry = createAlphaPanelRegistry([
     category: "market",
     singleton: false,
     pinnable: true,
-    defaultSize: { w: 16, h: 12, minW: 6, minH: 8 },
+    defaultSize: { w: 53, h: 29, minW: 20, minH: 19 },
     createDefaultConfig: createDefaultAlphaChartPanelConfig,
     validateConfig: parseAlphaChartPanelConfig,
     load: () =>

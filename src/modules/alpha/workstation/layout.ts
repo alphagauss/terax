@@ -1,10 +1,9 @@
 /**
  * 本文件负责解析和校验 Alpha 工作台布局。
- * 结构校验之外还锁定 panel/grid 对应、24 列几何、面板元数据和纯 JSON 配置边界。
+ * 结构校验之外还锁定 panel/grid 对应、面板最小尺寸、元数据和纯 JSON 配置边界。
  */
 
 import {
-  ALPHA_WORKSTATION_GRID_COLUMNS,
   ALPHA_WORKSTATION_SCHEMA_VERSION,
   normalizeAlphaVtSymbol,
   type AlphaPanelConfig,
@@ -67,7 +66,6 @@ export type AlphaWorkstationLayoutIssueCode =
   | "duplicate-grid-panel-id"
   | "missing-grid-item"
   | "orphan-grid-item"
-  | "grid-bounds"
   | "panel-min-size"
   | "singleton"
   | "invalid-config";
@@ -231,9 +229,6 @@ export function parseAlphaWorkstationLayout(
     layout.panels.map((panel) => [panel.id, panel] as const),
   );
   for (const item of layout.grid) {
-    if (item.x + item.w > ALPHA_WORKSTATION_GRID_COLUMNS) {
-      issues.push({ code: "grid-bounds", panelId: item.panelId });
-    }
     const descriptor = registry.get(panelsById.get(item.panelId)?.type ?? "");
     if (
       descriptor &&
