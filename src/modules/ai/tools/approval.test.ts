@@ -5,9 +5,9 @@
 
 import { asSchema, type ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildToolApproval } from "./approval";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
-import { buildToolApproval } from "./approval";
 
 const nativeMock = vi.hoisted(() => ({
   shellExec: vi.fn(),
@@ -102,6 +102,18 @@ describe("AI tool approval mode", () => {
     );
   });
 
+  it("disables the process timeout only for an explicit null", async () => {
+    nativeMock.shellExec.mockResolvedValue({ status: "running", stdout: "" });
+    const execute = buildShellTools(context).shell_exec.execute;
+    if (!execute) throw new Error("shell_exec execute missing");
+
+    await execute({ command: "pnpm dev", timeout_secs: null }, toolOptions);
+
+    expect(nativeMock.shellExec).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutSecs: 0 }),
+    );
+  });
+
   it("only requires process approval when writing stdin", () => {
     const approval = buildToolApproval(context).shell_process;
     const processId = "00000000-0000-4000-8000-000000000002";
@@ -155,6 +167,26 @@ describe("AI tool approval mode", () => {
       ).toMatchObject({ success });
     },
   );
+
+  it.each([
+    ["input", { action: "poll", input: "status\n" }],
+    ["close_stdin", { action: "terminate", close_stdin: true }],
+    ["wait_timeout_ms", { action: "poll", wait_timeout_ms: 5000 }],
+    [
+      "yield_time_ms",
+      { action: "poll", wait_for: "ready", yield_time_ms: 5000 },
+    ],
+  ])("rejects ignored process option %s", async (_field, input) => {
+    const schema = asSchema(buildShellTools(context).shell_process.inputSchema);
+    if (!schema.validate) throw new Error("shell_process validator missing");
+
+    expect(
+      await schema.validate({
+        process_id: "00000000-0000-4000-8000-000000000002",
+        ...input,
+      }),
+    ).toMatchObject({ success: false });
+  });
 
   it("scopes process control and discovery to the active chat", async () => {
     const processId = "00000000-0000-4000-8000-000000000002";
