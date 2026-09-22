@@ -266,11 +266,9 @@
     "compactionFailed": "Compaction did not produce a complete summary. The existing context is preserved."
   },
   "filePicker": {
-    "workspaceFiles": "Workspace files",
-    "noWorkspace": "No workspace open",
-    "indexing": "Indexing workspace…",
-    "noMatches": "No matching files",
-    "truncated": "The workspace is large. Refine your query to narrow the results."
+    "currentSpace": "{{name}} (Current Space)",
+    "noOpenFiles": "No files are currently open",
+    "noMatches": "No matching open files"
   },
   "statusPill": {
     "openAiLog": "Open AI log",

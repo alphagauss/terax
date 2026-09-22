@@ -38,6 +38,7 @@ import {
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
+import { buildOpenFileGroups } from "@/modules/ai/lib/openFileCandidates";
 import { useApprovalStore } from "@/modules/ai/store/approvalStore";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
@@ -343,7 +344,18 @@ export default function App() {
     environmentError === null;
 
   const activeSpaceId = useSpaces((s) => s.activeId);
+  const spaces = useSpaces((s) => s.spaces);
   const spacesHydrated = useSpaces((s) => s.hydrated);
+  const openFileGroups = useMemo(
+    () =>
+      buildOpenFileGroups({
+        state: workbenchState,
+        spaces,
+        activeSpaceId: activeSpaceId ?? DEFAULT_SPACE_ID,
+        workspace: workspaceEnv,
+      }),
+    [activeSpaceId, spaces, workbenchState, workspaceEnv],
+  );
 
   const handleWorkspaceChange = useCallback(
     (env: WorkspaceEnv) => {
@@ -413,8 +425,7 @@ export default function App() {
   const secondaryFocused = secondaryMode !== "normal";
   const secondaryMaximized = secondaryMode === "maximized";
   const secondaryRestoring = sidebar.restoringSecondaryMode !== null;
-  const secondaryPresentationActive =
-    secondaryFocused || secondaryRestoring;
+  const secondaryPresentationActive = secondaryFocused || secondaryRestoring;
   const primaryPresentationMaximized =
     secondaryMaximized || sidebar.restoringSecondaryMode === "maximized";
   const initialSecondaryFocused =
@@ -2294,7 +2305,7 @@ export default function App() {
   );
 
   return (
-    <AiComposerProvider>
+    <AiComposerProvider openFileGroups={openFileGroups}>
       <RepositoryProvider controller={sourceControl}>
         {shell}
       </RepositoryProvider>

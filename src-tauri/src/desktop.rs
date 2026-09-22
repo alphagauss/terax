@@ -260,7 +260,6 @@ pub fn run() {
             lsp::lsp_send,
             lsp::lsp_kill,
             fs::search::fs_search,
-            fs::search::fs_list_files,
             commands::search::fs_content_search,
             commands::search::fs_glob,
             commands::agent::agent_file_read,

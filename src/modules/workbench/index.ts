@@ -4,8 +4,10 @@
  */
 
 export {
+  activeTabId,
   findGroupForTab,
   tabsForActiveGroup,
+  tabsForSpace,
 } from "@/modules/workbench/model";
 export {
   type AiDiffStatus,

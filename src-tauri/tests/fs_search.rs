@@ -8,7 +8,7 @@ use common::{git_available, FsFixture, GitRepoFixture};
 use terax_lib::modules::fs::grep::{
     fs_glob, search_content, ContentSearchCaseMode, ContentSearchRequest, ContentSearchSyntax,
 };
-use terax_lib::modules::fs::search::{fs_list_files, search_paths};
+use terax_lib::modules::fs::search::search_paths;
 use terax_lib::modules::fs::tree::{fs_read_dir, list_subdirs, EntryKind};
 
 fn content_request(root: String, pattern: &str) -> ContentSearchRequest {
@@ -263,39 +263,6 @@ async fn search_ranks_filename_hits_before_path_hits() {
         zeta_file < inner_file,
         "filename hit should rank before path-only hit",
     );
-}
-
-#[tokio::test]
-async fn list_files_returns_sorted_relative_paths() {
-    let fx = FsFixture::new();
-    fx.write("z.txt", "");
-    fx.write("a.txt", "");
-    fx.write("nested/b.txt", "");
-
-    let res = fs_list_files(fx.root_str(), None, None, None, None)
-        .await
-        .expect("list");
-    assert_eq!(res.files, vec!["a.txt", "nested/b.txt", "z.txt"]);
-}
-
-#[tokio::test]
-async fn list_files_max_depth_clamps() {
-    let fx = FsFixture::new();
-    fx.write("d1/d2/d3/deep.txt", "");
-    fx.write("shallow.txt", "");
-
-    let res = fs_list_files(fx.root_str(), None, Some(1), None, None)
-        .await
-        .expect("list");
-    assert!(res.files.contains(&"shallow.txt".to_string()));
-    assert!(!res.files.iter().any(|f| f.contains("deep.txt")));
-}
-
-#[tokio::test]
-async fn list_files_non_dir_errors() {
-    assert!(fs_list_files("/no/such/dir".into(), None, None, None, None)
-        .await
-        .is_err());
 }
 
 #[tokio::test]
