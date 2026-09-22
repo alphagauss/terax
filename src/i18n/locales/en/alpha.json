@@ -4,7 +4,8 @@
     "workstation": "Workstation",
     "data": "Data",
     "backtests": "Backtests",
-    "settings": "Settings"
+    "settings": "Settings",
+    "desk": "Three-column desk (experimental)"
   },
   "common": {
     "refresh": "Refresh",
@@ -422,5 +423,47 @@
     "status": "Could not query Alpha status",
     "python": "Could not use this Python interpreter",
     "setting": "Could not update Alpha settings"
+  },
+  "desk": {
+    "previous": "Previous",
+    "next": "Next",
+    "resultCount": "{{count}} results",
+    "experimental": "Experimental layout",
+    "watchlist": "Watchlist",
+    "market": "Market",
+    "backtests": "Backtests",
+    "security": "Security details",
+    "tasks": "Tasks",
+    "views": "Analysis views",
+    "tools": "Utility panels",
+    "collapse": "Collapse",
+    "search": "Name or security code",
+    "find": "Search",
+    "backToWatchlist": "Back to watchlist",
+    "add": "Add",
+    "remove": "Remove",
+    "addSymbol": "Add {{symbol}} to watchlist",
+    "removeSymbol": "Remove {{symbol}} from watchlist",
+    "noResults": "No matching securities",
+    "emptyWatchlist": "Search for securities to add to your watchlist.",
+    "resizeWatchlist": "Resize watchlist",
+    "resizeDetails": "Resize utility panel",
+    "saveFailed": "Could not save layout: {{error}}",
+    "tasksDescription": "Tasks retained by the current service. Collapsing this panel does not stop them.",
+    "noTasks": "No tasks",
+    "details": {
+      "exchange": "Exchange",
+      "timezone": "Market timezone",
+      "intervals": "Available intervals",
+      "coverage": "Market data coverage",
+      "updated": "Data updated"
+    },
+    "taskStatus": {
+      "running": "Running",
+      "succeeded": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "timeout": "Timed out"
+    }
   }
 }

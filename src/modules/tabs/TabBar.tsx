@@ -862,7 +862,7 @@ export function TabIcon({ tab }: { tab: Tab }) {
       />
     );
   }
-  if (tab.kind === "alpha-workstation") {
+  if (tab.kind === "alpha-workstation" || tab.kind === "alpha-desk") {
     return (
       <HugeiconsIcon
         icon={GridIcon}

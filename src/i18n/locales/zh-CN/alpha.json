@@ -4,7 +4,8 @@
     "workstation": "工作台",
     "data": "数据管理",
     "backtests": "回测",
-    "settings": "设置"
+    "settings": "设置",
+    "desk": "三栏工作页（实验）"
   },
   "common": {
     "refresh": "刷新",
@@ -422,5 +423,47 @@
     "status": "无法查询 Alpha 状态",
     "python": "无法使用此 Python 解释器",
     "setting": "无法更新 Alpha 设置"
+  },
+  "desk": {
+    "previous": "上一页",
+    "next": "下一页",
+    "resultCount": "共 {{count}} 项",
+    "experimental": "实验性三栏布局",
+    "watchlist": "自选",
+    "market": "行情",
+    "backtests": "回测",
+    "security": "证券资料",
+    "tasks": "任务",
+    "views": "分析视图",
+    "tools": "辅助面板",
+    "collapse": "收起",
+    "search": "名称或证券代码",
+    "find": "搜索",
+    "backToWatchlist": "返回自选",
+    "add": "添加",
+    "remove": "移除",
+    "addSymbol": "添加 {{symbol}} 到自选",
+    "removeSymbol": "从自选移除 {{symbol}}",
+    "noResults": "没有匹配的证券",
+    "emptyWatchlist": "搜索证券并添加到自选。",
+    "resizeWatchlist": "调整自选宽度",
+    "resizeDetails": "调整辅助面板宽度",
+    "saveFailed": "无法保存布局：{{error}}",
+    "tasksDescription": "当前服务保留的任务。收起面板不会停止任务。",
+    "noTasks": "暂无任务",
+    "details": {
+      "exchange": "交易所",
+      "timezone": "市场时区",
+      "intervals": "可用周期",
+      "coverage": "行情覆盖范围",
+      "updated": "数据更新时间"
+    },
+    "taskStatus": {
+      "running": "运行中",
+      "succeeded": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "timeout": "超时"
+    }
   }
 }

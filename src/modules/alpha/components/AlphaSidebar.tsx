@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 活动栏对应的侧边栏导航。
- * 侧边栏只打开工作台、数据、回测和设置标签，不持有业务查询或服务状态。
+ * 侧边栏只打开两套实验布局、数据、回测和设置标签，不持有业务查询或服务状态。
  */
 
 import {
@@ -13,6 +13,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
+  onOpenDesk: () => void;
   onOpenWorkstation: () => void;
   onOpenData: () => void;
   onOpenBacktests: () => void;
@@ -25,6 +26,7 @@ type Props = {
  * 点击导航项时在当前工作组打开或复用对应的业务页面。
  */
 export function AlphaSidebar({
+  onOpenDesk,
   onOpenWorkstation,
   onOpenData,
   onOpenBacktests,
@@ -40,6 +42,11 @@ export function AlphaSidebar({
         </span>
       </div>
       <nav className="flex min-h-0 flex-1 flex-col gap-1 p-2">
+        <NavItem
+          icon={GridIcon}
+          label={t("sidebar.desk")}
+          onClick={onOpenDesk}
+        />
         <NavItem
           icon={GridIcon}
           label={t("sidebar.workstation")}

@@ -46,6 +46,7 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type AlphaPageKind =
+  | "alpha-desk"
   | "alpha-workstation"
   | "alpha-data"
   | "alpha-backtests"
@@ -761,6 +762,13 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [openAlphaPageTab],
   );
 
+  /** 打开或复用独立的 Alpha 三栏实验页。 */
+  const openAlphaDeskTab = useCallback(
+    (groupId?: number) =>
+      openAlphaPageTab("alpha-desk", i18n.t("tabs:alphaDesk"), groupId),
+    [openAlphaPageTab],
+  );
+
   /** 打开或复用 Alpha 综合工作台。 */
   const openAlphaWorkstationTab = useCallback(
     (groupId?: number) =>
@@ -1023,6 +1031,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openFileEditsTab,
     openGitDiffTab,
     openCommitFileDiffTab,
+    openAlphaDeskTab,
     openAlphaWorkstationTab,
     openAlphaDataTab,
     openAlphaBacktestsTab,

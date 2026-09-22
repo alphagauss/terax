@@ -123,6 +123,9 @@ CREATE TABLE IF NOT EXISTS index_constituent_meta (
 """
 
 MAIN_DB_SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS watchlist (
+        vt_symbol TEXT NOT NULL PRIMARY KEY
+    );""",
     ADJUST_FACTOR_CREATE,
     ADJUST_FACTOR_META_CREATE,
     BAR_OVERVIEW_CREATE,

@@ -17,6 +17,7 @@ from alpha.api.routes import (
     sync,
     system,
     tasks,
+    watchlist,
 )
 
 router = APIRouter()
@@ -32,3 +33,4 @@ router.include_router(strategies.router)
 router.include_router(backtests.router)
 router.include_router(sync.router)
 router.include_router(tasks.router)
+router.include_router(watchlist.router)

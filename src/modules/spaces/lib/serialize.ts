@@ -27,6 +27,7 @@ export type SerializedTab =
   | { kind: "editor"; path: string; explorerRoot?: string }
   | { kind: "web-preview"; url: string }
   | { kind: "markdown"; path: string; explorerRoot?: string }
+  | { kind: "alpha-desk" }
   | { kind: "alpha-workstation" }
   | { kind: "alpha-data" }
   | { kind: "alpha-backtests" }
@@ -52,6 +53,7 @@ function isSerializableTab(tab: Tab): boolean {
     tab.kind === "editor" ||
     tab.kind === "web-preview" ||
     tab.kind === "markdown" ||
+    tab.kind === "alpha-desk" ||
     tab.kind === "alpha-workstation" ||
     tab.kind === "alpha-data" ||
     tab.kind === "alpha-backtests" ||
@@ -97,6 +99,8 @@ function serializeTab(tab: Tab): SerializedTab | null {
       };
     case "alpha-settings":
       return { kind: "alpha-settings" };
+    case "alpha-desk":
+      return { kind: "alpha-desk" };
     case "alpha-workstation":
       return { kind: "alpha-workstation" };
     case "alpha-data":
@@ -237,6 +241,14 @@ function hydrateTab(
         spaceId,
         cold: true,
         title: i18n.t("tabs:alphaSettings"),
+      } satisfies Tab;
+    case "alpha-desk":
+      return {
+        id: allocId(),
+        kind: "alpha-desk",
+        spaceId,
+        cold: true,
+        title: i18n.t("tabs:alphaDesk"),
       } satisfies Tab;
     case "alpha-workstation":
       return {
@@ -411,6 +423,7 @@ function isSerializedTab(value: unknown): value is SerializedTab {
   }
   if (tab.kind === "web-preview") return typeof tab.url === "string";
   if (
+    tab.kind === "alpha-desk" ||
     tab.kind === "alpha-workstation" ||
     tab.kind === "alpha-data" ||
     tab.kind === "alpha-backtests" ||

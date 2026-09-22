@@ -39,5 +39,6 @@
     "left": "向左拆分",
     "right": "向右拆分"
   },
-  "startFromDirectory": "从 {{name}} 启动"
+  "startFromDirectory": "从 {{name}} 启动",
+  "alphaDesk": "Alpha 三栏工作页"
 }

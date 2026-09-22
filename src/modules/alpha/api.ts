@@ -23,6 +23,36 @@ import {
 } from "@/modules/alpha/market/normalize";
 import { type AlphaQueryParam, requestAlpha } from "@/modules/alpha/native";
 import { z } from "zod";
+import { taskSnapshotSchema } from "@/modules/alpha/events/taskModel";
+
+const watchlistSchema = z.array(
+  z.object({ vt_symbol: z.string(), name: z.string() }),
+);
+
+/** 读取 Python 持有的自选列表。 */
+export function getAlphaWatchlist() {
+  return alphaGet("/api/alpha/watchlist", watchlistSchema);
+}
+
+/** 幂等增删单个自选，不上传整表快照。 */
+export async function setAlphaWatchlistSymbol(
+  vtSymbol: string,
+  included: boolean,
+) {
+  const response = await requestAlpha({
+    method: "POST",
+    path: "/api/alpha/watchlist",
+    body: { vt_symbol: vtSymbol, included },
+  });
+  if (response.status < 200 || response.status >= 300)
+    throw alphaError(response.status, response.body);
+  return watchlistSchema.parse(response.body);
+}
+
+/** 查询任务权威快照，用于首次打开与重连恢复。 */
+export function getAlphaTasks() {
+  return alphaGet("/api/alpha/tasks", z.array(taskSnapshotSchema));
+}
 
 const statusSchema = z.object({
   database_ready: z.boolean(),

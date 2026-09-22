@@ -4,6 +4,7 @@
  * 冷启动页面不会提前挂载昂贵内容，仅为前台终端保留轻量加载反馈。
  */
 
+import { AlphaDeskPage } from "@/modules/alpha/pages/AlphaDeskPageLazy";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
@@ -112,6 +113,7 @@ export function WorkbenchRegisteredView({
         tab.kind === "terminal" &&
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
         tab.kind !== "terminal" &&
+          tab.kind !== "alpha-desk" &&
           tab.kind !== "alpha-workstation" &&
           tab.kind !== "alpha-data" &&
           tab.kind !== "alpha-backtests" &&
@@ -177,6 +179,7 @@ export function WorkbenchRegisteredView({
       {(tab.kind === "git-diff" || tab.kind === "git-commit-file") && (
         <GitDiffView ref={registerFindHandle} tab={tab} visible={visible} />
       )}
+      {tab.kind === "alpha-desk" && <AlphaDeskPage visible={visible} />}
       {tab.kind === "alpha-workstation" && (
         <AlphaWorkstationPage visible={visible} />
       )}

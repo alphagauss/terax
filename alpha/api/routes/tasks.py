@@ -51,6 +51,14 @@ def _find_task(
     return task.snapshot()
 
 
+@router.get("/tasks", response_model=list[dict[str, object]])
+async def list_tasks(
+    services: Annotated[AlphaServiceContainer, Depends(get_alpha_services)],
+) -> list[dict[str, object]]:
+    """返回运行时保留的有界任务快照，供面板打开及重连后恢复。"""
+    return services.task_manager.list_snapshots()
+
+
 @router.get("/tasks/{task_id}", response_model=dict[str, object])
 async def get_task(
     task_id: str,

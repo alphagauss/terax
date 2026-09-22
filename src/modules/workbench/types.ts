@@ -111,6 +111,7 @@ export type Tab =
   | GitCommitFileDiffTab
   | AlphaDataTab
   | AlphaBacktestsTab
+  | (TabBase & { kind: "alpha-desk" })
   | AlphaWorkstationTab
   | AlphaSettingsTab;
 

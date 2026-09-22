@@ -41,6 +41,7 @@ import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionSto
 import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
 import { useAlphaShowInRemote } from "@/modules/alpha/preferences";
 import { flushAlphaWorkstationWrites } from "@/modules/alpha/workstation/store";
+import { flushAlphaDeskWrites } from "@/modules/alpha/desk/writes";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
@@ -206,6 +207,7 @@ export default function App() {
     setAiDiffStatus,
     openGitDiffTab,
     openCommitFileDiffTab,
+    openAlphaDeskTab,
     openAlphaWorkstationTab,
     openAlphaDataTab,
     openAlphaBacktestsTab,
@@ -591,6 +593,7 @@ export default function App() {
       flushSpacePersistence(),
       flushCompletedSessionRuns(),
       flushAlphaWorkstationWrites(),
+      flushAlphaDeskWrites(),
     ]);
     const storeResults = await Promise.allSettled([
       flushSharedStoreWrites(),
@@ -628,6 +631,7 @@ export default function App() {
     if (alphaAvailable) return;
     for (const tab of tabsRef.current) {
       if (
+        tab.kind === "alpha-desk" ||
         tab.kind === "alpha-workstation" ||
         tab.kind === "alpha-data" ||
         tab.kind === "alpha-backtests" ||
@@ -1920,6 +1924,9 @@ export default function App() {
             id: "alpha" as const,
             content: (
               <AlphaSidebar
+                onOpenDesk={() =>
+                  openWorkspaceFromSidebar("alpha", openAlphaDeskTab)
+                }
                 onOpenWorkstation={() =>
                   openWorkspaceFromSidebar("alpha", openAlphaWorkstationTab)
                 }

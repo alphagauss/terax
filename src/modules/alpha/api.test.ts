@@ -13,6 +13,8 @@ import {
   getAlphaSettings,
   getAlphaStudyDefinitions,
   getAlphaSyncOverview,
+  getAlphaWatchlist,
+  setAlphaWatchlistSymbol,
   startAlphaBarSync,
   updateAlphaSettings,
 } from "@/modules/alpha/api";
@@ -28,6 +30,31 @@ const requestMock = vi.mocked(requestAlpha);
 describe("Alpha API client", () => {
   beforeEach(() => {
     requestMock.mockReset();
+  });
+
+  it("自选修改只发送单个成员命令，并保留后端业务错误", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: [{ vt_symbol: "600000.SSE", name: "浦发银行" }],
+    });
+    expect(await getAlphaWatchlist()).toEqual([
+      { vt_symbol: "600000.SSE", name: "浦发银行" },
+    ]);
+    await setAlphaWatchlistSymbol("600000.SSE", false);
+    expect(requestMock).toHaveBeenLastCalledWith({
+      method: "POST",
+      path: "/api/alpha/watchlist",
+      body: { vt_symbol: "600000.SSE", included: false },
+    });
+    requestMock.mockResolvedValue({
+      status: 404,
+      headers: {},
+      body: { detail: "证券不存在" },
+    });
+    await expect(setAlphaWatchlistSymbol("UNKNOWN.SSE", true)).rejects.toThrow(
+      "404",
+    );
   });
 
   it("queries and validates the first securities page", async () => {

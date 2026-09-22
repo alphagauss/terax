@@ -39,5 +39,6 @@
     "left": "Split Left",
     "right": "Split Right"
   },
-  "startFromDirectory": "Start from {{name}}"
+  "startFromDirectory": "Start from {{name}}",
+  "alphaDesk": "Alpha Desk"
 }

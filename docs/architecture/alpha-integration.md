@@ -21,7 +21,7 @@ Rust 不自动重连业务 WebSocket。前端按订阅生命周期复用连接�
 | --- | --- |
 | Python 数据目录等后端配置 | `~/.terax/alpha/config.json`，由 Python 管理 |
 | 可同步业务数据 | 用户选择的 data_dir |
-| 工作台布局、主标的和前端偏好 | Terax 白名单共享存储 `terax-alpha.json` |
+| 两套实验布局、各自主标的和前端偏好 | Terax 白名单共享存储 `terax-alpha.json` |
 | 页面定位 | Workbench 可恢复页面描述 |
 | 查询结果、连接、Controller | 当前运行实例，不持久化 |
 
@@ -29,6 +29,6 @@ Rust 不自动重连业务 WebSocket。前端按订阅生命周期复用连接�
 
 ## UI 与计算
 
-Alpha 通过自身活动栏与侧栏打开 Workbench 页面，复用 Terax 控件、主题、国际化和通知。策略源码由 Workspace 浏览编辑，Alpha 发现、加载与执行。
+Alpha 通过自身活动栏与侧栏打开 Workbench 页面，三栏实验页与自由画布使用独立入口和展示配置，复用 Terax 控件、主题、国际化和通知。策略源码由 Workspace 浏览编辑，Alpha 发现、加载与执行。
 
 可选 alpha-native 只替换完整计算边界，不能改变 Python 公开行为或 FastAPI 协议；使用差分测试验证结果。Rust 代理不承载 Python 领域模型。图表与工作台规则见 [Alpha 工作站](alpha-quant-workstation.md)。

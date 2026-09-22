@@ -164,9 +164,15 @@ describe("Workbench Space serialization", () => {
     ]);
   });
 
-  it("persists Alpha workstation, data and backtest pages as runtime locators", () => {
+  it("persists Alpha workstation, desk, data and backtest pages as runtime locators", () => {
     const current: WorkbenchState = {
       tabs: {
+        6: {
+          id: 6,
+          kind: "alpha-desk",
+          spaceId: "default",
+          title: "Alpha Desk",
+        },
         1: {
           id: 1,
           kind: "alpha-data",
@@ -190,7 +196,7 @@ describe("Workbench Space serialization", () => {
         default: {
           root: { kind: "group", id: 4, groupId: 5 },
           groups: {
-            5: { id: 5, tabIds: [1, 2, 3], activeTabId: 3 },
+            5: { id: 5, tabIds: [1, 2, 3, 6], activeTabId: 3 },
           },
           activeGroupId: 5,
         },
@@ -204,6 +210,7 @@ describe("Workbench Space serialization", () => {
         { kind: "alpha-data" },
         { kind: "alpha-backtests" },
         { kind: "alpha-workstation" },
+        { kind: "alpha-desk" },
       ],
       activeTabIndex: 2,
       active: true,
@@ -216,6 +223,7 @@ describe("Workbench Space serialization", () => {
       "alpha-data",
       "alpha-backtests",
       "alpha-workstation",
+      "alpha-desk",
     ]);
   });
 
@@ -224,6 +232,7 @@ describe("Workbench Space serialization", () => {
       kind: "group",
       tabs: [
         { kind: "alpha-workstation" },
+        { kind: "alpha-desk" },
         { kind: "alpha-data" },
         { kind: "alpha-backtests" },
         { kind: "alpha-settings" },

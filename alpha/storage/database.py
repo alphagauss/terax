@@ -22,6 +22,7 @@ from alpha.common.schema_market import (
     ShareCapitalPayload,
 )
 from alpha.storage.base import SQLiteStorageBase
+from alpha.storage.repositories.watchlist import WatchlistRepository
 from alpha.storage.repositories.data_catalog import DataCatalogRepository
 from alpha.storage.repositories.equity import EquityRepository
 from alpha.storage.repositories.index_constituent import IndexConstituentRepository
@@ -38,6 +39,7 @@ class DataBase:
         """使用调用方明确提供的目录初始化数据库。"""
 
         self._storage = SQLiteStorageBase(data_dir)
+        self._watchlist = WatchlistRepository(self._storage)
         self._data_catalog = DataCatalogRepository(self._storage)
         self._equity = EquityRepository(self._storage)
         self._security = SecurityRepository(self._storage)
@@ -48,6 +50,14 @@ class DataBase:
     def data_dir(self) -> Path:
         """返回数据库目录。"""
         return self._storage.data_dir
+
+    async def list_watchlist(self) -> list[dict[str, str]]:
+        """返回所有客户端共用的自选证券摘要。"""
+        return await self._watchlist.list_items()
+
+    async def set_watchlist_symbol(self, vt_symbol: str, included: bool) -> None:
+        """精确修改自选成员，其他成员不受影响。"""
+        await self._watchlist.set_symbol(vt_symbol, included)
 
     async def close(self) -> None:
         """关闭底层存储对象。"""
@@ -107,12 +117,16 @@ class DataBase:
         return await self._market_data.get_bar_overview_item(vt_symbol, interval)
 
     @log_execution_time()
-    async def query_security_catalog(self, query: SecurityCatalogQuery) -> dict[str, object]:
+    async def query_security_catalog(
+        self, query: SecurityCatalogQuery
+    ) -> dict[str, object]:
         """查询 union 证券数据目录分页。"""
         return await self._data_catalog.query_securities(query)
 
     @log_execution_time()
-    async def get_security_catalog_item(self, vt_symbol: str) -> dict[str, object] | None:
+    async def get_security_catalog_item(
+        self, vt_symbol: str
+    ) -> dict[str, object] | None:
         """读取单个证券的数据目录详情。"""
         return await self._data_catalog.get_security(vt_symbol)
 
@@ -167,7 +181,9 @@ class DataBase:
         return await self._security.save_security_profiles(rows)
 
     @log_execution_time()
-    async def load_security_profiles(self, query: SecurityProfileQuery) -> list[dict[str, object]]:
+    async def load_security_profiles(
+        self, query: SecurityProfileQuery
+    ) -> list[dict[str, object]]:
         """按统一查询条件加载证券静态资料。"""
         return await self._security.load_security_profiles(query)
 
@@ -197,7 +213,9 @@ class DataBase:
         )
 
     @log_execution_time()
-    async def load_security_status_meta(self, vt_symbol: str) -> dict[str, object] | None:
+    async def load_security_status_meta(
+        self, vt_symbol: str
+    ) -> dict[str, object] | None:
         """加载证券状态同步游标。"""
         return await self._security.load_security_status_meta(vt_symbol)
 
@@ -207,7 +225,9 @@ class DataBase:
         return await self._security.load_security_status_metas()
 
     @log_execution_time()
-    async def save_suspended_day_events(self, rows: list[SecurityStatusEventPayload]) -> bool:
+    async def save_suspended_day_events(
+        self, rows: list[SecurityStatusEventPayload]
+    ) -> bool:
         """批量保存停牌交易日事件。"""
         return await self._security.save_suspended_day_events(rows)
 
@@ -217,7 +237,9 @@ class DataBase:
         return await self._security.save_st_day_events(rows)
 
     @log_execution_time()
-    async def save_security_status_metas(self, rows: list[SecurityStatusMetaPayload]) -> bool:
+    async def save_security_status_metas(
+        self, rows: list[SecurityStatusMetaPayload]
+    ) -> bool:
         """批量保存证券状态同步游标。"""
         return await self._security.save_security_status_metas(rows)
 
@@ -241,10 +263,14 @@ class DataBase:
         query: IndexConstituentQuery,
     ) -> list[str]:
         """加载指数成分股列表。"""
-        return await self._index_constituent.load_index_constituents(query.index_code, query.trade_date)
+        return await self._index_constituent.load_index_constituents(
+            query.index_code, query.trade_date
+        )
 
     @log_execution_time()
-    async def load_index_constituent_meta(self, index_code: str) -> dict[str, object] | None:
+    async def load_index_constituent_meta(
+        self, index_code: str
+    ) -> dict[str, object] | None:
         """加载指数成分股同步边界。"""
         return await self._index_constituent.load_index_constituent_meta(index_code)
 
