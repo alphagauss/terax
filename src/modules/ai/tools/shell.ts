@@ -11,8 +11,8 @@ import {
   type ShellProcessResponse,
 } from "../lib/native";
 import { redactSensitive } from "../lib/redact";
-import { resolvePath, type ToolContext } from "./context";
 import { accessModeForCall, shellNeedsApproval } from "./authorization";
+import { resolvePath, type ToolContext } from "./context";
 
 const DEFAULT_TIMEOUT_SECS = 300;
 const DEFAULT_YIELD_MS = 10_000;
@@ -36,7 +36,15 @@ const outputOptions = {
 };
 
 const waitOptions = {
-  yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+  yield_time_ms: z
+    .number()
+    .int()
+    .min(0)
+    .max(30_000)
+    .optional()
+    .describe(
+      "Maximum time to wait before returning a poll or write response when wait_for is omitted. Defaults to 1000. This does not change the process timeout.",
+    ),
   wait_for: z
     .string()
     .min(1)
@@ -45,7 +53,15 @@ const waitOptions = {
     .describe(
       "Literal text to match in stdout or stderr at or after since_offset, including already-buffered output. An option for action=poll or action=write, not an action itself. Earlier or evicted output is not searched.",
     ),
-  wait_timeout_ms: z.number().int().min(0).max(120_000).optional(),
+  wait_timeout_ms: z
+    .number()
+    .int()
+    .min(0)
+    .max(120_000)
+    .optional()
+    .describe(
+      "Maximum time to wait for wait_for. Only valid when wait_for is set and defaults to 10000. This does not change the process timeout.",
+    ),
 };
 
 const processInputSchema = z
@@ -79,6 +95,34 @@ const processInputSchema = z
         message: "input is required when action is write",
       });
     }
+    if (input.action !== "write" && input.input !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["input"],
+        message: "input is only valid when action is write",
+      });
+    }
+    if (input.action !== "write" && input.close_stdin !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["close_stdin"],
+        message: "close_stdin is only valid when action is write",
+      });
+    }
+    if (input.wait_for === undefined && input.wait_timeout_ms !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["wait_timeout_ms"],
+        message: "wait_timeout_ms requires wait_for",
+      });
+    }
+    if (input.wait_for !== undefined && input.yield_time_ms !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["yield_time_ms"],
+        message: "use wait_timeout_ms instead of yield_time_ms with wait_for",
+      });
+    }
   });
 
 /** 创建统一 Shell 工具，并在每次有副作用的调用前读取最新权限模式。 */
@@ -86,7 +130,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Workspace-local commands run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. Never start full-screen TTY programs such as vim, less, or top.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Workspace-local commands run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. Never start full-screen TTY programs such as vim, less, or top.",
       inputSchema: z.object({
         command: z
           .string()
@@ -96,7 +140,10 @@ export function buildShellTools(ctx: ToolContext) {
           .string()
           .max(32 * 1024)
           .nullable()
-          .optional(),
+          .optional()
+          .describe(
+            "Working directory for this process. Relative values resolve from the session's fixed working directory. If omitted, uses the chat cwd from its most recent synchronously completed shell command; later completion of a background process does not change it.",
+          ),
         timeout_secs: z
           .number()
           .int()
@@ -105,9 +152,17 @@ export function buildShellTools(ctx: ToolContext) {
           .nullable()
           .optional()
           .describe(
-            "Process timeout in seconds. Defaults to 300; use null to disable the automatic timeout.",
+            "Process lifetime limit in seconds, counted from launch and still active after status=running is returned. Defaults to 300; use null to disable the automatic timeout for an intentionally long-running process.",
           ),
-        yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+        yield_time_ms: z
+          .number()
+          .int()
+          .min(0)
+          .max(30_000)
+          .optional()
+          .describe(
+            "Maximum time this call waits for the initial process result. Defaults to 10000. This does not change or disable the process timeout.",
+          ),
         max_output_bytes: z
           .number()
           .int()
@@ -154,7 +209,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     shell_process: tool({
       description:
-        "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output.",
+        "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output. If truncated is true, continue reading from next_offset; dropped_bytes greater than zero means older output was evicted and cannot be recovered. Polling and waiting do not extend the process timeout.",
       inputSchema: processInputSchema,
       execute: async (input) => {
         const sessionId = ctx.getSessionId();
@@ -188,7 +243,12 @@ export function buildShellTools(ctx: ToolContext) {
       description:
         "List managed shell processes owned by this chat in the current Workspace. Call this before starting a dev server or watcher so an existing process can be reused instead of duplicated. Auto-executes.",
       inputSchema: z.object({
-        include_exited: z.boolean().optional(),
+        include_exited: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include recently finished, terminated, and timed-out processes. Defaults to false; enable it to diagnose a process that disappeared from the running list.",
+          ),
       }),
       execute: async ({ include_exited }) => {
         const sessionId = ctx.getSessionId();

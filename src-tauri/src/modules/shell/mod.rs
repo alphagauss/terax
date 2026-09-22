@@ -1265,6 +1265,56 @@ mod tests {
         assert_eq!(process.response(0, 8192).status, ProcessStatus::Terminated);
     }
 
+    #[tokio::test]
+    async fn managed_process_times_out_after_returning_running() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().to_string_lossy().into_owned();
+        let owner = uuid::Uuid::new_v4().to_string();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let state = ShellState::default();
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 30";
+        #[cfg(unix)]
+        let command = "sleep 30";
+
+        let started = shell_exec(
+            &state,
+            &registry,
+            owner.clone(),
+            command.into(),
+            cwd.clone(),
+            Some(cwd),
+            AgentPermissionMode::FullAccess,
+            1,
+            0,
+            8192,
+            ShellKind::Default,
+            false,
+            Some(WorkspaceEnv::Local),
+        )
+        .await
+        .unwrap();
+        assert_eq!(started.status, ProcessStatus::Running);
+        let process = state
+            .owned_process(&started.process_id, &owner, &WorkspaceEnv::Local)
+            .unwrap();
+
+        let status = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = process.response(started.next_offset, 8192).status;
+                if status != ProcessStatus::Running {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(status, ProcessStatus::TimedOut);
+    }
+
     #[test]
     fn process_lookup_is_scoped_to_its_owner() {
         let directory = tempfile::tempdir().unwrap();
