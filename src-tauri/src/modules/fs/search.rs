@@ -1,7 +1,7 @@
 //! 工作区路径枚举与模糊搜索。
 //!
-//! Explorer 搜索和 AI 文件列表共享跨环境路径语义；SSH 递归枚举统一进入远端树服务，
-//! 交互式模糊搜索会取消上一条本地遍历或远端 exec。
+//! Explorer 搜索保持跨环境路径语义；SSH 递归枚举统一进入远端树服务，交互式模糊
+//! 搜索会取消上一条本地遍历或远端 exec。
 
 use ignore::WalkBuilder;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -258,104 +258,6 @@ fn rank_fuzzy(cands: Vec<SearchHit>, query: &str, cap: usize) -> Vec<SearchHit> 
         .take(cap)
         .map(|(_, i)| cands[i].clone())
         .collect()
-}
-
-#[derive(Serialize)]
-pub struct ListFilesResult {
-    pub files: Vec<String>,
-    pub truncated: bool,
-}
-
-/// 返回工作区中的有界文件列表，供 AI Composer 等轻量调用方使用。
-#[tauri::command]
-pub async fn fs_list_files(
-    root: String,
-    limit: Option<usize>,
-    max_depth: Option<usize>,
-    workspace: Option<WorkspaceEnv>,
-    show_hidden: Option<bool>,
-) -> Result<ListFilesResult, String> {
-    const DEFAULT_LIMIT: usize = 2_000;
-    const HARD_LIMIT: usize = 10_000;
-    const DEFAULT_DEPTH: usize = 8;
-    const HARD_DEPTH: usize = 16;
-
-    let cap = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, HARD_LIMIT);
-    let depth = max_depth.unwrap_or(DEFAULT_DEPTH).clamp(1, HARD_DEPTH);
-    let show_hidden = show_hidden.unwrap_or(false);
-    let workspace = WorkspaceEnv::from_option(workspace);
-    if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let (entries, truncated) = remote::tree_service::list_files(
-            &remote_workspace,
-            &root,
-            None,
-            show_hidden,
-            depth,
-            cap,
-        )
-        .await?;
-        let mut files: Vec<String> = entries.into_iter().map(|entry| entry.rel).collect();
-        files.sort_by_key(|path| path.to_lowercase());
-        return Ok(ListFilesResult { files, truncated });
-    }
-    let root_path = resolve_path(&root, &workspace);
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
-    }
-
-    let walker = WalkBuilder::new(&root_path)
-        .hidden(!show_hidden)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .ignore(true)
-        .parents(true)
-        .follow_links(false)
-        .max_depth(Some(depth))
-        .filter_entry(|dent| {
-            if dent.depth() == 0 {
-                return true;
-            }
-            match dent.file_name().to_str() {
-                Some(name) => !PRUNE_DIRS.contains(&name),
-                None => true,
-            }
-        })
-        .build();
-
-    let mut files: Vec<String> = Vec::with_capacity(cap.min(256));
-    let mut scanned: usize = 0;
-    let mut truncated = false;
-
-    for dent in walker.flatten() {
-        scanned += 1;
-        if scanned > MAX_SCANNED {
-            truncated = true;
-            break;
-        }
-        let is_file = dent.file_type().map(|t| t.is_file()).unwrap_or(false);
-        if !is_file {
-            continue;
-        }
-        let path = dent.path();
-        let rel = match path.strip_prefix(&root_path) {
-            Ok(r) => to_canon(r),
-            Err(_) => continue,
-        };
-        if rel.is_empty() {
-            continue;
-        }
-        files.push(rel);
-        if files.len() >= cap {
-            truncated = true;
-            break;
-        }
-    }
-
-    files.sort_by_key(|a| a.to_lowercase());
-    Ok(ListFilesResult { files, truncated })
 }
 
 async fn remote_walk(

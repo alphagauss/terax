@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseExternalAgentBinding } from "../external-agents/runtime";
-import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposerClipboard } from "@/modules/ai/hooks/useComposerClipboard";
 import { useComposer } from "../lib/composer";
+import { filterOpenFileGroups } from "@/modules/ai/lib/openFileCandidates";
 import { availableCommands } from "@/modules/ai/commands/registry";
 import { sessionMetadata, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -88,8 +88,6 @@ export function AiComposerInput() {
   );
   const focusSignal = useChatStore((s) => s.focusSignal);
   const snippets = useSnippetsStore((s) => s.snippets);
-  const workspaceRoot = c.workingDirectory;
-
   useEffect(() => {
     if (focusSignal === 0) return;
     requestAnimationFrame(() => c.textareaRef.current?.focus());
@@ -98,18 +96,6 @@ export function AiComposerInput() {
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
-
-  const [fileQuery, setFileQuery] = useState("");
-  useEffect(() => {
-    if (!fileTrigger) {
-      setFileQuery("");
-      return;
-    }
-    const q = fileTrigger.query;
-    const t = window.setTimeout(() => setFileQuery(q), 50);
-    return () => window.clearTimeout(t);
-  }, [fileTrigger]);
 
   useEffect(() => {
     autoresize(c.textareaRef.current);
@@ -156,26 +142,27 @@ export function AiComposerInput() {
     return snipItems;
   }, [trigger, snippets, usesExternalAgent, t]);
 
-  const FILE_PICKER_CAP = 30;
-  const filteredFiles = useMemo<string[]>(() => {
-    if (!fileTrigger) return [];
-    const q = fileQuery.toLowerCase();
-    if (!q) return workspaceFiles.files.slice(0, FILE_PICKER_CAP);
-    const out: string[] = [];
-    for (const f of workspaceFiles.files) {
-      if (f.toLowerCase().includes(q)) {
-        out.push(f);
-        if (out.length >= FILE_PICKER_CAP) break;
-      }
-    }
-    return out;
-  }, [fileTrigger, fileQuery, workspaceFiles.files]);
+  const fileQuery = fileTrigger?.query ?? "";
+  const filteredFileGroups = useMemo(
+    () =>
+      fileTrigger ? filterOpenFileGroups(c.openFileGroups, fileQuery) : [],
+    [c.openFileGroups, fileQuery, fileTrigger],
+  );
+  const filteredFiles = useMemo(
+    () => filteredFileGroups.flatMap((group) => group.files),
+    [filteredFileGroups],
+  );
 
   const fileTriggerOpen = fileTrigger !== null;
   const snippetTriggerOpen = trigger !== null;
   useEffect(() => {
-    setActiveIndex(0);
-  }, [snippetTriggerOpen, fileTriggerOpen, fileQuery]);
+    if (!fileTriggerOpen) return;
+    const active = filteredFiles.findIndex((file) => file.active);
+    setActiveIndex(active >= 0 ? active : 0);
+  }, [fileTriggerOpen, filteredFiles]);
+  useEffect(() => {
+    if (snippetTriggerOpen) setActiveIndex(0);
+  }, [snippetTriggerOpen]);
 
   const pickerOpen = trigger !== null || fileTrigger !== null;
 
@@ -206,16 +193,13 @@ export function AiComposerInput() {
   };
 
   const onPickFile = async (filePath: string) => {
-    if (!fileTrigger || !workspaceRoot) return;
+    if (!fileTrigger) return;
     const before = c.value.slice(0, fileTrigger.start);
     const after = c.value.slice(fileTrigger.end);
     c.setValue(`${before}${after}`);
     setFileTrigger(null);
     setActiveIndex(0);
-    const fullPath = workspaceRoot.endsWith("/")
-      ? `${workspaceRoot}${filePath}`
-      : `${workspaceRoot}/${filePath}`;
-    await c.attachFileByPath(fullPath);
+    await c.attachFileByPath(filePath);
     requestAnimationFrame(() => {
       const el = c.textareaRef.current;
       if (!el) return;
@@ -227,7 +211,7 @@ export function AiComposerInput() {
   const pickActive = () => {
     if (fileTrigger) {
       const file = filteredFiles[activeIndex];
-      if (file) void onPickFile(file);
+      if (file) void onPickFile(file.path);
       return;
     }
     const it = filteredItems[activeIndex];
@@ -318,11 +302,9 @@ export function AiComposerInput() {
         </PopoverAnchor>
         {fileTrigger ? (
           <FilePickerContent
-            files={filteredFiles}
+            groups={filteredFileGroups}
             activeIndex={activeIndex}
-            indexing={workspaceFiles.indexing}
-            truncated={workspaceFiles.truncated}
-            hasWorkspace={workspaceRoot !== null}
+            hasOpenFiles={c.openFileGroups.length > 0}
             onPick={(f) => void onPickFile(f)}
             onHover={setActiveIndex}
           />

@@ -266,11 +266,9 @@
     "compactionFailed": "压缩未生成完整摘要，原有上下文已保留。"
   },
   "filePicker": {
-    "workspaceFiles": "工作区文件",
-    "noWorkspace": "未打开工作区",
-    "indexing": "正在索引工作区…",
-    "noMatches": "没有匹配的文件",
-    "truncated": "工作区较大，请细化查询以缩小结果范围。"
+    "currentSpace": "{{name}}（当前 Space）",
+    "noOpenFiles": "当前无打开的文件",
+    "noMatches": "没有匹配的已打开文件"
   },
   "statusPill": {
     "openAiLog": "打开 AI 日志",

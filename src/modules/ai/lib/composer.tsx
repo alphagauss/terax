@@ -39,6 +39,7 @@ import {
   resolveSessionCwd,
 } from "@/modules/ai/lib/sessions";
 import { parseCommand } from "@/modules/ai/commands/registry";
+import type { OpenFileGroup } from "@/modules/ai/lib/openFileCandidates";
 
 export type FileAttachment = {
   id: string;
@@ -84,6 +85,7 @@ type ComposerCtx = {
   readOnly: boolean;
   readOnlyEnvironmentKey: string | null;
   workingDirectory: string | null;
+  openFileGroups: readonly OpenFileGroup[];
   canRevealWorkingDirectory: boolean;
   revealingWorkingDirectory: boolean;
   revealWorkingDirectory: () => void;
@@ -104,6 +106,7 @@ export function useComposer(): ComposerCtx {
 
 type ProviderProps = {
   children: React.ReactNode;
+  openFileGroups: readonly OpenFileGroup[];
 };
 
 /**
@@ -111,7 +114,10 @@ type ProviderProps = {
  *
  * Provider 始终挂载，因此关闭侧边栏不会丢失尚未发送的输入。
  */
-export function AiComposerProvider({ children }: ProviderProps) {
+export function AiComposerProvider({
+  children,
+  openFileGroups,
+}: ProviderProps) {
   const { t } = useTranslation("ai");
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore(
@@ -505,6 +511,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     readOnly,
     readOnlyEnvironmentKey,
     workingDirectory,
+    openFileGroups,
     canRevealWorkingDirectory,
     revealingWorkingDirectory,
     revealWorkingDirectory,
