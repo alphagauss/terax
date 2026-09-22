@@ -34,8 +34,8 @@ const IMAGE_MEDIA_TYPES = new Map(
 );
 
 type PathAttachment =
-  | { kind: "text"; content: string; size: number }
-  | { kind: "binary" | "toolarge"; size: number }
+  | { kind: "file"; size: number }
+  | { kind: "binary" | "unsupported"; size: number }
   | { kind: "image"; url: string; mediaType: string; size: number };
 
 /** 常见图片优先按签名识别，避免平台默认文件名或错误扩展名改变 MIME。 */
@@ -61,7 +61,7 @@ function imageMediaType(bytes: Uint8Array): string | undefined {
   }
 }
 
-/** 图片只读取一次二进制；平台已知图片可绕过扩展名筛选，其余文件仍走原生文本读取。 */
+/** 图片读取媒体内容，其他路径只读取属性，正文留给 Agent 工具按需获取。 */
 export async function readPathAttachment(
   path: string,
   workspace: WorkspaceEnv,
@@ -70,8 +70,24 @@ export async function readPathAttachment(
   const extension =
     path.split(/[\\/]/).pop()?.split(".").slice(1).pop()?.toLowerCase() ?? "";
   const extensionType = IMAGE_MEDIA_TYPES.get(extension);
-  if (!extensionType && !options.image)
-    return invoke<PathAttachment>("fs_read_file", { path, workspace });
+  if (!extensionType && !options.image) {
+    let stat = await invoke<{ kind: string; size: number }>("fs_stat", {
+      path,
+      workspace,
+    });
+    if (stat.kind === "symlink") {
+      const canonical = await invoke<string>("fs_canonicalize", {
+        path,
+        workspace,
+      });
+      stat = await invoke<{ kind: string; size: number }>("fs_stat", {
+        path: canonical,
+        workspace,
+      });
+    }
+    if (stat.kind !== "file") return { kind: "unsupported", size: stat.size };
+    return { kind: "file", size: stat.size };
+  }
   const binary = await invoke<{ bytes: number[]; size: number }>(
     "fs_read_binary",
     { path, workspace },

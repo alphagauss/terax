@@ -1,105 +1,45 @@
-/** 用户附件的轻量展示索引；正文和图片仍由消息 parts 唯一持有。 */
+/** 用户附件的轻量索引；文件路径随用户消息保存，图片内容仍由媒体 part 持有。 */
 import type { UIMessage } from "ai";
 
-export type AttachmentDisplay = {
-  name: string;
-  size: number;
-  sourcePath?: string;
-  environmentKey?: string;
-} & (
+export type AttachmentDisplay =
   | {
-      kind: "text";
-      blockRange: [number, number];
-      contentRange: [number, number];
+      kind: "file";
+      name: string;
+      size: number;
+      path: string;
+      environmentKey: string;
     }
-  | { kind: "image"; mediaIndex: number }
-);
+  | {
+      kind: "image";
+      name: string;
+      size: number;
+      sourcePath?: string;
+      environmentKey?: string;
+      mediaIndex: number;
+    };
 
 export function messageRawText(message: UIMessage): string {
   return message.parts
-    .filter((p) => p.type === "text")
-    .map((p) => p.text)
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
     .join("");
 }
 
-/** 在原始 UTF-16 文本上校验范围；无效或重叠索引不参与隐藏与预览。 */
-export function textAttachments(
-  text: string,
+/** 将路径附件稳定编码为同一条用户消息的模型输入。 */
+export function attachmentReferenceText(
   attachments: readonly AttachmentDisplay[],
-) {
-  let end = 0;
-  return attachments.filter(
-    (a): a is Extract<AttachmentDisplay, { kind: "text" }> => {
-      if (
-        a.kind !== "text" ||
-        !Array.isArray(a.blockRange) ||
-        !Array.isArray(a.contentRange)
-      )
-        return false;
-      const [start, stop] = a.blockRange;
-      const [contentStart, contentEnd] = a.contentRange;
-      if (
-        ![start, stop, contentStart, contentEnd].every(Number.isSafeInteger) ||
-        start < end ||
-        stop <= start ||
-        stop > text.length ||
-        contentStart < start ||
-        contentEnd < contentStart ||
-        contentEnd > stop
-      )
-        return false;
-      end = stop;
-      return true;
-    },
+): string {
+  const files = attachments.flatMap((attachment) =>
+    attachment.kind === "file"
+      ? [
+          {
+            path: attachment.path,
+            name: attachment.name,
+            size: attachment.size,
+          },
+        ]
+      : [],
   );
-}
-
-/** 只移除明确记录的附件块，正文内同名标签保持原样。 */
-export function messageTextWithoutAttachments(message: UIMessage): string {
-  const text = messageRawText(message);
-  const metadata = message.metadata as
-    | { attachments?: AttachmentDisplay[] }
-    | undefined;
-  const attachments = textAttachments(text, metadata?.attachments ?? []);
-  let start = 0;
-  const chunks: string[] = [];
-  for (const a of attachments) {
-    chunks.push(text.slice(start, a.blockRange[0]));
-    start = a.blockRange[1];
-  }
-  chunks.push(text.slice(start));
-  return chunks.join("");
-}
-
-/** 按发送顺序追加文件块，同时记录内容范围，不扫描文件正文。 */
-export function appendTextAttachment(
-  text: string,
-  file: {
-    name: string;
-    mediaType: string;
-    text?: string;
-    size: number;
-    sourcePath?: string;
-    environmentKey?: string;
-  },
-): { text: string; attachment: AttachmentDisplay } {
-  const start = text.length + (text ? 2 : 0);
-  const header = `<file name="${file.name}" mediaType="${file.mediaType}">\n`;
-  const content = file.text ?? "";
-  const block = `${header}${content}\n</file>`;
-  return {
-    text: `${text}${text ? "\n\n" : ""}${block}`,
-    attachment: {
-      kind: "text",
-      name: file.name,
-      size: file.size,
-      sourcePath: file.sourcePath,
-      environmentKey: file.environmentKey,
-      blockRange: [start, start + block.length],
-      contentRange: [
-        start + header.length,
-        start + header.length + content.length,
-      ],
-    },
-  };
+  if (!files.length) return "";
+  return `<attached_files>\n${JSON.stringify(files)}\n</attached_files>`;
 }

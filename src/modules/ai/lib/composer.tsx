@@ -12,10 +12,7 @@ import {
   readPathAttachment,
   readAsDataURL,
 } from "@/modules/ai/lib/attachmentFiles";
-import {
-  appendTextAttachment,
-  type AttachmentDisplay,
-} from "@/modules/ai/lib/messageAttachments";
+import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
 import {
   createContext,
   useCallback,
@@ -41,25 +38,38 @@ import {
 import { parseCommand } from "@/modules/ai/commands/registry";
 import type { OpenFileGroup } from "@/modules/ai/lib/openFileCandidates";
 
-export type FileAttachment = {
+type AttachmentBase = {
   id: string;
   name: string;
-  kind: "image" | "text" | "selection";
-  mediaType: string;
-  url?: string;
-  text?: string;
   size: number;
-  sourcePath?: string;
-  environmentKey?: string;
-  /** For kind === "selection": which surface it came from. */
-  source?: "terminal" | "editor";
 };
+
+export type FileAttachment = AttachmentBase &
+  (
+    | {
+        kind: "image";
+        mediaType: string;
+        url: string;
+        sourcePath?: string;
+        environmentKey?: string;
+      }
+    | {
+        kind: "file";
+        sourcePath: string;
+        environmentKey: string;
+      }
+    | {
+        kind: "selection";
+        mediaType: "text/plain";
+        text: string;
+        /** 选区所属的工作区表面。 */
+        source: "terminal" | "editor";
+      }
+  );
 
 type MessagePart =
   | { type: "text"; text: string }
   | { type: "file"; mediaType: string; url: string; filename?: string };
-
-export const MAX_TEXT_INLINE = 200_000;
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 type ComposerFiles = FileList | readonly File[];
@@ -205,39 +215,33 @@ export function AiComposerProvider({
         const name = basename(path);
         const id = `path-${path}`;
         const result = await readPathAttachment(path, workspace);
-        if (
-          result.kind === "toolarge" ||
-          (result.kind === "text" && result.size > MAX_TEXT_INLINE)
-        ) {
-          toast.error(
-            t("composer.fileTooLarge", {
-              name,
-              size: formatBytes(result.size),
-            }),
-          );
-          return;
-        }
-        if (result.kind !== "image" && result.kind !== "text") {
+        if (result.kind !== "image" && result.kind !== "file") {
           toast.error(t("composer.unsupportedFile", { name }));
           return;
         }
+        const environmentKey = currentWorkspaceBootstrap().environmentKey;
+        const attachment: FileAttachment =
+          result.kind === "image"
+            ? {
+                id,
+                name,
+                kind: "image",
+                size: result.size,
+                sourcePath: path,
+                environmentKey,
+                mediaType: result.mediaType,
+                url: result.url,
+              }
+            : {
+                id,
+                name,
+                kind: "file",
+                size: result.size,
+                sourcePath: path,
+                environmentKey,
+              };
         setFiles((prev) =>
-          prev.some((f) => f.id === id)
-            ? prev
-            : [
-                ...prev,
-                {
-                  id,
-                  name,
-                  kind: result.kind,
-                  size: result.size,
-                  sourcePath: path,
-                  environmentKey: currentWorkspaceBootstrap().environmentKey,
-                  ...(result.kind === "image"
-                    ? { mediaType: result.mediaType, url: result.url }
-                    : { mediaType: "text/plain", text: result.content }),
-                },
-              ],
+          prev.some((file) => file.id === id) ? prev : [...prev, attachment],
         );
         useChatStore.getState().focusInput();
       } catch (e) {
@@ -398,16 +402,23 @@ export function AiComposerProvider({
       if (m) seenHandles.add(m[1]);
       allSnippetBlocks.push(block);
     }
-    let composed = [allSnippetBlocks.join("\n\n"), selectionBlocks.join("\n\n")]
+    const composed = [
+      allSnippetBlocks.join("\n\n"),
+      selectionBlocks.join("\n\n"),
+      bodyAfterTokens,
+    ]
       .filter(Boolean)
       .join("\n\n");
     for (const file of files) {
-      if (file.kind !== "text") continue;
-      const appended = appendTextAttachment(composed, file);
-      composed = appended.text;
-      attachments.push(appended.attachment);
+      if (file.kind !== "file") continue;
+      attachments.push({
+        kind: "file",
+        name: file.name,
+        size: file.size,
+        path: file.sourcePath,
+        environmentKey: file.environmentKey,
+      });
     }
-    composed = [composed, bodyAfterTokens].filter(Boolean).join("\n\n");
     if (composed) parts.push({ type: "text", text: composed });
 
     let mediaIndex = 0;
@@ -537,25 +548,10 @@ async function readAttachment(file: File): Promise<FileAttachment | null> {
       size: file.size,
     };
   }
-  if (file.size > MAX_TEXT_INLINE) return null;
-  const text = await file.text();
-  return {
-    id,
-    name: file.name,
-    kind: "text",
-    mediaType: file.type || "text/plain",
-    text,
-    size: file.size,
-  };
+  return null;
 }
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : path;
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

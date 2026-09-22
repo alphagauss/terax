@@ -1,10 +1,7 @@
 /** 会话压缩的覆盖边界与模型投影；原始消息始终保留，摘要按时间追加。 */
 import type { UIMessage } from "ai";
 import { messageMetadata } from "@/modules/ai/lib/conversation";
-import {
-  messageRawText,
-  messageTextWithoutAttachments,
-} from "@/modules/ai/lib/messageAttachments";
+import { messageRawText } from "@/modules/ai/lib/messageAttachments";
 
 export type CompactionEvent = {
   event: "compaction";
@@ -72,16 +69,13 @@ export function projectCompactedMessages(
     if (isConversationUser(message) && !meta.guided) root = message.id;
     if (!coveredIds.has(root)) return [message];
     if (isConversationUser(message)) {
-      const text = messageTextWithoutAttachments(message);
+      const text = messageRawText(message);
       return text.trim()
         ? [
             {
               ...message,
-              // 没有文本附件时保持正文片段，避免把结构变化误判为待摘要内容。
-              parts:
-                text === messageRawText(message)
-                  ? message.parts.filter((part) => part.type === "text")
-                  : [{ type: "text" as const, text }],
+              parts: message.parts.filter((part) => part.type === "text"),
+              metadata: { ...meta, attachments: undefined },
             },
           ]
         : [];
@@ -127,6 +121,7 @@ export function planCompaction(
       event:
         messageMetadata(message).subagentResult ??
         messageMetadata(message).runFailure,
+      attachments: messageMetadata(message).attachments,
     });
   const retainedById = new Map(after.map((message) => [message.id, message]));
   const changed = before.filter((message) => {

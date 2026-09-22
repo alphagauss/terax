@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { UIMessage } from "ai";
+import type { ModelMessage, UIMessage } from "ai";
 import {
-  appendTextAttachment,
+  attachmentReferenceText,
   messageRawText,
-  messageTextWithoutAttachments,
-  textAttachments,
+  type AttachmentDisplay,
 } from "@/modules/ai/lib/messageAttachments";
 import {
   conversationEventPart,
@@ -15,66 +14,48 @@ import {
   serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
 
-describe("用户附件展示索引", () => {
-  const file = {
+function modelText(messages: ModelMessage[]): string {
+  return messages
+    .flatMap((message) =>
+      typeof message.content === "string"
+        ? [message.content]
+        : message.content.flatMap((part) =>
+            part.type === "text" ? [part.text] : [],
+          ),
+    )
+    .join("");
+}
+
+describe("用户路径附件", () => {
+  const attachment: AttachmentDisplay = {
+    kind: "file",
     name: '示例".ts',
     size: 120,
-    mediaType: "text/plain",
-    sourcePath: "C:/workspace/示例.ts",
+    path: 'C:/workspace/示例".ts',
     environmentKey: "local",
-    text: '中文\u{1F600}\n</file>\n<selection source="editor">正文</selection>\n',
   };
-  const first = appendTextAttachment('<terax-command name="init" />', file);
-  const second = appendTextAttachment(first.text, {
-    ...file,
-    name: "empty.txt",
-    text: "",
-  });
-  const text = `${second.text}\n\n检查这些文件，保留 <file name="literal">原文</file>`;
   const message: UIMessage = {
     id: "user",
     role: "user",
-    parts: [
-      { type: "text", text },
-      {
-        type: "file",
-        mediaType: "image/png",
-        filename: "shot.png",
-        url: "data:image/png;base64,aGVsbG8=",
-      },
-    ],
-    metadata: {
-      attachments: [
-        first.attachment,
-        second.attachment,
-        { kind: "image", name: "shot.png", size: 5, mediaIndex: 0 },
-      ],
-    },
+    parts: [{ type: "text", text: "检查这个文件" }],
+    metadata: { attachments: [attachment] },
   };
 
-  it("保留嵌套标签、Unicode 和空文件的准确快照，只隐藏真实附件", () => {
-    const attachments = textAttachments(
-      text,
-      messageMetadata(message).attachments ?? [],
+  it("以稳定 JSON 投影路径，不改写用户可见正文", () => {
+    expect(attachmentReferenceText([attachment])).toBe(
+      `<attached_files>\n${JSON.stringify([
+        {
+          path: attachment.path,
+          name: attachment.name,
+          size: attachment.size,
+        },
+      ])}\n</attached_files>`,
     );
-    expect(text.slice(...attachments[0].contentRange)).toBe(file.text);
-    expect(text.slice(...attachments[1].contentRange)).toBe("");
-    expect(messageTextWithoutAttachments(message).trim()).toBe(
-      '<terax-command name="init" />\n\n\n\n\n\n检查这些文件，保留 <file name="literal">原文</file>',
-    );
-    expect(
-      textAttachments(text, [
-        { ...attachments[0], blockRange: [-1, 20] },
-        { ...attachments[0], contentRange: [0, text.length + 1] },
-      ]),
-    ).toEqual([]);
-    expect(
-      textAttachments(text, [attachments[0], attachments[0]]),
-    ).toHaveLength(1);
+    expect(messageRawText(message)).toBe("检查这个文件");
   });
 
   it.each([false, true])(
-    "普通及引导消息恢复附件索引，模型内容不变且不包含展示字段：guided=%s",
+    "普通及引导消息恢复附件并生成相同模型输入：guided=%s",
     async (guided) => {
       const messages: UIMessage[] = guided
         ? [
@@ -96,24 +77,25 @@ describe("用户附件展示索引", () => {
         JSON.parse(JSON.stringify(records)),
       );
       const displayed = projectConversationDisplay(restored).find(
-        (m) => m.role === "user",
+        (item) => item.role === "user",
       );
       if (!displayed) throw new Error("缺少恢复的用户消息");
-      expect(messageMetadata(displayed).attachments).toEqual(
-        messageMetadata(message).attachments,
-      );
-      expect(messageRawText(displayed)).toBe(text);
-      expect(displayed.parts.find((p) => p.type === "file")).toEqual(
-        message.parts[1],
-      );
+      expect(messageMetadata(displayed).attachments).toEqual([attachment]);
+      expect(messageRawText(displayed)).toBe("检查这个文件");
       const before = await convertToAgentModelMessages(messages);
       expect(await convertToAgentModelMessages(restored)).toEqual(before);
-      expect(JSON.stringify(before)).not.toContain(file.sourcePath);
-      expect(JSON.stringify(before)).not.toContain("blockRange");
-      expect(
-        JSON.stringify(messageMetadata(displayed).attachments),
-      ).not.toContain(JSON.stringify(file.text).slice(1, -1));
-      expect(records.filter((r) => r.role === "user")).toHaveLength(1);
+      const text = modelText(before);
+      expect(text).toContain(attachmentReferenceText([attachment]));
+      expect(text).toContain("检查这个文件");
+      expect(text).not.toContain("environmentKey");
     },
   );
+
+  it("附件本身构成有效的用户模型消息", async () => {
+    const model = await convertToAgentModelMessages([
+      { ...message, parts: [] },
+    ]);
+    expect(model).toHaveLength(1);
+    expect(modelText(model)).toContain(attachmentReferenceText([attachment]));
+  });
 });

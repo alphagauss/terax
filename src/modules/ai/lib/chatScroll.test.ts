@@ -4,7 +4,6 @@
  */
 
 import type { UIMessage } from "ai";
-import { appendTextAttachment } from "@/modules/ai/lib/messageAttachments";
 import { describe, expect, it } from "vitest";
 import {
   buildUserMessageAnchors,
@@ -18,12 +17,6 @@ describe("chat scroll controls", () => {
   });
 
   it("builds ordered user anchors without embedded context blocks", () => {
-    const file = appendTextAttachment("", {
-      name: "a.ts",
-      mediaType: "text/plain",
-      text: "large body",
-      size: 10,
-    });
     const messages = [
       {
         id: "user-1",
@@ -42,14 +35,19 @@ describe("chat scroll controls", () => {
       },
       {
         id: "user-2",
-        metadata: { attachments: [file.attachment] },
+        metadata: {
+          attachments: [
+            {
+              kind: "file",
+              name: "a.ts",
+              size: 10,
+              path: "/work/a.ts",
+              environmentKey: "local",
+            },
+          ],
+        },
         role: "user",
-        parts: [
-          {
-            type: "text",
-            text: file.text,
-          },
-        ],
+        parts: [],
       },
     ] as UIMessage[];
 

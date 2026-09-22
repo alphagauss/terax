@@ -11,7 +11,7 @@ import {
 } from "@/modules/channels/history";
 
 import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
-import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
+import { messageRawText } from "@/modules/ai/lib/messageAttachments";
 import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
 import { Shimmer } from "@/components/controls/shimmer";
 import {
@@ -706,7 +706,7 @@ const RenderedMessage = memo(function RenderedMessage({
     );
   }
   if (message.role === "user") {
-    const rawText = messageTextWithoutAttachments(message);
+    const rawText = messageRawText(message);
 
     const stripped = stripUserContextBlocks(rawText);
 
@@ -894,7 +894,7 @@ function messageTextForCopy(message: UIMessage): string {
       .map((part) => part.text)
       .join("\n");
   }
-  return stripUserContextBlocks(messageTextWithoutAttachments(message)).text;
+  return stripUserContextBlocks(messageRawText(message)).text;
 }
 
 /** 消息底部的时间、复制操作与最终回答的本轮统计入口。 */
