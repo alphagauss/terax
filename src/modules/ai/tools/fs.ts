@@ -78,7 +78,7 @@ export function buildFsTools(ctx: ToolContext) {
           .enum(["create", "rewrite"])
           .optional()
           .describe(
-            "Defaults to create, which refuses an existing target. rewrite replaces the complete existing file and requires a current version baseline from read_file or a prior write in this chat.",
+            "Defaults to create, which refuses an existing target. rewrite replaces the complete existing file and requires a current version baseline from read_file or a successful write_file/apply_patch in this chat.",
           ),
       }),
       execute: async (input, { toolCallId }) => {

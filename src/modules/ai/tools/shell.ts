@@ -71,8 +71,16 @@ const processInputSchema = z
     input: z
       .string()
       .max(256 * 1024)
-      .optional(),
-    close_stdin: z.boolean().optional(),
+      .optional()
+      .describe(
+        "Exact stdin text. Required for action=write; omit for other actions.",
+      ),
+    close_stdin: z
+      .boolean()
+      .optional()
+      .describe(
+        "Send EOF after writing. true is only valid for action=write; defaults to false.",
+      ),
     ...outputOptions,
     ...waitOptions,
   })
@@ -102,11 +110,11 @@ const processInputSchema = z
         message: "input is only valid when action is write",
       });
     }
-    if (input.action !== "write" && input.close_stdin !== undefined) {
+    if (input.action !== "write" && input.close_stdin === true) {
       ctx.addIssue({
         code: "custom",
         path: ["close_stdin"],
-        message: "close_stdin is only valid when action is write",
+        message: "close_stdin=true is only valid when action is write",
       });
     }
     if (input.wait_for === undefined && input.wait_timeout_ms !== undefined) {
@@ -142,7 +150,7 @@ export function buildShellTools(ctx: ToolContext) {
           .nullable()
           .optional()
           .describe(
-            "Working directory for this process. Relative values resolve from the session's fixed working directory. If omitted, uses the chat cwd from its most recent synchronously completed shell command; later completion of a background process does not change it.",
+            "Explicit cwd applies only to this process; relative values resolve from the session's fixed working directory. If omitted or null, uses the chat cwd, initially the session directory. Only commands without explicit cwd that finish before shell_exec returns update the chat cwd.",
           ),
         timeout_secs: z
           .number()

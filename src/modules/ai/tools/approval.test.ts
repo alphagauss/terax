@@ -188,6 +188,24 @@ describe("AI tool approval mode", () => {
     ).toMatchObject({ success: false });
   });
 
+  it.each(["poll", "close_stdin", "terminate"])(
+    "accepts close_stdin=false with action=%s",
+    async (action) => {
+      const schema = asSchema(
+        buildShellTools(context).shell_process.inputSchema,
+      );
+      if (!schema.validate) throw new Error("shell_process validator missing");
+
+      expect(
+        await schema.validate({
+          process_id: "00000000-0000-4000-8000-000000000002",
+          action,
+          close_stdin: false,
+        }),
+      ).toMatchObject({ success: true });
+    },
+  );
+
   it("scopes process control and discovery to the active chat", async () => {
     const processId = "00000000-0000-4000-8000-000000000002";
     nativeMock.shellProcess.mockResolvedValue({
