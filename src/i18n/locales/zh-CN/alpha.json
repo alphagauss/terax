@@ -47,6 +47,11 @@
     "panels": {
       "chart": "K 线图"
     },
+    "panelList": {
+      "action": "面板",
+      "empty": "暂无面板",
+      "collapsed": "已收起"
+    },
     "panel": {
       "loading": "正在加载面板...",
       "unknown": "不可用的面板类型：{{type}}",
@@ -55,7 +60,9 @@
       "pinned": "固定",
       "pinCurrent": "固定为 {{symbol}}",
       "restoreFollow": "恢复跟随主标的",
-      "remove": "移除面板"
+      "remove": "移除面板",
+      "collapse": "收起面板",
+      "expand": "展开面板"
     }
   },
   "data": {

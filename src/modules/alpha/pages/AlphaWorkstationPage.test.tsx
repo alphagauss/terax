@@ -11,6 +11,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   updateState: vi.fn(),
+  state: null as AlphaWorkstationState | null,
+  gridProps: null as Record<string, unknown> | null,
+}));
+
+vi.mock("@/components/menu/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => children,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) =>
+    children,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) =>
+    children,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    disabled,
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+    disabled?: boolean;
+  }) => (
+    <button type="button" disabled={disabled} onClick={onSelect}>
+      {children}
+    </button>
+  ),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -26,7 +49,10 @@ vi.mock("@/modules/alpha/workstation/components/AlphaPanelPool", () => ({
 }));
 
 vi.mock("@/modules/alpha/workstation/components/AlphaPanelGrid", () => ({
-  AlphaPanelGrid: () => null,
+  AlphaPanelGrid: (props: Record<string, unknown>) => {
+    mocks.gridProps = props;
+    return null;
+  },
 }));
 
 vi.mock("@/modules/alpha/workstation/store", async () => {
@@ -34,7 +60,7 @@ vi.mock("@/modules/alpha/workstation/store", async () => {
   return {
     useAlphaWorkstationSnapshot: () => ({
       hydrated: true,
-      state: templates.createDefaultAlphaWorkstationState(),
+      state: mocks.state ?? templates.createDefaultAlphaWorkstationState(),
     }),
     updateAlphaWorkstationState: mocks.updateState,
   };
@@ -56,6 +82,8 @@ describe("AlphaWorkstationPage", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     root = createRoot(container);
+    mocks.state = null;
+    mocks.gridProps = null;
   });
 
   afterEach(() => {
@@ -127,5 +155,33 @@ describe("AlphaWorkstationPage", () => {
     const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
     expect(inputs).toHaveLength(2);
     expect(new Set(inputs.map((input) => input.id)).size).toBe(2);
+  });
+
+  it("面板菜单区分重复项，找回时只置顶并请求定位，保持折叠和几何", async () => {
+    const state = createDefaultAlphaWorkstationState();
+    const first = state.layout.panels[0];
+    first.collapsed = true;
+    state.layout.panels.push({ ...first, id: "second", collapsed: false });
+    state.layout.grid.push({ ...state.layout.grid[0], panelId: "second" });
+    mocks.state = state;
+    await act(async () => root?.render(<AlphaWorkstationPage visible />));
+    const entries = [...container.querySelectorAll("button")].filter((button) =>
+      button.textContent?.includes("workstation.panels.chart ·"),
+    );
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toContain("(1)");
+    expect(entries[1].textContent).toContain("(2)");
+    act(() => entries[0].click());
+    const update = mocks.updateState.mock.calls[0][0] as (
+      state: AlphaWorkstationState,
+    ) => AlphaWorkstationState;
+    const next = update(state);
+    expect(next.layout.panels).toBe(state.layout.panels);
+    expect(next.layout.grid).toEqual([
+      state.layout.grid[1],
+      state.layout.grid[0],
+    ]);
+    expect(next.layout.panels[0].collapsed).toBe(true);
+    expect(mocks.gridProps?.revealRequest).toEqual({ panelId: first.id });
   });
 });

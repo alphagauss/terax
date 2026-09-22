@@ -47,6 +47,11 @@
     "panels": {
       "chart": "Chart"
     },
+    "panelList": {
+      "action": "Panels",
+      "empty": "No panels",
+      "collapsed": "Collapsed"
+    },
     "panel": {
       "loading": "Loading panel...",
       "unknown": "Unavailable panel type: {{type}}",
@@ -55,7 +60,9 @@
       "pinned": "Pinned",
       "pinCurrent": "Pin to {{symbol}}",
       "restoreFollow": "Resume following the main symbol",
-      "remove": "Remove panel"
+      "remove": "Remove panel",
+      "collapse": "Collapse panel",
+      "expand": "Expand panel"
     }
   },
   "data": {

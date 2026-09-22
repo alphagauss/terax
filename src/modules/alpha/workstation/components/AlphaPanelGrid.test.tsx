@@ -23,7 +23,6 @@ vi.mock("react-grid-layout", () => ({
     containerRef: { current: null },
     mounted: true,
   }),
-  verticalCompactor: { type: "vertical", allowOverlap: false },
 }));
 
 vi.mock("@/modules/alpha/workstation/components/AlphaPanelPool", () => ({
@@ -39,7 +38,10 @@ vi.mock("@/modules/alpha/workstation/components/AlphaPanelChrome", () => ({
 }));
 
 import { AlphaPanelGrid } from "@/modules/alpha/workstation/components/AlphaPanelGrid";
-import type { AlphaWorkstationState } from "@/modules/alpha/workstation/model";
+import type {
+  AlphaGridItem,
+  AlphaWorkstationState,
+} from "@/modules/alpha/workstation/model";
 import { alphaPanelRegistry } from "@/modules/alpha/workstation/panelRegistry";
 import { createDefaultAlphaWorkstationState } from "@/modules/alpha/workstation/templates";
 
@@ -56,20 +58,26 @@ describe("AlphaPanelGrid", () => {
   afterEach(() => {
     act(() => root?.unmount());
     root = null;
+    vi.restoreAllMocks();
   });
 
   async function renderGrid(
     state: AlphaWorkstationState,
-    onGridCommit: (grid: Array<Record<string, unknown>>) => void,
+    onGridCommit: (item: AlphaGridItem) => void,
+    onRaisePanel = (_panelId: string) => undefined,
+    revealRequest: { panelId: string } | null = null,
   ) {
     await act(async () => {
       root?.render(
         <AlphaPanelGrid
           state={state}
           registry={alphaPanelRegistry}
-          onGridCommit={onGridCommit}
+          onGridItemCommit={onGridCommit}
           onBindingChange={() => undefined}
           onRemovePanel={() => undefined}
+          onToggleCollapsed={() => undefined}
+          onRaisePanel={onRaisePanel}
+          revealRequest={revealRequest}
         />,
       );
     });
@@ -82,29 +90,41 @@ describe("AlphaPanelGrid", () => {
 
     expect(latestGridProps?.onLayoutChange).toBeUndefined();
     expect(latestGridProps?.gridConfig).toMatchObject({ cols: 24 });
-    expect(latestGridProps?.compactor).toMatchObject({ type: "vertical" });
+    expect(latestGridProps?.compactor).toMatchObject({
+      type: null,
+      allowOverlap: true,
+    });
     expect(onGridCommit).not.toHaveBeenCalled();
 
     const panelId = state.layout.panels[0].id;
     const finalLayout = [
       { i: panelId, x: 6, y: 3, w: 18, h: 12, minW: 6, minH: 8 },
+      { i: "other", x: 0, y: 0, w: 6, h: 8, minW: 6, minH: 8 },
     ];
     if (!latestGridProps) throw new Error("grid props were not captured");
     const onDragStop = latestGridProps.onDragStop as (
       layout: typeof finalLayout,
+      oldItem: null,
+      item: (typeof finalLayout)[number],
     ) => void;
     const onResizeStop = latestGridProps.onResizeStop as (
       layout: typeof finalLayout,
+      oldItem: null,
+      item: (typeof finalLayout)[number],
     ) => void;
     act(() => {
-      onDragStop(finalLayout);
-      onResizeStop(finalLayout);
+      onDragStop(finalLayout, null, finalLayout[0]);
+      onResizeStop(finalLayout, null, finalLayout[0]);
     });
 
     expect(onGridCommit).toHaveBeenCalledTimes(2);
-    expect(onGridCommit).toHaveBeenLastCalledWith([
-      { panelId, x: 6, y: 3, w: 18, h: 12 },
-    ]);
+    expect(onGridCommit).toHaveBeenLastCalledWith({
+      panelId,
+      x: 6,
+      y: 3,
+      w: 18,
+      h: 12,
+    });
   });
 
   it("布局锁定同时禁用拖动和缩放", async () => {
@@ -113,5 +133,56 @@ describe("AlphaPanelGrid", () => {
 
     expect(latestGridProps?.dragConfig).toMatchObject({ enabled: false });
     expect(latestGridProps?.resizeConfig).toMatchObject({ enabled: false });
+  });
+
+  it("收起仅改变自身占位并禁止缩放，内容原生事件可以置顶", async () => {
+    const state = createDefaultAlphaWorkstationState();
+    const panel = state.layout.panels[0];
+    panel.collapsed = true;
+    const raise = vi.fn();
+    await renderGrid(state, vi.fn(), raise);
+    expect(latestGridProps?.layout).toEqual([
+      expect.objectContaining({
+        i: panel.id,
+        h: 1,
+        minH: 1,
+        isResizable: false,
+      }),
+    ]);
+    const content = container.querySelector("[data-host]");
+    act(() =>
+      content?.dispatchEvent(new Event("pointerdown", { bubbles: true })),
+    );
+    expect(raise).toHaveBeenCalledWith(panel.id);
+    expect(state.layout.grid[0].h).toBe(16);
+  });
+
+  it("找回面板时把标题定位到可用视口，不把滚动条区域当成可见内容", async () => {
+    const state = createDefaultAlphaWorkstationState();
+    const commit = vi.fn();
+    await renderGrid(state, commit);
+    const viewport = container.querySelector<HTMLElement>(
+      "[data-alpha-workstation-grid-viewport]",
+    );
+    const panel = container.querySelector<HTMLElement>(
+      "[data-alpha-workstation-panel]",
+    );
+    if (!viewport || !panel) throw new Error("缺少网格宿主");
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 1000, 600),
+    );
+    Object.defineProperties(viewport, {
+      clientWidth: { value: 984 },
+      clientHeight: { value: 584 },
+    });
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(500, 560, 500, 400),
+    );
+    await renderGrid(state, commit, vi.fn(), {
+      panelId: state.layout.panels[0].id,
+    });
+    expect(viewport.scrollTop).toBe(560);
+    expect(viewport.scrollLeft).toBe(500);
+    expect(commit).not.toHaveBeenCalled();
   });
 });

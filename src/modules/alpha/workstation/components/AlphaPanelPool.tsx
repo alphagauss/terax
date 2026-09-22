@@ -161,7 +161,7 @@ function PooledPanel({
             panelId={panel.id}
             vtSymbol={vtSymbol}
             config={panel.config}
-            visible={visible}
+            visible={visible && !panel.collapsed}
             onConfigChange={changeConfig}
           />
         </Suspense>

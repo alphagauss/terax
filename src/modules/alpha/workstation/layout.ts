@@ -36,6 +36,7 @@ const panelSchema = z
     type: z.string().trim().min(1),
     binding: symbolBindingSchema,
     config: z.record(z.string(), z.unknown()),
+    collapsed: z.boolean().optional(),
   })
   .strict();
 
@@ -68,7 +69,6 @@ export type AlphaWorkstationLayoutIssueCode =
   | "orphan-grid-item"
   | "grid-bounds"
   | "panel-min-size"
-  | "panel-overlap"
   | "singleton"
   | "invalid-config";
 
@@ -80,6 +80,60 @@ export type AlphaWorkstationLayoutIssue = {
 export type AlphaWorkstationLayoutResult =
   | { ok: true; layout: AlphaWorkstationLayout }
   | { ok: false; issues: AlphaWorkstationLayoutIssue[] };
+
+/** 只调整层级，不改变菜单顺序、几何或面板身份。 */
+export function raiseAlphaPanel(
+  layout: AlphaWorkstationLayout,
+  panelId: string,
+): AlphaWorkstationLayout {
+  const item = layout.grid.find((candidate) => candidate.panelId === panelId);
+  if (!item || layout.grid[layout.grid.length - 1] === item) return layout;
+  return {
+    ...layout,
+    grid: [...layout.grid.filter((candidate) => candidate !== item), item],
+  };
+}
+
+/** 折叠只改变展示状态，展开在原位置恢复保存的高度并置顶。 */
+export function toggleAlphaPanelCollapsed(
+  layout: AlphaWorkstationLayout,
+  panelId: string,
+): AlphaWorkstationLayout {
+  const panel = layout.panels.find((candidate) => candidate.id === panelId);
+  if (!panel) return layout;
+  return {
+    ...raiseAlphaPanel(layout, panelId),
+    panels: layout.panels.map((candidate) =>
+      candidate === panel
+        ? { ...panel, collapsed: !panel.collapsed }
+        : candidate,
+    ),
+  };
+}
+
+/** 网格返回的是当前占位；收起时拖动不得覆盖展开高度或当前层级。 */
+export function updateAlphaPanelGeometry(
+  layout: AlphaWorkstationLayout,
+  next: AlphaGridItem,
+): AlphaWorkstationLayout {
+  const index = layout.grid.findIndex((item) => item.panelId === next.panelId);
+  if (index < 0) return layout;
+  const current = layout.grid[index];
+  const collapsed = layout.panels.find(
+    (panel) => panel.id === next.panelId,
+  )?.collapsed;
+  const h = collapsed ? current.h : next.h;
+  if (
+    current.x === next.x &&
+    current.y === next.y &&
+    current.w === next.w &&
+    current.h === h
+  )
+    return layout;
+  const grid = [...layout.grid];
+  grid[index] = { ...next, h };
+  return { ...layout, grid };
+}
 
 /**
  * 更新一个已注册面板的配置。
@@ -111,15 +165,6 @@ export function updateAlphaPanelConfig(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function overlaps(left: AlphaGridItem, right: AlphaGridItem): boolean {
-  return (
-    left.x < right.x + right.w &&
-    right.x < left.x + left.w &&
-    left.y < right.y + right.h &&
-    right.y < left.y + left.h
-  );
 }
 
 function duplicateIds(values: readonly string[]): Set<string> {
@@ -196,17 +241,6 @@ export function parseAlphaWorkstationLayout(
         item.h < descriptor.defaultSize.minH)
     ) {
       issues.push({ code: "panel-min-size", panelId: item.panelId });
-    }
-  }
-
-  for (let left = 0; left < layout.grid.length; left += 1) {
-    for (let right = left + 1; right < layout.grid.length; right += 1) {
-      if (overlaps(layout.grid[left], layout.grid[right])) {
-        issues.push({
-          code: "panel-overlap",
-          panelId: layout.grid[right].panelId,
-        });
-      }
     }
   }
 

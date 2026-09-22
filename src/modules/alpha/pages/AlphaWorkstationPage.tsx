@@ -23,7 +23,13 @@ import {
   type AlphaPanelConfig,
   type AlphaSymbolBinding,
 } from "@/modules/alpha/workstation/model";
-import { updateAlphaPanelConfig } from "@/modules/alpha/workstation/layout";
+import {
+  updateAlphaPanelConfig,
+  updateAlphaPanelGeometry,
+  raiseAlphaPanel,
+  toggleAlphaPanelCollapsed,
+} from "@/modules/alpha/workstation/layout";
+import { resolveAlphaPanelSymbol } from "@/modules/alpha/workstation/state";
 import { alphaPanelRegistry } from "@/modules/alpha/workstation/panelRegistry";
 import {
   updateAlphaWorkstationState,
@@ -62,6 +68,9 @@ function AlphaWorkstationPageContent({ visible }: Props) {
   const snapshot = useAlphaWorkstationSnapshot();
   const [symbolDraft, setSymbolDraft] = useState("");
   const [symbolError, setSymbolError] = useState(false);
+  const [revealRequest, setRevealRequest] = useState<{
+    panelId: string;
+  } | null>(null);
   const state = snapshot.state;
   const mainSymbol = state?.mainSymbol ?? "";
   const symbolInputId = useId();
@@ -84,10 +93,24 @@ function AlphaWorkstationPageContent({ visible }: Props) {
     updateAlphaWorkstationState((current) => ({ ...current, mainSymbol }));
   }, [symbolDraft]);
 
-  const commitGrid = useCallback((grid: AlphaGridItem[]) => {
+  const commitGridItem = useCallback((item: AlphaGridItem) => {
+    updateAlphaWorkstationState((current) => {
+      const layout = updateAlphaPanelGeometry(current.layout, item);
+      return layout === current.layout ? current : { ...current, layout };
+    });
+  }, []);
+
+  const raisePanel = useCallback((panelId: string) => {
+    updateAlphaWorkstationState((current) => {
+      const layout = raiseAlphaPanel(current.layout, panelId);
+      return layout === current.layout ? current : { ...current, layout };
+    });
+  }, []);
+
+  const toggleCollapsed = useCallback((panelId: string) => {
     updateAlphaWorkstationState((current) => ({
       ...current,
-      layout: { ...current.layout, grid },
+      layout: toggleAlphaPanelCollapsed(current.layout, panelId),
     }));
   }, []);
 
@@ -194,6 +217,58 @@ function AlphaWorkstationPageContent({ visible }: Props) {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" type="button" variant="outline">
+              {t("workstation.panelList.action")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="max-h-80 min-w-56 overflow-y-auto"
+          >
+            {state.layout.panels.length === 0 ? (
+              <DropdownMenuItem disabled>
+                {t("workstation.panelList.empty")}
+              </DropdownMenuItem>
+            ) : (
+              state.layout.panels.map((panel) => {
+                const descriptor = alphaPanelRegistry.get(panel.type);
+                const symbol = resolveAlphaPanelSymbol(
+                  panel.binding,
+                  state.mainSymbol,
+                );
+                const matching = state.layout.panels.filter(
+                  (candidate) =>
+                    candidate.type === panel.type &&
+                    resolveAlphaPanelSymbol(
+                      candidate.binding,
+                      state.mainSymbol,
+                    ) === symbol,
+                );
+                const title = descriptor ? t(descriptor.titleKey) : panel.type;
+                const label = `${title} · ${symbol}${matching.length > 1 ? ` (${matching.findIndex((candidate) => candidate.id === panel.id) + 1})` : ""}`;
+                return (
+                  <DropdownMenuItem
+                    key={panel.id}
+                    onSelect={() => {
+                      raisePanel(panel.id);
+                      setRevealRequest({ panelId: panel.id });
+                    }}
+                  >
+                    <span className="truncate">{label}</span>
+                    {panel.collapsed ? (
+                      <span className="ml-auto text-muted-foreground">
+                        {t("workstation.panelList.collapsed")}
+                      </span>
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Hint content={t("workstation.sync.range")}>
           <Button
             size="sm"
@@ -272,9 +347,12 @@ function AlphaWorkstationPageContent({ visible }: Props) {
           <AlphaPanelGrid
             state={state}
             registry={alphaPanelRegistry}
-            onGridCommit={commitGrid}
+            onGridItemCommit={commitGridItem}
             onBindingChange={changeBinding}
             onRemovePanel={removePanel}
+            onToggleCollapsed={toggleCollapsed}
+            onRaisePanel={raisePanel}
+            revealRequest={revealRequest}
           />
         </AlphaPanelPool>
       </ChartSyncProvider>

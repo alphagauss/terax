@@ -34,6 +34,7 @@ export type AlphaPanelInstance = {
   type: string;
   binding: AlphaSymbolBinding;
   config: AlphaPanelConfig;
+  collapsed?: boolean;
 };
 
 export type AlphaGridItem = {
@@ -41,6 +42,7 @@ export type AlphaGridItem = {
   x: number;
   y: number;
   w: number;
+  /** 始终保存展开高度，折叠占位不写回。 */
   h: number;
 };
 
@@ -49,6 +51,7 @@ export type AlphaWorkstationLayout = {
   id: string;
   name: string;
   panels: AlphaPanelInstance[];
+  /** 数组从底层到顶层排列，独立于面板菜单的稳定顺序。 */
   grid: AlphaGridItem[];
 };
 

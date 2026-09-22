@@ -187,6 +187,22 @@ describe("AlphaPanelPool", () => {
     expect(seenProps[seenProps.length - 1]?.visible).toBe(true);
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 });
 
+    await act(async () =>
+      renderPool([{ ...panels[0], collapsed: true }], registry, {
+        hostKey: "restored",
+      }),
+    );
+    expect(seenProps[seenProps.length - 1]?.visible).toBe(false);
+    expect(container.querySelector("[data-testid='test-panel']")).toBe(
+      panelElement,
+    );
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 });
+    await act(async () =>
+      renderPool(panels, registry, { hostKey: "restored" }),
+    );
+    expect(seenProps[seenProps.length - 1]?.visible).toBe(true);
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 });
+
     await act(async () => renderPool([], registry));
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 1 });
     expect(panelContainer?.isConnected).toBe(false);

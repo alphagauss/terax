@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 工作台面板的统一标题栏。
- * 标题栏承载拖动手柄、标的跟随或固定切换和删除操作，不接触面板业务内容。
+ * 标题栏承载拖动手柄、标的绑定、折叠与删除操作，不接触面板业务内容。
  */
 
 import { Hint } from "@/components/controls/tooltip";
@@ -11,8 +11,11 @@ import type {
 } from "@/modules/alpha/workstation/model";
 import type { AlphaPanelRegistry } from "@/modules/alpha/workstation/registry";
 import { resolveAlphaPanelSymbol } from "@/modules/alpha/workstation/state";
+import { ALPHA_PANEL_HEADER_HEIGHT } from "@/modules/alpha/workstation/panelGeometry";
 import {
   Delete02Icon,
+  ArrowDown01Icon,
+  ArrowUp01Icon,
   DragDropVerticalIcon,
   Link01Icon,
   PinIcon,
@@ -26,6 +29,7 @@ type Props = {
   mainSymbol: string;
   onBindingChange: (binding: AlphaSymbolBinding) => void;
   onRemove: () => void;
+  onToggleCollapsed: () => void;
 };
 
 /** 渲染与业务面板解耦的工作台标题栏和面板级操作。 */
@@ -35,14 +39,21 @@ export function AlphaPanelChrome({
   mainSymbol,
   onBindingChange,
   onRemove,
+  onToggleCollapsed,
 }: Props) {
   const { t } = useTranslation("alpha");
   const descriptor = registry.get(panel.type);
   const vtSymbol = resolveAlphaPanelSymbol(panel.binding, mainSymbol);
   const followed = panel.binding.mode === "follow";
+  const collapseLabel = t(
+    panel.collapsed ? "workstation.panel.expand" : "workstation.panel.collapse",
+  );
 
   return (
-    <header className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 bg-card/80 px-1.5">
+    <header
+      className="pointer-events-auto relative z-10 flex shrink-0 items-center gap-1 rounded-t border border-border bg-card px-1.5"
+      style={{ height: ALPHA_PANEL_HEADER_HEIGHT }}
+    >
       <div className="alpha-panel-drag-handle flex min-w-0 flex-1 cursor-grab items-center gap-1.5 px-0.5 text-xs active:cursor-grabbing">
         <HugeiconsIcon
           icon={DragDropVerticalIcon}
@@ -98,6 +109,24 @@ export function AlphaPanelChrome({
           </Button>
         </Hint>
       ) : null}
+
+      <Hint content={collapseLabel}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0"
+          aria-label={collapseLabel}
+          aria-expanded={!panel.collapsed}
+          onClick={onToggleCollapsed}
+        >
+          <HugeiconsIcon
+            icon={panel.collapsed ? ArrowDown01Icon : ArrowUp01Icon}
+            size={12}
+            strokeWidth={1.8}
+          />
+        </Button>
+      </Hint>
 
       <Hint content={t("workstation.panel.remove")}>
         <Button

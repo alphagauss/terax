@@ -7,6 +7,9 @@ import type { AlphaWorkstationLayout } from "@/modules/alpha/workstation/model";
 import {
   parseAlphaWorkstationLayout,
   updateAlphaPanelConfig,
+  raiseAlphaPanel,
+  toggleAlphaPanelCollapsed,
+  updateAlphaPanelGeometry,
 } from "@/modules/alpha/workstation/layout";
 import {
   createAlphaPanelRegistry,
@@ -105,7 +108,7 @@ describe("Alpha workstation layout", () => {
     );
   });
 
-  it("拒绝 24 列越界、尺寸不足和面板重叠", () => {
+  it("拒绝 24 列越界和尺寸不足", () => {
     const invalid = validLayout();
     invalid.grid[0] = { panelId: "panel-chart", x: 22, y: 0, w: 3, h: 3 };
     invalid.grid[1] = {
@@ -117,12 +120,64 @@ describe("Alpha workstation layout", () => {
     };
 
     expect(issueCodes(invalid)).toEqual(
-      expect.arrayContaining([
-        "grid-bounds",
-        "panel-min-size",
-        "panel-overlap",
-      ]),
+      expect.arrayContaining(["grid-bounds", "panel-min-size"]),
     );
+  });
+
+  it("允许重叠和空位，恢复时保留坐标、折叠状态及层级", () => {
+    const layout = validLayout();
+    layout.grid[0].y = 20;
+    layout.grid[1] = { ...layout.grid[1], x: 0, y: 20 };
+    layout.panels[0].collapsed = true;
+    const raised = raiseAlphaPanel(layout, "panel-chart");
+    const result = parseAlphaWorkstationLayout(
+      JSON.parse(JSON.stringify(raised)),
+      registry,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.layout.grid).toEqual([layout.grid[1], layout.grid[0]]);
+    expect(result.layout.panels[0].collapsed).toBe(true);
+    expect(raised.panels).toBe(layout.panels);
+  });
+
+  it("收起后拖动只移动目标，展开恢复高度且其他面板不动", () => {
+    const original = validLayout();
+    const collapsed = toggleAlphaPanelCollapsed(original, "panel-chart");
+    expect(collapsed.grid[collapsed.grid.length - 1]).toBe(original.grid[0]);
+    expect(collapsed.panels[0].collapsed).toBe(true);
+    const dragged = updateAlphaPanelGeometry(collapsed, {
+      ...original.grid[0],
+      x: 5,
+      y: 10,
+      h: 1,
+    });
+    const expanded = toggleAlphaPanelCollapsed(dragged, "panel-chart");
+    expect(expanded.panels[0].collapsed).toBe(false);
+    expect(expanded.grid[expanded.grid.length - 1]).toEqual({
+      ...original.grid[0],
+      x: 5,
+      y: 10,
+    });
+    expect(expanded.grid[0]).toBe(original.grid[1]);
+    expect(parseAlphaWorkstationLayout(expanded, registry).ok).toBe(true);
+  });
+
+  it("几何提交不复活已删除的面板，不为未变化的占位创建新布局", () => {
+    const layout = validLayout();
+    expect(
+      updateAlphaPanelGeometry(layout, {
+        ...layout.grid[0],
+        panelId: "deleted",
+      }),
+    ).toBe(layout);
+    expect(updateAlphaPanelGeometry(layout, { ...layout.grid[0] })).toBe(
+      layout,
+    );
+    const collapsed = toggleAlphaPanelCollapsed(layout, "panel-chart");
+    expect(
+      updateAlphaPanelGeometry(collapsed, { ...layout.grid[0], h: 1 }),
+    ).toBe(collapsed);
   });
 
   it("拒绝 singleton 面板的重复实例", () => {

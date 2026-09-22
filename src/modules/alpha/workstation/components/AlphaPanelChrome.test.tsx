@@ -48,6 +48,7 @@ describe("AlphaPanelChrome", () => {
           mainSymbol="000001.SZSE"
           onBindingChange={onBindingChange}
           onRemove={onRemove}
+          onToggleCollapsed={() => undefined}
         />,
       );
     });
@@ -72,6 +73,7 @@ describe("AlphaPanelChrome", () => {
           mainSymbol="000001.SZSE"
           onBindingChange={onBindingChange}
           onRemove={onRemove}
+          onToggleCollapsed={() => undefined}
         />,
       );
     });

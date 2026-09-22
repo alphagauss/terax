@@ -717,22 +717,33 @@ html *::-webkit-scrollbar {
   transition: none;
 }
 
-.alpha-workstation-grid .react-grid-placeholder {
-  border: 1px dashed var(--primary);
+/* 占位层低于所有面板，并覆盖网格库延迟加载的默认红色样式。 */
+.alpha-workstation-grid .react-grid-item.react-grid-placeholder {
+  z-index: 0;
+  pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--muted-foreground) 25%, transparent);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  background: color-mix(in srgb, var(--muted-foreground) 12%, var(--background));
   opacity: 1;
 }
 
 .alpha-workstation-grid .react-grid-item.react-draggable-dragging,
 .alpha-workstation-grid .react-grid-item.resizing {
-  z-index: 30;
   opacity: 0.94;
   box-shadow: 0 12px 32px rgb(0 0 0 / 32%);
 }
 
-.alpha-workstation-grid .react-resizable-handle::after {
-  border-color: var(--muted-foreground);
+/* 缩放预览裁剪固定尺寸内容，提交后才更新图表高度。 */
+.alpha-workstation-grid .react-grid-item.resizing {
+  overflow: hidden;
+}
+
+.alpha-workstation-grid .react-grid-item > .react-resizable-handle::after {
+  border-color: color-mix(in srgb, var(--foreground) 50%, var(--background));
+}
+
+.alpha-workstation-grid .react-resizable-handle {
+  pointer-events: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
