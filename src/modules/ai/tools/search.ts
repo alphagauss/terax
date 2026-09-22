@@ -63,7 +63,7 @@ export function buildSearchTools(ctx: ToolContext) {
 
     grep: tool({
       description:
-        "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
+        "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Continue from next_offset when present. If truncated=true without next_offset, narrow path, include, or pattern. Counts may be incomplete when truncated=true. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
       inputSchema: z
         .object({
           pattern: z.string().min(1),
@@ -89,7 +89,7 @@ export function buildSearchTools(ctx: ToolContext) {
             .max(20)
             .optional()
             .describe(
-              "Lines of context before and after each match. Only valid with output=content.",
+              "Lines of context before and after each match. Defaults to 0; positive values require output=content.",
             ),
           offset: z
             .number()
@@ -113,12 +113,12 @@ export function buildSearchTools(ctx: ToolContext) {
           if (
             input.output !== undefined &&
             input.output !== "content" &&
-            input.context_lines !== undefined
+            (input.context_lines ?? 0) > 0
           ) {
             refinement.addIssue({
               code: "custom",
               path: ["context_lines"],
-              message: "context_lines is only valid with output=content",
+              message: "positive context_lines requires output=content",
             });
           }
         }),

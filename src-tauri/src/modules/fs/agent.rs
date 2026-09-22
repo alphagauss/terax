@@ -2433,7 +2433,8 @@ mod tests {
         })).unwrap())
         };
         for (index, (mutation, expected, reread)) in [
-            (serde_json::json!({ "kind": "write", "path": "a.txt", "content": "first\n", "mode": "create" }), "first", true),
+            (serde_json::json!({ "kind": "write", "path": "a.txt", "content": "first\n", "mode": "create" }), "first", false),
+            (serde_json::json!({ "kind": "patch", "files": [{ "path": "a.txt", "edits": [{ "old_text": "first", "new_text": "authored" }] }] }), "authored", true),
             (serde_json::json!({ "kind": "write", "path": "a.txt", "content": "second\n", "mode": "rewrite" }), "second", true),
             (serde_json::json!({ "kind": "patch", "files": [{ "path": "a.txt", "edits": [{ "old_text": "second", "new_text": "third!" }] }] }), "third!", false),
             (serde_json::json!({ "kind": "patch", "files": [{ "path": "a.txt", "edits": [{ "old_text": "third!", "new_text": "fourth" }] }] }), "fourth", true),

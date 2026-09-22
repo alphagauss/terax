@@ -91,7 +91,7 @@ describe("AI search tools", () => {
         pattern: "literal text",
         path: "src",
         syntax: "literal",
-        output: "count",
+        output: "content",
         context_lines: 2,
         include: ["**/*.ts"],
         offset: 10,
@@ -109,14 +109,14 @@ describe("AI search tools", () => {
       syntax: "literal",
       caseInsensitive: undefined,
       include: ["**/*.ts"],
-      output: "count",
+      output: "content",
       contextLines: 2,
       offset: 10,
       limit: 25,
     });
   });
 
-  it("describes search defaults and rejects context for aggregate output", async () => {
+  it("describes search defaults and only allows zero context for aggregate output", async () => {
     const tools = buildSearchTools(makeContext());
     const grepSchema = asSchema(tools.grep.inputSchema);
     const jsonSchema = await grepSchema.jsonSchema;
@@ -130,13 +130,22 @@ describe("AI search tools", () => {
     expect(properties.limit.description).toContain("Defaults to 30");
     expect(tools.find_files.description).toContain("require approval");
     if (!grepSchema.validate) throw new Error("grep validator missing");
-    expect(
-      await grepSchema.validate({
-        pattern: "needle",
-        output: "files",
-        context_lines: 2,
-      }),
-    ).toMatchObject({ success: false });
+    for (const output of ["files", "count"]) {
+      expect(
+        await grepSchema.validate({
+          pattern: "needle",
+          output,
+          context_lines: 2,
+        }),
+      ).toMatchObject({ success: false });
+      expect(
+        await grepSchema.validate({
+          pattern: "needle",
+          output,
+          context_lines: 0,
+        }),
+      ).toMatchObject({ success: true });
+    }
     expect(
       await grepSchema.validate({
         pattern: "needle",
