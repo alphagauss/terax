@@ -133,6 +133,7 @@ export const ChatMessageResponse = memo(function ChatMessageResponse({
         isAnimating={streaming}
         mode={streaming ? "streaming" : "static"}
         parseIncompleteMarkdown={false}
+        tableMaxHeight={420}
         components={components}
         rehypePlugins={rehypePlugins}
         plugins={streamdownPlugins}

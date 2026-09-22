@@ -68,6 +68,7 @@ export function MarkdownTable({
   const [menu, setMenu] = useState<Action | null>(null);
   const { controls, isAnimating, tableMaxHeight } =
     useContext(StreamdownContext);
+  const maxHeight = tableHeight(tableMaxHeight);
   const { t } = useTranslation("markdown");
   const tableControls =
     typeof controls === "object" ? controls.table : controls;
@@ -239,7 +240,8 @@ export function MarkdownTable({
         {actions()}
         <div
           className="overflow-auto rounded-md border border-border bg-background"
-          style={{ maxHeight: tableHeight(tableMaxHeight) }}
+          data-markdown-table-scroll={maxHeight ? "" : undefined}
+          style={{ maxHeight }}
         >
           {table()}
         </div>

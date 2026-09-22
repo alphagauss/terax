@@ -47,10 +47,7 @@ export function MarkdownCode({
   const block = "data-block" in rest;
   if (!block) {
     return (
-      <code
-        className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
-        {...rest}
-      >
+      <code {...rest} data-streamdown="inline-code">
         {children}
       </code>
     );

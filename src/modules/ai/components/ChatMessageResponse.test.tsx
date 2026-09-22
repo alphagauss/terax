@@ -184,6 +184,12 @@ describe("chat file references", () => {
       );
     });
 
+    const viewport = container.querySelector<HTMLElement>(
+      "[data-markdown-table-scroll]",
+    );
+    expect(viewport?.style.maxHeight).toBe("420px");
+    expect(viewport?.classList.contains("overflow-auto")).toBe(true);
+
     const copy = container.querySelector<HTMLButtonElement>(
       '[aria-label="table.copy"]',
     );

@@ -231,13 +231,13 @@ function MermaidCode({
           dangerouslySetInnerHTML={{ __html: state.svg }}
         />
       ) : state.kind === "error" ? (
-        <pre className="m-0 whitespace-pre-wrap px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+        <pre className="text-foreground">
           {code}
           {"\n\n"}
           <span className="text-destructive">{state.message}</span>
         </pre>
       ) : state.kind === "waiting" ? (
-        <pre className="m-0 whitespace-pre-wrap px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+        <pre className="text-foreground">
           {code}
         </pre>
       ) : (
@@ -418,10 +418,10 @@ function BlockChrome({
   return (
     <div
       data-markdown-code-block
-      className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30"
+      className="not-prose overflow-hidden"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] text-muted-foreground">
           {label}
         </span>
         <CopyButton text={code} />
@@ -435,7 +435,7 @@ function FinalizedCodeBlock({ code, lang }: { code: string; lang: string }) {
   if (!isHighlightable(lang)) {
     return (
       <BlockChrome label={lang} code={code}>
-        <pre className="m-0 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+        <pre className="text-foreground">
           {code}
         </pre>
       </BlockChrome>
@@ -478,14 +478,14 @@ const HighlightedPre = memo(function HighlightedPre({
 
   if (!nodes) {
     return (
-      <pre className="m-0 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+      <pre className="text-foreground">
         {code}
       </pre>
     );
   }
 
   return (
-    <pre className="m-0 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+    <pre className="text-foreground">
       {nodes.map((node, i) =>
         node.kind === "break" ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: 高亮节点是无状态文本，随整段代码重新生成。
