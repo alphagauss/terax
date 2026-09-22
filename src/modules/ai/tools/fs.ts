@@ -6,12 +6,12 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import type { ToolContext } from "./context";
 import {
   accessModeForCall,
   fileOperationNeedsApproval,
   pathNeedsApproval,
 } from "./authorization";
+import type { ToolContext } from "./context";
 import { executeFileMutation, fileEditInputHooks } from "./fileMutation";
 
 /** 创建已知文件读取、完整文件写入和结构化路径操作工具。 */
@@ -23,12 +23,28 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a known UTF-8 text file with 1-based line numbers. Defaults to 2000 lines and returns next_line when more content exists. Use start_line to continue. Repeating the same unchanged range returns unchanged=true unless force=true. Binary, oversized, and special-device paths are refused. Outside-workspace and sensitive paths require approval unless full access is enabled.",
+        "Read a known UTF-8 text file with 1-based line numbers. The response reports end_line, total_lines, next_line, truncated, and line_truncated; continue from next_line when present. line_truncated=true means one long line was only partially returned and cannot be continued by line number, so never use that partial content for a complete rewrite. Repeating the same unchanged range returns unchanged=true unless force=true. Binary, oversized, and special-device paths are refused. Outside-workspace and sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
         path: z.string().min(1),
-        start_line: z.number().int().min(1).optional(),
-        line_count: z.number().int().min(1).max(10_000).optional(),
-        force: z.boolean().optional(),
+        start_line: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("First 1-based line to return. Defaults to 1."),
+        line_count: z
+          .number()
+          .int()
+          .min(1)
+          .max(10_000)
+          .optional()
+          .describe("Maximum lines to return. Defaults to 2000."),
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return the content again even when this exact range and file version were already read. Defaults to false.",
+          ),
       }),
       execute: async ({ path, start_line, line_count, force }) => {
         const approvalRequired = needsPathApproval(path);
@@ -54,11 +70,16 @@ export function buildFsTools(ctx: ToolContext) {
     write_file: tool({
       ...fileEditInputHooks(ctx, "write_file"),
       description:
-        "Create one complete UTF-8 text file, or intentionally rewrite one complete file. Missing parent directories are created automatically. mode defaults to create and refuses an existing target; rewrite requires read_file on the current version first. Use apply_patch for targeted changes. Workspace-local writes run automatically; outside or sensitive paths require approval unless full access is enabled.",
+        "Create one complete UTF-8 text file, or intentionally rewrite one complete file. Missing parent directories are created automatically. mode defaults to create and refuses an existing target. Use rewrite only when the complete current content is known from read_file or the complete file content was authored by this chat; use apply_patch for targeted changes or partially read files. Workspace-local writes run automatically; outside or sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
         path: z.string().min(1),
         content: z.string(),
-        mode: z.enum(["create", "rewrite"]).optional(),
+        mode: z
+          .enum(["create", "rewrite"])
+          .optional()
+          .describe(
+            "Defaults to create, which refuses an existing target. rewrite replaces the complete existing file and requires a current version baseline from read_file or a prior write in this chat.",
+          ),
       }),
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();

@@ -3,13 +3,13 @@
  * 测试锁定固定会话根、动态审批、默认创建模式及统一原生调用边界。
  */
 
-import { asSchema, type ToolExecutionOptions } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolContext } from "./context";
 import {
   getFileEditRuntime,
   releaseFileEditRuntime,
 } from "@/modules/ai/lib/fileEditRuntime";
+import { asSchema, type ToolExecutionOptions } from "ai";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ToolContext } from "./context";
 
 const nativeMock = vi.hoisted(() => ({
   agentFileRead: vi.fn(),
@@ -21,10 +21,10 @@ const nativeMock = vi.hoisted(() => ({
 
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
+import { buildToolApproval } from "./approval";
 import { buildFsTools } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildTools } from "./tools";
-import { buildToolApproval } from "./approval";
 
 const options: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
@@ -96,6 +96,9 @@ describe("AI file tools", () => {
     expect(tool.description).toContain(
       'Example: {"files":[{"path":"a.py","edits":',
     );
+    expect(tool.description).toContain(
+      'must omit the "N| " line-number prefixes',
+    );
     expect(files.description).toContain("JSON array, not a string");
     expect(files.items?.properties?.edits.description).toContain(
       "Ordered exact-text replacements",
@@ -103,6 +106,27 @@ describe("AI file tools", () => {
     expect(files.items?.properties?.path.description).toContain(
       "existing UTF-8 file",
     );
+  });
+
+  it("describes read truncation and complete rewrite requirements", async () => {
+    const tools = buildFsTools(context);
+    const readSchema = await asSchema(tools.read_file.inputSchema).jsonSchema;
+    const writeSchema = await asSchema(tools.write_file.inputSchema).jsonSchema;
+    const readProperties = readSchema.properties as Record<
+      string,
+      { description?: string }
+    >;
+    const writeProperties = writeSchema.properties as Record<
+      string,
+      { description?: string }
+    >;
+
+    expect(tools.read_file.description).toContain("line_truncated=true");
+    expect(readProperties.force.description).toContain("exact range");
+    expect(tools.write_file.description).toContain(
+      "complete current content is known",
+    );
+    expect(writeProperties.mode.description).toContain("Defaults to create");
   });
 
   it("reads through the owner-scoped native backend", async () => {

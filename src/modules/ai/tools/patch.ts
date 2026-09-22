@@ -5,8 +5,8 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import type { ToolContext } from "./context";
 import { accessModeForCall, pathNeedsApproval } from "./authorization";
+import type { ToolContext } from "./context";
 import { executeFileMutation, fileEditInputHooks } from "./fileMutation";
 
 /** 创建支持一个或多个已有文本文件的严格精确补丁工具。 */
@@ -15,7 +15,7 @@ export function buildPatchTools(ctx: ToolContext) {
     apply_patch: tool({
       ...fileEditInputHooks(ctx, "apply_patch"),
       description:
-        'Apply ordered exact-text replacements to one or more existing UTF-8 files. Every file must be read with read_file first. Each non-replace_all old_text must occur exactly once; any invalid edit aborts the whole preparation before writing. Pass files and edits as JSON arrays, never as JSON-encoded strings. Example: {"files":[{"path":"a.py","edits":[{"old_text":"old","new_text":"new"}]}]}. Workspace-local patches run automatically; outside or sensitive paths require approval unless full access is enabled.',
+        'Apply ordered exact-text replacements to one or more existing UTF-8 files. Every file must be read with read_file first. old_text and new_text are raw file content and must omit the "N| " line-number prefixes added by read_file. Each non-replace_all old_text must occur exactly once; any invalid edit aborts the whole preparation before writing. Pass files and edits as JSON arrays, never as JSON-encoded strings. Example: {"files":[{"path":"a.py","edits":[{"old_text":"old","new_text":"new"}]}]}. Workspace-local patches run automatically; outside or sensitive paths require approval unless full access is enabled.',
       inputSchema: z.object({
         files: z
           .array(

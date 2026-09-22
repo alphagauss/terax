@@ -3,7 +3,7 @@
  * 测试锁定固定会话根目录、新参数命名和旧 glob 工具已经移除。
  */
 
-import type { ToolExecutionOptions } from "ai";
+import { asSchema, type ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 
@@ -14,8 +14,8 @@ const nativeMock = vi.hoisted(() => ({
 
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
-import { buildSearchTools } from "./search";
 import { buildToolApproval } from "./approval";
+import { buildSearchTools } from "./search";
 
 const toolOptions: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
@@ -114,6 +114,36 @@ describe("AI search tools", () => {
       offset: 10,
       limit: 25,
     });
+  });
+
+  it("describes search defaults and rejects context for aggregate output", async () => {
+    const tools = buildSearchTools(makeContext());
+    const grepSchema = asSchema(tools.grep.inputSchema);
+    const jsonSchema = await grepSchema.jsonSchema;
+    const properties = jsonSchema.properties as Record<
+      string,
+      { description?: string }
+    >;
+
+    expect(properties.syntax.description).toContain("Defaults to regex");
+    expect(properties.output.description).toContain("Defaults to content");
+    expect(properties.limit.description).toContain("Defaults to 30");
+    expect(tools.find_files.description).toContain("require approval");
+    if (!grepSchema.validate) throw new Error("grep validator missing");
+    expect(
+      await grepSchema.validate({
+        pattern: "needle",
+        output: "files",
+        context_lines: 2,
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      await grepSchema.validate({
+        pattern: "needle",
+        output: "content",
+        context_lines: 2,
+      }),
+    ).toMatchObject({ success: true });
   });
 
   it("does not expose the removed standalone glob tool", () => {

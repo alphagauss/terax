@@ -6,20 +6,30 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import type { ToolContext } from "./context";
 import { accessModeForCall, pathNeedsApproval } from "./authorization";
+import type { ToolContext } from "./context";
 
 /** 创建路径发现和文本内容搜索工具。 */
 export function buildSearchTools(ctx: ToolContext) {
   return {
     find_files: tool({
       description:
-        "Discover files and directories by path. Without recursive it lists immediate children; with recursive=true it walks the tree and honors ignore files. glob matches relative paths, for example '**/*.ts'. Results are paged with offset/limit. Use grep to search file contents.",
+        "Discover files and directories by path. Without recursive it lists immediate children; with recursive=true it walks the tree and honors ignore files. glob matches relative paths, for example '**/*.ts'. Results are paged with offset/limit. Use grep to search file contents. Outside-workspace and sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
         path: z.string().min(1).optional(),
         glob: z.string().min(1).optional(),
-        recursive: z.boolean().optional(),
-        include_directories: z.boolean().optional(),
+        recursive: z
+          .boolean()
+          .optional()
+          .describe(
+            "Walk the full tree instead of listing immediate children. Defaults to false.",
+          ),
+        include_directories: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include directories in results. Defaults to true for immediate listing and false for recursive search.",
+          ),
         include_hidden: z.boolean().optional(),
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(2_000).optional(),
@@ -54,17 +64,64 @@ export function buildSearchTools(ctx: ToolContext) {
     grep: tool({
       description:
         "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
-      inputSchema: z.object({
-        pattern: z.string().min(1),
-        path: z.string().min(1).optional(),
-        syntax: z.enum(["literal", "regex"]).optional(),
-        case_insensitive: z.boolean().optional(),
-        include: z.array(z.string().min(1)).max(32).optional(),
-        output: z.enum(["content", "files", "count"]).optional(),
-        context_lines: z.number().int().min(0).max(20).optional(),
-        offset: z.number().int().min(0).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-      }),
+      inputSchema: z
+        .object({
+          pattern: z.string().min(1),
+          path: z.string().min(1).optional(),
+          syntax: z
+            .enum(["literal", "regex"])
+            .optional()
+            .describe(
+              "Pattern syntax. Defaults to regex; use literal for exact source text containing punctuation.",
+            ),
+          case_insensitive: z.boolean().optional(),
+          include: z.array(z.string().min(1)).max(32).optional(),
+          output: z
+            .enum(["content", "files", "count"])
+            .optional()
+            .describe(
+              "Return matching lines, unique file paths, or per-file counts. Defaults to content.",
+            ),
+          context_lines: z
+            .number()
+            .int()
+            .min(0)
+            .max(20)
+            .optional()
+            .describe(
+              "Lines of context before and after each match. Only valid with output=content.",
+            ),
+          offset: z
+            .number()
+            .int()
+            .min(0)
+            .optional()
+            .describe(
+              "Pagination offset into matching lines, file paths, or count records according to output.",
+            ),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(500)
+            .optional()
+            .describe(
+              "Maximum matching lines, file paths, or count records to return. Defaults to 30.",
+            ),
+        })
+        .superRefine((input, refinement) => {
+          if (
+            input.output !== undefined &&
+            input.output !== "content" &&
+            input.context_lines !== undefined
+          ) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["context_lines"],
+              message: "context_lines is only valid with output=content",
+            });
+          }
+        }),
       execute: async (input) => {
         const approvalRequired =
           ctx.supportsApprovals &&
