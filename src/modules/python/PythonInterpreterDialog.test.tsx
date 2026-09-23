@@ -5,7 +5,7 @@
 
 // @vitest-environment happy-dom
 
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -59,6 +59,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { PythonInterpreterDialog } from "@/modules/python/PythonInterpreterDialog";
+import {
+  WorkbenchPageDialog,
+  WorkbenchPageScope,
+} from "@/modules/workbench/WorkbenchPageOverlays";
 
 const reactTestEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -115,5 +119,110 @@ describe("PythonInterpreterDialog", () => {
     expect(container.textContent).not.toContain("probeFailed");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     act(() => root.unmount());
+  });
+
+  it("页内解释器选择随标签隐藏保留搜索，关闭后只解除自身模态", async () => {
+    const workspace = { kind: "local" as const };
+    function Harness({ visible }: { visible: boolean }) {
+      const [open, setOpen] = useState(true);
+      return (
+        <WorkbenchPageScope visible={visible} focused={visible}>
+          <WorkbenchPageDialog open title="settings" onOpenChange={() => {}}>
+            <PythonInterpreterDialog
+              scope="page"
+              open={open}
+              onOpenChange={setOpen}
+              root={null}
+              workspace={workspace}
+              onSelect={() => {}}
+            />
+          </WorkbenchPageDialog>
+        </WorkbenchPageScope>
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      const render = async (visible: boolean) =>
+        act(async () => root.render(<Harness visible={visible} />));
+      await render(true);
+      const input = container.querySelector("input");
+      if (!input) throw new Error("Picker did not mount");
+      input.value = "python draft";
+      const child = input.closest<HTMLElement>("[data-workbench-page-overlay]");
+      const parent = [
+        ...container.querySelectorAll<HTMLElement>(
+          "[data-workbench-page-overlay]",
+        ),
+      ].find((layer) => layer !== child);
+      expect(parent?.inert).toBe(true);
+      expect(document.body.style.pointerEvents).toBe("");
+      await render(false);
+      expect(child?.inert).toBe(true);
+      await render(true);
+      expect(container.querySelector("input")).toBe(input);
+      expect(input.value).toBe("python draft");
+      expect(mocks.list).toHaveBeenCalledOnce();
+      const close = [...(child?.querySelectorAll("button") ?? [])].find(
+        (button) => button.textContent === "close",
+      );
+      await act(async () => close?.click());
+      expect(
+        container.querySelectorAll("[data-workbench-page-overlay]"),
+      ).toHaveLength(1);
+      expect(parent?.inert).toBe(false);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+
+  it("原生文件选择尚未返回时阻止重复浏览和提前关闭，取消后解除占用", async () => {
+    let finish: (value: null) => void = () => {};
+    mocks.open.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onOpenChange = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <WorkbenchPageScope visible focused>
+            <PythonInterpreterDialog
+              scope="page"
+              open
+              onOpenChange={onOpenChange}
+              root={null}
+              workspace={{ kind: "local" }}
+              onSelect={() => {}}
+            />
+          </WorkbenchPageScope>,
+        ),
+      );
+      const browse = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "browse",
+      );
+      const close = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "close",
+      );
+      await act(async () => browse?.click());
+      expect(browse?.disabled).toBe(true);
+      await act(async () => {
+        browse?.click();
+        close?.click();
+      });
+      expect(mocks.open).toHaveBeenCalledOnce();
+      expect(onOpenChange).not.toHaveBeenCalled();
+      await act(async () => finish(null));
+      expect(browse?.disabled).toBe(false);
+      await act(async () => close?.click());
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      act(() => root.unmount());
+    }
   });
 });

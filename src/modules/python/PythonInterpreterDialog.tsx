@@ -21,6 +21,7 @@ import {
   type PythonInterpreter,
   probePythonInterpreter,
 } from "@/modules/python/native";
+import { WorkbenchPageDialog } from "@/modules/workbench/WorkbenchPageOverlays";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useState } from "react";
@@ -34,6 +35,8 @@ type Props = {
   selectedPath?: string | null;
   title?: string;
   onSelect: (interpreter: PythonInterpreter) => Promise<void> | void;
+  /** 页内模式继承调用方工作页的浮层作用域，默认保留全窗口行为。 */
+  scope?: "window" | "page";
 };
 
 type InterpreterGroup = "workspace" | "environments" | "system";
@@ -53,6 +56,7 @@ export function PythonInterpreterDialog({
   selectedPath,
   title,
   onSelect,
+  scope = "window",
 }: Props) {
   const { t } = useTranslation("python");
   const [interpreters, setInterpreters] = useState<PythonInterpreter[]>([]);
@@ -126,41 +130,42 @@ export function PythonInterpreterDialog({
   /** 在 Local Workspace 中通过系统文件选择器探测列表外解释器。 */
   const browse = async () => {
     if (workspace.kind !== "local" || selecting) return;
-    let selected: string | string[] | null;
+    // 原生选择器等待期间也属于同一次选择，防止关闭后旧结果继续提交。
+    setSelecting(true);
+    setError(null);
+    let errorKey: "browseFailed" | "probeFailed" = "browseFailed";
     try {
-      selected = await openDialog({
+      const selected = await openDialog({
         directory: false,
         multiple: false,
         title: t("browseTitle"),
       });
-    } catch (reason) {
-      console.warn("[python] interpreter browser failed", reason);
-      setError(t("browseFailed"));
-      return;
-    }
-    if (!selected || Array.isArray(selected)) return;
-    setSelecting(true);
-    setError(null);
-    try {
+      if (!selected || Array.isArray(selected)) return;
+      errorKey = "probeFailed";
       const interpreter = await probePythonInterpreter(selected, workspace);
       await commitSelection(interpreter);
     } catch (reason) {
-      console.warn("[python] interpreter probe failed", reason);
-      setError(t("probeFailed"));
+      console.warn(`[python] interpreter ${errorKey}`, reason);
+      setError(t(errorKey));
     } finally {
       setSelecting(false);
     }
   };
 
+  const Dialog = scope === "page" ? WorkbenchPageDialog : CommandDialog;
   return (
-    <CommandDialog
+    <Dialog
       open={open}
       onOpenChange={(next) => !selecting && onOpenChange(next)}
       title={title ?? t("title")}
-      description={t("description")}
-      className="w-[min(42rem,calc(100vw-2rem))] max-w-none"
+      {...(scope === "window" ? { description: t("description") } : {})}
+      className={
+        scope === "page"
+          ? "w-[42rem]"
+          : "w-[min(42rem,calc(100vw-2rem))] max-w-none"
+      }
     >
-      <Command className="rounded-4xl">
+      <Command className={scope === "page" ? "rounded-none" : "rounded-4xl"}>
         <CommandInput placeholder={t("searchPlaceholder")} disabled={loading} />
         <CommandList className="max-h-88">
           {loading ? (
@@ -235,6 +240,6 @@ export function PythonInterpreterDialog({
           </div>
         </CommandList>
       </Command>
-    </CommandDialog>
+    </Dialog>
   );
 }
