@@ -13,7 +13,8 @@ vi.mock("react-i18next", async (importOriginal) => ({
   }),
 }));
 
-it("opens saved statistics on focus and excludes other turns and subagents", async () => {
+it("opens saved statistics on hover and excludes other turns and subagents", async () => {
+  vi.useFakeTimers();
   const sessionId = "metrics-ui";
   restoreUsage(
     sessionId,
@@ -50,7 +51,17 @@ it("opens saved statistics on focus and excludes other turns and subagents", asy
       root.render(<TurnMetrics sessionId={sessionId} turnId="old" />),
     );
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    await act(async () => container.querySelector("button")?.focus());
+    await act(async () =>
+      container
+        .querySelector("button")
+        ?.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            pointerType: "mouse",
+          }),
+        ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(800));
     const panel = document.querySelector('[role="tooltip"]');
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(panel?.textContent).toContain("chat.metrics.output300");
@@ -64,5 +75,6 @@ it("opens saved statistics on focus and excludes other turns and subagents", asy
     await act(async () => root.unmount());
     container.remove();
     releaseUsage(sessionId);
+    vi.useRealTimers();
   }
 });

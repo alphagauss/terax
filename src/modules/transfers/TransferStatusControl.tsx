@@ -41,7 +41,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { TFunction } from "i18next";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -72,6 +72,7 @@ function TransferStatusPanel() {
   const removeLocalMany = useTransferStore((state) => state.removeLocalMany);
   const panelOpen = useTransferStore((state) => state.panelOpen);
   const setPanelOpen = useTransferStore((state) => state.setPanelOpen);
+  const restorePanelFocus = useRef(false);
   const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
   const [clearing, setClearing] = useState<"completed" | "all" | null>(null);
   useTransferBridge();
@@ -133,7 +134,13 @@ function TransferStatusPanel() {
   };
 
   return (
-    <Popover open={panelOpen} onOpenChange={setPanelOpen}>
+    <Popover
+      open={panelOpen}
+      onOpenChange={(open) => {
+        if (open) restorePanelFocus.current = true;
+        setPanelOpen(open);
+      }}
+    >
       <PopoverTrigger asChild>
         <Hint content={t("transfers.title")}>
           <button
@@ -177,6 +184,17 @@ function TransferStatusPanel() {
         </Hint>
       </PopoverTrigger>
       <PopoverContent
+        onOpenAutoFocus={(event) => {
+          // 后台任务只展示进度；主动打开或进入面板后才接管焦点。
+          if (!restorePanelFocus.current) event.preventDefault();
+        }}
+        onFocusCapture={() => {
+          restorePanelFocus.current = true;
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!restorePanelFocus.current) event.preventDefault();
+          restorePanelFocus.current = false;
+        }}
         side="top"
         align="end"
         sideOffset={6}
