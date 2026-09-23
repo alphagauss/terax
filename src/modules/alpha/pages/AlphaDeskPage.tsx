@@ -71,6 +71,23 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
         </p>
       )}
       <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label={t("desk.watchlistTools")}
+          className="flex w-8 shrink-0 flex-col items-center gap-2 border-r py-2"
+        >
+          <Hint content={t("desk.watchlist")}>
+            <Button
+              size="icon-sm"
+              variant={state.leftOpen ? "secondary" : "ghost"}
+              aria-label={t("desk.watchlist")}
+              aria-expanded={state.leftOpen}
+              aria-controls={`${id}-watchlist`}
+              onClick={() => set("leftOpen", !state.leftOpen)}
+            >
+              <HugeiconsIcon icon={GridIcon} size={16} />
+            </Button>
+          </Hint>
+        </nav>
         <div className="app-scrollbar min-w-0 flex-1 overflow-x-auto">
           <div
             className="flex h-full"
@@ -121,17 +138,6 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
                 aria-label={t("desk.views")}
                 className="flex h-10 shrink-0 items-center gap-1 border-b px-2"
               >
-                {!state.leftOpen && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-controls={`${id}-watchlist`}
-                    aria-expanded={false}
-                    onClick={() => set("leftOpen", true)}
-                  >
-                    {t("desk.watchlist")}
-                  </Button>
-                )}
                 {(["market", "backtests"] as const).map((view) => (
                   <Button
                     key={view}
@@ -223,20 +229,8 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
         </div>
         <nav
           aria-label={t("desk.tools")}
-          className="flex w-10 shrink-0 flex-col items-center gap-2 border-l py-2"
+          className="flex w-8 shrink-0 flex-col items-center gap-2 border-l py-2"
         >
-          <Hint content={t("desk.watchlist")}>
-            <Button
-              size="icon-sm"
-              variant={state.leftOpen ? "secondary" : "ghost"}
-              aria-label={t("desk.watchlist")}
-              aria-expanded={state.leftOpen}
-              aria-controls={`${id}-watchlist`}
-              onClick={() => set("leftOpen", !state.leftOpen)}
-            >
-              <HugeiconsIcon icon={GridIcon} size={16} />
-            </Button>
-          </Hint>
           {(
             [
               { key: "security", icon: Database01Icon },

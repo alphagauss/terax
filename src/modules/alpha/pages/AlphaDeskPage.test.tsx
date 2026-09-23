@@ -111,6 +111,22 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   });
   const chart = container.querySelector("[data-chart]");
   expect(chart).not.toBeNull();
+  const leftTools = container.querySelector(
+    'nav[aria-label="desk.watchlistTools"]',
+  );
+  const rightTools = container.querySelector('nav[aria-label="desk.tools"]');
+  expect(
+    leftTools?.querySelector('button[aria-label="desk.watchlist"]'),
+  ).not.toBeNull();
+  expect(
+    rightTools?.querySelector('button[aria-label="desk.watchlist"]'),
+  ).toBeNull();
+  expect(
+    rightTools?.querySelector('button[aria-label="desk.security"]'),
+  ).not.toBeNull();
+  expect(
+    container.querySelectorAll('button[aria-label="desk.watchlist"]'),
+  ).toHaveLength(1);
   const click = async (label: string) => {
     const button = [
       ...container.querySelectorAll<HTMLButtonElement>("button"),
