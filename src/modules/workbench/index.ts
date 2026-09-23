@@ -28,4 +28,12 @@ export { useStartupWarmup } from "@/modules/workbench/useStartupWarmup";
 export { useWorkbench } from "@/modules/workbench/useWorkbench";
 export type { WorkbenchViewServices } from "@/modules/workbench/viewRegistry";
 export type { WorkbenchChromeActions } from "@/modules/workbench/WorkbenchGrid";
+export {
+  useWorkbenchOverlayContainer,
+  useWorkbenchPageActivity,
+  WorkbenchPageDialog,
+  type WorkbenchPageDialogProps,
+  type WorkbenchPageOverlayProps,
+  WorkbenchPageWindow,
+} from "@/modules/workbench/WorkbenchPageOverlays";
 export { WorkbenchSurface } from "@/modules/workbench/WorkbenchSurface";
