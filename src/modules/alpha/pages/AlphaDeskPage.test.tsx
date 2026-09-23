@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ReactNode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mocks = vi.hoisted(() => ({
   values: {} as Record<string, unknown>,
@@ -78,6 +79,7 @@ vi.mock("@/modules/alpha/scenes/TaskMonitorScene", () => ({
 }));
 
 import { AlphaDeskPage } from "@/modules/alpha/pages/AlphaDeskPage";
+import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 
 let root: ReturnType<typeof createRoot> | undefined;
 let client: QueryClient | undefined;
@@ -100,7 +102,9 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   const render = (visible: boolean) =>
     root?.render(
       <QueryClientProvider client={queryClient}>
-        <AlphaDeskPage visible={visible} />
+        <WorkbenchPageScope visible={visible} focused={visible}>
+          <AlphaDeskPage visible={visible} />
+        </WorkbenchPageScope>
       </QueryClientProvider>,
     );
   await act(async () => {
@@ -165,6 +169,16 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(mocks.visible.watchlist).toBe(false);
   expect(container.querySelector("[data-chart]")).toBe(chart);
   expect(mocks.mounts).toEqual({ chart: 1, backtests: 1 });
+  await click("desk.tasks");
+  await click("desk.openTaskWindow");
+  const taskWindow = container.querySelector(
+    '[data-workbench-page-overlay="window"]',
+  );
+  expect(taskWindow).not.toBeNull();
   await act(async () => render(false));
   expect(Object.values(mocks.visible).every((value) => !value)).toBe(true);
+  await act(async () => render(true));
+  expect(
+    container.querySelector('[data-workbench-page-overlay="window"]'),
+  ).toBe(taskWindow);
 });

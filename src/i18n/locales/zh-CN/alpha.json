@@ -250,6 +250,7 @@
           "select": "请选择一个指标进行配置。",
           "loadError": "无法加载指标目录。",
           "invalidParams": "请检查指标参数范围。",
+          "targetRemoved": "此指标已被移除。请关闭对话框，或选择指标新建。",
           "paneLimit": "每张图最多支持 4 个独立指标窗格。",
           "totalLimit": "每张图最多支持 8 个指标。"
         }
@@ -434,6 +435,7 @@
     "backtests": "回测",
     "security": "证券资料",
     "tasks": "任务",
+    "openTaskWindow": "打开浮窗",
     "views": "分析视图",
     "watchlistTools": "自选工具栏",
     "tools": "辅助面板",

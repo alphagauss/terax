@@ -14,13 +14,14 @@ import { BacktestResultsScene } from "@/modules/alpha/scenes/BacktestResultsScen
 import { SecurityDetailsScene } from "@/modules/alpha/scenes/SecurityDetailsScene";
 import { TaskMonitorScene } from "@/modules/alpha/scenes/TaskMonitorScene";
 import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
+import { WorkbenchPageWindow } from "@/modules/workbench/WorkbenchPageOverlays";
 import {
   ChartAnalysisIcon,
   Database01Icon,
   GridIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 /** 为三栏页接入与其他 Alpha 页面相同的查询缓存和服务边界。 */
@@ -38,6 +39,7 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
   const { t } = useTranslation("alpha");
   const preferences = useAlphaDeskPreferences();
   const id = useId();
+  const [taskWindowOpen, setTaskWindowOpen] = useState(false);
   const state = preferences.data;
   if (!state)
     return (
@@ -199,6 +201,15 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
                 <strong className="text-xs">
                   {state.right && t(`desk.${state.right}`)}
                 </strong>
+                {state.right === "tasks" && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setTaskWindowOpen(true)}
+                  >
+                    {t("desk.openTaskWindow")}
+                  </Button>
+                )}
                 <Button
                   size="xs"
                   variant="ghost"
@@ -252,6 +263,14 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
           ))}
         </nav>
       </div>
+      <WorkbenchPageWindow
+        open={taskWindowOpen}
+        onOpenChange={setTaskWindowOpen}
+        title={t("desk.tasks")}
+        className="w-96"
+      >
+        <TaskMonitorScene visible={visible && taskWindowOpen} />
+      </WorkbenchPageWindow>
     </div>
   );
 }

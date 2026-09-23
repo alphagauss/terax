@@ -250,6 +250,7 @@
           "select": "Select an indicator to configure.",
           "loadError": "Could not load the indicator catalog.",
           "invalidParams": "Check the indicator parameter ranges.",
+          "targetRemoved": "This indicator has been removed. Close this dialog or select an indicator to add a new one.",
           "paneLimit": "A chart can have at most 4 separate indicator panes.",
           "totalLimit": "A chart can have at most 8 indicators."
         }
@@ -434,6 +435,7 @@
     "backtests": "Backtests",
     "security": "Security details",
     "tasks": "Tasks",
+    "openTaskWindow": "Open floating window",
     "views": "Analysis views",
     "watchlistTools": "Watchlist tools",
     "tools": "Utility panels",

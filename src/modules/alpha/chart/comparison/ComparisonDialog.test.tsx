@@ -32,6 +32,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import ComparisonDialog from "@/modules/alpha/chart/comparison/ComparisonDialog";
+import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 
 const reactTestEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -57,16 +58,19 @@ describe("ComparisonDialog", () => {
 
   it("排除主标的和已选标的，并为新增标的分配未使用颜色", () => {
     const onChange = vi.fn();
+    const onOpenChange = vi.fn();
     act(() => {
       root?.render(
-        <ComparisonDialog
-          open={true}
-          mainSymbol="MAIN.SSE"
-          interval="d"
-          comparisons={[{ vtSymbol: "SELECTED.SSE", color: "#4daafc" }]}
-          onOpenChange={vi.fn()}
-          onChange={onChange}
-        />,
+        <WorkbenchPageScope visible focused>
+          <ComparisonDialog
+            open={true}
+            mainSymbol="MAIN.SSE"
+            interval="d"
+            comparisons={[{ vtSymbol: "SELECTED.SSE", color: "#4daafc" }]}
+            onOpenChange={onOpenChange}
+            onChange={onChange}
+          />
+        </WorkbenchPageScope>,
       );
     });
 
@@ -82,6 +86,14 @@ describe("ComparisonDialog", () => {
       { vtSymbol: "SELECTED.SSE", color: "#4daafc" },
       { vtSymbol: "CANDIDATE.SSE", color: "#d9a441" },
     ]);
+    const backdrop = container.querySelector("[data-workbench-page-backdrop]");
+    expect(backdrop).not.toBeNull();
+    act(() => {
+      backdrop?.dispatchEvent(
+        new PointerEvent("pointerdown", { button: 0, bubbles: true }),
+      );
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("达到三个标的后禁用新增，并回传合法颜色修改", () => {
@@ -93,14 +105,16 @@ describe("ComparisonDialog", () => {
     ];
     act(() => {
       root?.render(
-        <ComparisonDialog
-          open={true}
-          mainSymbol="MAIN.SSE"
-          interval="d"
-          comparisons={comparisons}
-          onOpenChange={vi.fn()}
-          onChange={onChange}
-        />,
+        <WorkbenchPageScope visible focused>
+          <ComparisonDialog
+            open={true}
+            mainSymbol="MAIN.SSE"
+            interval="d"
+            comparisons={comparisons}
+            onOpenChange={vi.fn()}
+            onChange={onChange}
+          />
+        </WorkbenchPageScope>,
       );
     });
 
