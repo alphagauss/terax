@@ -1,10 +1,6 @@
-import { useEffect, useRef } from "react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import {
-  SHORTCUTS,
-  matchBinding,
-  type ShortcutId,
-} from "../shortcuts";
+import { useEffect, useRef } from "react";
+import { matchBinding, SHORTCUTS, type ShortcutId } from "../shortcuts";
 
 export type ShortcutHandler = (e: KeyboardEvent) => void;
 export type ShortcutHandlers = Partial<Record<ShortcutId, ShortcutHandler>>;
@@ -34,6 +30,16 @@ export function useGlobalShortcuts(
         const bindings = userShortcuts[s.id] || s.defaultBindings;
         const isMatch = bindings.some((b) => matchBinding(e, b, s.id));
         if (!isMatch) continue;
+        // 浮层输入不能透传给底层编辑器、终端或查找，宿主导航快捷键仍然可用。
+        if (
+          e.target instanceof Element &&
+          e.target.closest("[data-workbench-page-overlay]") &&
+          (s.id.startsWith("editor.") ||
+            s.id.startsWith("blocks.") ||
+            s.id === "terminal.clear" ||
+            s.id === "search.focus")
+        )
+          return;
         if (options?.isDisabled?.(s.id, e)) return;
         const h = handlers[s.id];
         if (!h) return;

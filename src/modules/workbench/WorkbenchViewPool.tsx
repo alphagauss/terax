@@ -12,6 +12,7 @@ import {
   WorkbenchRegisteredView,
   type WorkbenchViewServices,
 } from "@/modules/workbench/viewRegistry";
+import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 import {
   type RefObject,
   useEffect,
@@ -137,12 +138,14 @@ function PooledView({
       onMouseDownCapture={() => services.onFocusTab(tab.id)}
       onFocusCapture={() => services.onFocusTab(tab.id)}
     >
-      <WorkbenchRegisteredView
-        tab={tab}
-        visible={visible}
-        focused={focused}
-        services={services}
-      />
+      <WorkbenchPageScope visible={visible} focused={focused}>
+        <WorkbenchRegisteredView
+          tab={tab}
+          visible={visible}
+          focused={focused}
+          services={services}
+        />
+      </WorkbenchPageScope>
     </div>,
     container,
   );
