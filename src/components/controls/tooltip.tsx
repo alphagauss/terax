@@ -16,8 +16,6 @@ import {
   createContext,
   type ReactElement,
   type ReactNode,
-  type Ref,
-  type RefObject,
   useCallback,
   useContext,
   useEffect,
@@ -28,69 +26,55 @@ import {
 
 type TooltipGroupValue = {
   dismissEpoch: number;
-  canOpen: () => boolean;
+  suspended: { current: boolean };
+  lastClosedAt: { current: number };
 };
 
 type TooltipInstanceValue = {
-  trigger: RefObject<HTMLElement | null>;
+  hover: (element: HTMLElement) => void;
+  leave: () => void;
+  dismiss: () => void;
 };
 
 const TooltipGroup = createContext<TooltipGroupValue | null>(null);
 const TooltipInstance = createContext<TooltipInstanceValue | null>(null);
+// 独立延迟分组仍共用一个可见提示，避免跨面板移动时叠加。
+let activeTooltip:
+  | { dismiss: () => void; group: TooltipGroupValue }
+  | undefined;
 
 export const TOOLTIP_DELAY_MS = 800;
 export const TOOLTIP_SKIP_DELAY_MS = 500;
 
 export function TooltipProvider({ children }: { children: ReactNode }) {
   const suspended = useRef(typeof document !== "undefined" && document.hidden);
+  const lastClosedAt = useRef(Number.NEGATIVE_INFINITY);
   const [dismissEpoch, setDismissEpoch] = useState(0);
 
   useEffect(() => {
     const suspend = () => {
       suspended.current = true;
+      lastClosedAt.current = Number.NEGATIVE_INFINITY;
       setDismissEpoch((value) => value + 1);
-    };
-    const resumeFromInput = () => {
-      suspended.current = false;
     };
     const onVisibilityChange = () => {
       if (document.hidden) suspend();
     };
-    const suppressRestoredFocus = (event: FocusEvent) => {
-      // WebView 恢复时会重新派发旧 activeElement 的焦点事件，不能把它当作键盘导航。
-      if (suspended.current) event.stopImmediatePropagation();
-    };
-
     window.addEventListener("blur", suspend);
     document.addEventListener("visibilitychange", onVisibilityChange);
-    document.addEventListener("focusin", suppressRestoredFocus, true);
-    document.addEventListener("pointermove", resumeFromInput, true);
-    document.addEventListener("pointerdown", resumeFromInput, true);
-    document.addEventListener("keydown", resumeFromInput, true);
     return () => {
       window.removeEventListener("blur", suspend);
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      document.removeEventListener("focusin", suppressRestoredFocus, true);
-      document.removeEventListener("pointermove", resumeFromInput, true);
-      document.removeEventListener("pointerdown", resumeFromInput, true);
-      document.removeEventListener("keydown", resumeFromInput, true);
     };
   }, []);
 
-  const canOpen = useCallback(() => !suspended.current, []);
   const group = useMemo(
-    () => ({ dismissEpoch, canOpen }),
-    [dismissEpoch, canOpen],
+    () => ({ dismissEpoch, suspended, lastClosedAt }),
+    [dismissEpoch],
   );
-
   return (
     <TooltipGroup value={group}>
-      <BaseTooltipProvider
-        delayDuration={TOOLTIP_DELAY_MS}
-        skipDelayDuration={TOOLTIP_SKIP_DELAY_MS}
-      >
-        {children}
-      </BaseTooltipProvider>
+      <BaseTooltipProvider>{children}</BaseTooltipProvider>
     </TooltipGroup>
   );
 }
@@ -122,38 +106,83 @@ function GroupedTooltip({
     onChange: onOpenChange,
     caller: "Tooltip",
   });
-  const trigger = useRef<HTMLElement | null>(null);
-  const handledDismissEpoch = useRef(0);
-  const instance = useMemo(() => ({ trigger }), []);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hovered = useRef(false);
+  const handledDismissEpoch = useRef(group.dismissEpoch);
+  const leave = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    hovered.current = false;
+  }, []);
+  const dismiss = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    setOpen(false);
+  }, [setOpen]);
 
   useEffect(() => {
-    if (group.dismissEpoch <= handledDismissEpoch.current) return;
+    if (handledDismissEpoch.current === group.dismissEpoch) return;
     handledDismissEpoch.current = group.dismissEpoch;
-    if (!open) return;
-    const element = trigger.current;
-    if (!element) {
-      setOpen(false);
-      return;
-    }
-    // 走 Radix 自身的 blur 关闭路径以同步分组计时，但不改变真实 DOM 焦点。
-    const event = new FocusEvent("focusout", {
-      bubbles: true,
-      relatedTarget: null,
-    });
-    element.dispatchEvent(event);
-  }, [group.dismissEpoch, open, setOpen]);
+    leave();
+    dismiss();
+  }, [group.dismissEpoch, leave, dismiss]);
+  useEffect(() => leave, [leave]);
 
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (!next || group.canOpen()) setOpen(next);
+  useEffect(() => {
+    if (!open) return;
+    activeTooltip?.dismiss();
+    activeTooltip = { dismiss, group };
+    return () => {
+      if (activeTooltip?.dismiss === dismiss) activeTooltip = undefined;
+      if (!group.suspended.current) group.lastClosedAt.current = Date.now();
+    };
+  }, [open, dismiss, group]);
+
+  const hover = useCallback(
+    (element: HTMLElement) => {
+      if (document.hidden || isExpandedPopup(element)) {
+        dismiss();
+        return;
+      }
+      group.suspended.current = false;
+      if (hovered.current) return;
+      hovered.current = true;
+      const show = () => {
+        timer.current = undefined;
+        if (!group.suspended.current && !isExpandedPopup(element))
+          setOpen(true);
+      };
+      if (
+        activeTooltip?.group === group ||
+        Date.now() - group.lastClosedAt.current < TOOLTIP_SKIP_DELAY_MS
+      )
+        show();
+      else timer.current = setTimeout(show, TOOLTIP_DELAY_MS);
     },
-    [group, setOpen],
+    [group, setOpen, dismiss],
+  );
+  const instance = useMemo(
+    () => ({ hover, leave, dismiss }),
+    [hover, leave, dismiss],
   );
 
   return (
     <TooltipInstance value={instance}>
-      <BaseTooltip {...props} open={open} onOpenChange={handleOpenChange} />
+      <BaseTooltip
+        {...props}
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) dismiss();
+        }}
+      />
     </TooltipInstance>
+  );
+}
+
+function isExpandedPopup(element: HTMLElement) {
+  return (
+    element.hasAttribute("aria-haspopup") &&
+    element.getAttribute("aria-expanded") === "true"
   );
 }
 
@@ -173,32 +202,53 @@ export function TooltipContent({
   );
 }
 
-/** 禁用按钮仍响应指针悬停；点击和键盘禁用继续由原生 disabled 保证。 */
+/** 只由鼠标悬停打开提示；禁用按钮仍可解释原因，焦点和点击继续传给业务控件。 */
 export function TooltipTrigger({
   className,
-  ref,
+  onFocus,
+  onPointerMove,
+  onPointerLeave,
+  onPointerDown,
+  onClick,
   ...props
 }: ComponentProps<typeof BaseTooltipTrigger>) {
   const instance = useContext(TooltipInstance);
-  const handleRef = useCallback(
-    (node: HTMLButtonElement | null) => {
-      if (instance) instance.trigger.current = node;
-      setRef(ref, node);
-    },
-    [instance, ref],
-  );
+  const popupExpanded =
+    Boolean(props["aria-haspopup"]) &&
+    String(props["aria-expanded"]) === "true";
+  useEffect(() => {
+    if (popupExpanded) instance?.dismiss();
+  }, [popupExpanded, instance]);
   return (
     <BaseTooltipTrigger
-      className={cn("disabled:pointer-events-auto!", className)}
-      ref={handleRef}
       {...props}
+      className={cn("disabled:pointer-events-auto!", className)}
+      onFocus={(event) => {
+        onFocus?.(event);
+        event.preventDefault();
+      }}
+      onPointerMove={(event) => {
+        onPointerMove?.(event);
+        if (!event.defaultPrevented && event.pointerType === "mouse") {
+          instance?.hover(event.currentTarget);
+        }
+        // 悬停计时由项目拥有，窗口失活可直接取消，不派发模拟焦点事件。
+        event.preventDefault();
+      }}
+      onPointerLeave={(event) => {
+        onPointerLeave?.(event);
+        instance?.leave();
+      }}
+      onClick={(event) => {
+        onClick?.(event);
+        instance?.dismiss();
+      }}
+      onPointerDown={(event) => {
+        onPointerDown?.(event);
+        instance?.dismiss();
+      }}
     />
   );
-}
-
-function setRef<T>(ref: Ref<T> | undefined, value: T | null) {
-  if (typeof ref === "function") ref(value);
-  else if (ref) ref.current = value;
 }
 
 /** 不增加普通触发元素的 DOM 层级，并透传外层菜单触发器的事件和 ref。 */
@@ -216,7 +266,13 @@ export function Hint({
   if (content == null || content === "") return trigger;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipTrigger
+        asChild
+        aria-haspopup={props["aria-haspopup"]}
+        aria-expanded={props["aria-expanded"]}
+      >
+        {trigger}
+      </TooltipTrigger>
       <TooltipContent side={side}>{content}</TooltipContent>
     </Tooltip>
   );

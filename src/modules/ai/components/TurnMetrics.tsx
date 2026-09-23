@@ -1,4 +1,4 @@
-/** 每轮回答的轻量性能提示；只在悬浮或聚焦时订阅和汇总该轮 SDK 记录。 */
+/** 每轮回答的轻量性能提示；只在悬停时订阅和汇总该轮 SDK 记录。 */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MoreVerticalIcon } from "@hugeicons/core-free-icons";

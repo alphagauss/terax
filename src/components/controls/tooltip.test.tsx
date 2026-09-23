@@ -14,6 +14,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { act, createRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -77,10 +82,17 @@ it("waits 800ms, skips the delay within 500ms, then restores it", async () => {
   expect(tooltip()).toBeNull();
   await wait(1);
   expect(tooltip()?.textContent).toBe("First");
-  await dismiss();
-  await wait(499);
   await hover(second);
   expect(tooltip()?.textContent).toBe("Second");
+  await dismiss();
+  await wait(499);
+  await act(async () =>
+    first.dispatchEvent(
+      new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  await hover(first);
+  expect(tooltip()?.textContent).toBe("First");
   await dismiss();
   await wait(501);
   await hover(third);
@@ -90,7 +102,7 @@ it("waits 800ms, skips the delay within 500ms, then restores it", async () => {
   expect(container.querySelector("[title]")).toBeNull();
 });
 
-it("keeps separate groups independent and supports keyboard focus", async () => {
+it("keeps separate hover groups independent", async () => {
   await act(async () =>
     root.render(
       <>
@@ -108,9 +120,10 @@ it("keeps separate groups independent and supports keyboard focus", async () => 
     ),
   );
   const [first, second] = container.querySelectorAll("button");
-  await act(async () => first.focus());
+  await hover(first);
+  await wait(800);
   expect(tooltip()?.textContent).toBe("One");
-  await act(async () => first.blur());
+  await dismiss();
   expect(tooltip()).toBeNull();
   await hover(second);
   expect(tooltip()).toBeNull();
@@ -130,7 +143,8 @@ it("dismisses tooltips while the window is inactive and ignores restored focus",
   );
   const button = container.querySelector("button") as HTMLButtonElement;
 
-  await act(async () => button.focus());
+  await hover(button);
+  await wait(800);
   expect(tooltip()?.textContent).toBe("Actions");
 
   await act(async () => window.dispatchEvent(new Event("blur")));
@@ -149,7 +163,7 @@ it("dismisses tooltips while the window is inactive and ignores restored focus",
     button.blur();
     button.focus();
   });
-  expect(tooltip()?.textContent).toBe("Actions");
+  expect(tooltip()).toBeNull();
 
   await act(async () => window.dispatchEvent(new Event("blur")));
   expect(tooltip()).toBeNull();
@@ -250,4 +264,135 @@ it("shows disabled button explanations without enabling their action", async () 
   await act(async () => button.click());
   expect(clicked).not.toHaveBeenCalled();
   expect(button.disabled).toBe(true);
+});
+
+it("keeps focus events observable without opening a tooltip", async () => {
+  const focused = vi.fn();
+  const blurred = vi.fn();
+  await act(async () =>
+    root.render(
+      <Hint content="Actions">
+        <button type="button" onFocus={focused} onBlur={blurred}>
+          Action
+        </button>
+      </Hint>,
+    ),
+  );
+  const button = container.querySelector("button") as HTMLButtonElement;
+  await act(async () => button.focus());
+  await wait(800);
+  expect(focused).toHaveBeenCalledOnce();
+  expect(tooltip()).toBeNull();
+  await hover(button);
+  await wait(800);
+  expect(tooltip()).not.toBeNull();
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  expect(tooltip()).toBeNull();
+  expect(blurred).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(button);
+});
+
+it("cancels pending hover on window blur and pointer down", async () => {
+  await act(async () =>
+    root.render(
+      <Hint content="Actions">
+        <button type="button">Action</button>
+      </Hint>,
+    ),
+  );
+  const button = container.querySelector("button") as HTMLButtonElement;
+  await hover(button);
+  await wait(400);
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  await wait(800);
+  expect(tooltip()).toBeNull();
+  await hover(button);
+  await wait(799);
+  expect(tooltip()).toBeNull();
+  await wait(1);
+  expect(tooltip()).not.toBeNull();
+  await act(async () =>
+    button.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  expect(tooltip()).toBeNull();
+  await hover(button);
+  await wait(800);
+  expect(tooltip()).toBeNull();
+  await act(async () =>
+    button.dispatchEvent(
+      new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  await hover(button);
+  await wait(400);
+  await act(async () =>
+    button.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  await wait(800);
+  expect(tooltip()).toBeNull();
+});
+
+it("ignores touch and pen movement", async () => {
+  await act(async () =>
+    root.render(
+      <Hint content="Actions">
+        <button type="button">Action</button>
+      </Hint>,
+    ),
+  );
+  for (const pointerType of ["touch", "pen"]) {
+    await act(async () =>
+      container
+        .querySelector("button")
+        ?.dispatchEvent(
+          new PointerEvent("pointermove", { bubbles: true, pointerType }),
+        ),
+    );
+    await wait(800);
+    expect(tooltip()).toBeNull();
+  }
+});
+
+it("does not show hints for popup autofocus, expanded entrances or restored focus", async () => {
+  await act(async () =>
+    root.render(
+      <TooltipProvider>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Hint content="Entrance">
+              <button type="button">Open</button>
+            </Hint>
+          </PopoverTrigger>
+          <PopoverContent>
+            <Hint content="Clear completed">
+              <button type="button">Clear</button>
+            </Hint>
+          </PopoverContent>
+        </Popover>
+      </TooltipProvider>,
+    ),
+  );
+  const entrance = container.querySelector("button") as HTMLButtonElement;
+  await act(async () => entrance.click());
+  await wait(0);
+  const action = document.querySelector(
+    '[data-slot="popover-content"] button',
+  ) as HTMLButtonElement;
+  expect(document.activeElement).toBe(action);
+  await hover(entrance);
+  await wait(800);
+  expect(tooltip()).toBeNull();
+  await hover(action);
+  await wait(800);
+  expect(tooltip()?.textContent).toBe("Clear completed");
+  await dismiss();
+  await dismiss();
+  await wait(0);
+  expect(document.activeElement).toBe(entrance);
+  await wait(800);
+  expect(tooltip()).toBeNull();
 });
