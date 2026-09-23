@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferConflict, TransferTask } from "@/modules/transfers/types";
 
 const mocks = vi.hoisted(() => ({
+  tasks: {} as Record<string, TransferTask>,
   resolveConflict: vi.fn(() => Promise.resolve()),
   retryFailure: vi.fn(() => Promise.resolve()),
   ignoreFailure: vi.fn(() => Promise.resolve()),
@@ -76,7 +77,11 @@ vi.mock("@/components/ui/popover", () => ({
   PopoverTrigger: ({ children }: { children?: ReactNode }) => children,
 }));
 vi.mock("@/components/ui/progress", () => ({
-  Progress: () => createElement("div"),
+  Progress: ({ value }: { value: number }) =>
+    createElement("div", { role: "progressbar", "aria-valuenow": value }),
+}));
+vi.mock("@/components/ui/spinner", () => ({
+  Spinner: () => createElement("svg", { "data-slot": "spinner" }),
 }));
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children?: ReactNode }) => children,
@@ -92,7 +97,7 @@ vi.mock("@/modules/transfers/store", () => ({
   useTransferBridge: vi.fn(),
   useTransferStore: (select: (state: Record<string, unknown>) => unknown) =>
     select({
-      tasks: {},
+      tasks: mocks.tasks,
       panelOpen: false,
       setPanelOpen: vi.fn(),
       removeLocal: vi.fn(),
@@ -125,14 +130,135 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 import {
   TransferConflictDialog,
+  TransferStatusControl,
   TransferTaskRow,
 } from "@/modules/transfers/TransferStatusControl";
 
 afterEach(() => {
+  mocks.tasks = {};
   mocks.resolveConflict.mockClear();
   mocks.retryFailure.mockClear();
   mocks.ignoreFailure.mockClear();
   document.body.innerHTML = "";
+});
+
+describe("transfer phase feedback", () => {
+  const task: TransferTask = {
+    id: "archive-task",
+    direction: "upload",
+    strategy: "archive",
+    status: "running",
+    stage: "transferring",
+    sourceCount: 1,
+    destination: "/target",
+    name: "folder",
+    totalBytes: 100,
+    transferredBytes: 50,
+    totalFiles: 10,
+    completedFiles: 0,
+    failedFiles: 0,
+    unprocessedFiles: 0,
+    totalRoots: 1,
+    committedRoots: 0,
+    speedBytesPerSecond: 10,
+    currentFile: null,
+    failure: null,
+    fileFailures: [],
+    conflict: null,
+    isDirectory: true,
+    createdAt: 1,
+    updatedAt: 2,
+  };
+
+  it.each([
+    ["transferring", "transfers.finishingTransfer"],
+    ["verifying", "transfers.verifyingAndExtracting"],
+    ["extracting", "transfers.stage.extracting"],
+    ["finalizing", "transfers.stage.finalizing"],
+  ] as const)(
+    "replaces full byte progress with live %s feedback",
+    (stage, label) => {
+      const view = render(
+        createElement(TransferTaskRow, {
+          task: { ...task, stage, transferredBytes: 100 },
+        }),
+      );
+      expect(view.container.querySelector('[role="progressbar"]')).toBeNull();
+      expect(view.container.querySelector('[role="status"]')?.textContent).toBe(
+        label,
+      );
+      expect(
+        view.container.querySelector('[data-slot="spinner"]'),
+      ).not.toBeNull();
+      expect(view.container.textContent).not.toContain("/s");
+      if (stage === "finalizing") {
+        expect(
+          view.container.querySelector('button[aria-label="transfers.pause"]'),
+        ).toBeNull();
+      }
+      act(() => view.root.unmount());
+    },
+  );
+
+  it("keeps byte progress during transfer and a full bar only on completion", () => {
+    const view = render(createElement(TransferTaskRow, { task }));
+    expect(
+      view.container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("50");
+    expect(view.container.textContent).toContain("10 B/s");
+    act(() =>
+      view.root.render(
+        createElement(TransferTaskRow, {
+          task: {
+            ...task,
+            status: "completed",
+            stage: "finished",
+            transferredBytes: 100,
+          },
+        }),
+      ),
+    );
+    expect(
+      view.container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("100");
+    expect(view.container.querySelector('[data-slot="spinner"]')).toBeNull();
+    act(() => view.root.unmount());
+  });
+
+  it("does not animate a paused finalization", () => {
+    const view = render(
+      createElement(TransferTaskRow, {
+        task: {
+          ...task,
+          status: "paused",
+          stage: "finalizing",
+          transferredBytes: 100,
+        },
+      }),
+    );
+    expect(view.container.querySelector('[role="status"]')?.textContent).toBe(
+      "transfers.status.paused",
+    );
+    expect(view.container.querySelector('[data-slot="spinner"]')).toBeNull();
+    act(() => view.root.unmount());
+  });
+
+  it("shows the current phase in the collapsed status bar", () => {
+    mocks.tasks = {
+      task: { ...task, stage: "finalizing", transferredBytes: 100 },
+    };
+    const view = render(createElement(TransferStatusControl));
+    const trigger = view.container.querySelector(
+      'button[aria-label="transfers.title"]',
+    );
+    expect(trigger?.textContent).toContain("transfers.stage.finalizing");
+    expect(trigger?.textContent).not.toContain("transfers.activeSummary");
+    act(() => view.root.unmount());
+  });
 });
 
 function render(element: ReactElement) {

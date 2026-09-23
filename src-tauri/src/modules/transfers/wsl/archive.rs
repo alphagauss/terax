@@ -24,6 +24,8 @@ use crate::modules::transfers::commit::{
     remote_commit_command, schedule_local_cleanup, LocalRoot, RemoteRoot,
 };
 #[cfg(windows)]
+use crate::modules::transfers::diagnostics::PhaseTimer;
+#[cfg(windows)]
 use crate::modules::transfers::errors::io_failure;
 use crate::modules::transfers::errors::TransferErrorCode;
 #[cfg(windows)]
@@ -79,6 +81,7 @@ async fn execute_upload(
     destination_parent: &str,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_upload_total");
     let mut work_dir = None;
     let result = async {
         ensure_capability(distro).await?;
@@ -147,6 +150,11 @@ async fn execute_upload(
     if result.is_err() {
         cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
+    log::info!(
+        "TERAX_TRANSFER_PERF task={} success={}",
+        context.task_id(),
+        result.is_ok()
+    );
     result
 }
 
@@ -157,6 +165,7 @@ async fn execute_download(
     sources: &[String],
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_download_total");
     let mut work_dir = None;
     let result = async {
         ensure_capability(distro).await?;
@@ -225,6 +234,11 @@ async fn execute_download(
     if result.is_err() {
         cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
+    log::info!(
+        "TERAX_TRANSFER_PERF task={} success={}",
+        context.task_id(),
+        result.is_ok()
+    );
     result
 }
 
@@ -253,6 +267,7 @@ async fn copy_archive(
     expected: u64,
     context: &mut ExecutionContext,
 ) -> RunResult<String> {
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_archive_copy_including_sync_hash");
     context.set_stage(TransferStage::Transferring).await;
     let mut input = tokio::fs::File::open(source)
         .await
@@ -323,6 +338,7 @@ async fn verify_and_extract_wsl_archive(
     expected_sha256: &str,
     context: &ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_verify_extract_remove");
     const SCRIPT: &str = r#"
 set -e
 archive=$1
@@ -384,6 +400,7 @@ else
   openssl dgst -sha256 "$archive"
 fi
 "#;
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_remote_pack_and_hash");
     let mut arguments = vec![
         "-c".to_string(),
         SCRIPT.to_string(),
@@ -769,6 +786,7 @@ async fn commit_upload_roots(
     let workspace = WorkspaceEnv::Wsl {
         distro: distro.to_string(),
     };
+    let _timer = PhaseTimer::new(context.task_id(), "wsl_commit_including_cleanup");
     let (command, cleanup_paths) = remote_commit_command(&roots);
     // 长脚本写入任务私有目录，避免经过 Windows CreateProcess 的参数长度上限。
     let script_path = format!("{work_dir}/commit.sh");

@@ -14,6 +14,7 @@ use russh_sftp::client::SftpSession;
 use crate::modules::remote::session::{join_remote, shell_quote, RemoteWorkspace};
 
 use super::cleanup_ticket::{CleanupTicket, CleanupTicketTarget};
+use super::diagnostics::PhaseTimer;
 use super::errors::TransferErrorCode;
 use super::manager::TransferRunError;
 use super::models::TransferEntryKind;
@@ -262,6 +263,7 @@ pub(crate) async fn commit_local_roots_tracked(
         _ => local_cleanup_ticket(staging_task_id, owner_task_id, roots)?,
     };
     let mut ticket = context.register_cleanup_ticket(cleanup_ticket).await?;
+    let _timer = PhaseTimer::new(context.task_id(), "local_commit_including_cleanup");
     let pending = commit_local_roots(roots).await?;
     let cleanup_pending = local_ticket_has_pending_paths(ticket.as_ref(), &pending);
     context
@@ -351,6 +353,7 @@ pub(crate) async fn commit_remote_roots_tracked(
     let mut ticket = context
         .register_cleanup_ticket(cleanup_scope.cleanup_ticket(remote_backup_paths(roots))?)
         .await?;
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_commit_including_cleanup");
     let pending = commit_remote_roots(workspace, roots).await?;
     let cleanup_pending = remote_ticket_has_pending_paths(ticket.as_ref(), &pending);
     context
@@ -1414,6 +1417,27 @@ mod tests {
         assert!(command.ends_with("fi\n"));
         assert!(!command.contains("rm -rf -- '/target/.terax-part-task-1.backup'"));
         assert!(!command.contains("rm -rf -- '/target/.terax-part-task-2.backup'"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn remote_file_batches_preserve_directories_and_rollback_partial_moves() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("reconcile.sh");
+        std::fs::write(&script, REMOTE_RECONCILE_SCRIPT).unwrap();
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(include_str!("ssh/reconcile.test.sh"))
+            .arg("terax-reconcile-test")
+            .arg(&script)
+            .arg(directory.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[cfg(target_os = "linux")]

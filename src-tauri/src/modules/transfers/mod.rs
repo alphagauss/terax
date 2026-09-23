@@ -8,6 +8,7 @@ mod cleanup_ticket;
 pub mod commands;
 mod commit;
 mod conflicts;
+mod diagnostics;
 mod direct;
 mod errors;
 mod journal;

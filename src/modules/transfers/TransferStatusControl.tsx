@@ -22,6 +22,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
@@ -95,13 +96,10 @@ function TransferStatusPanel() {
   );
   const progress = totalBytes > 0 ? (transferredBytes / totalBytes) * 100 : 0;
   const showAggregateProgress =
-    totalBytes > 0 &&
-    active.every(
-      (task) =>
-        task.stage !== "queued" &&
-        task.stage !== "scanning" &&
-        task.stage !== "checking_conflicts",
-    );
+    active.length > 0 && active.every(showsTransferByteProgress);
+  const processing = active.some(
+    (task) => task.status === "running" && !showsTransferByteProgress(task),
+  );
   const completedCount = tasks.filter(
     (task) =>
       task.status === "completed" || task.status === "completed_with_errors",
@@ -146,19 +144,28 @@ function TransferStatusPanel() {
             )}
             aria-label={t("transfers.title")}
           >
-            <HugeiconsIcon
-              icon={ArrowDataTransferVerticalIcon}
-              size={13}
-              strokeWidth={1.8}
-            />
+            {processing ? (
+              <Spinner
+                className="size-[13px] motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            ) : (
+              <HugeiconsIcon
+                icon={ArrowDataTransferVerticalIcon}
+                size={13}
+                strokeWidth={1.8}
+              />
+            )}
             <span>
               {active.length > 0
                 ? showAggregateProgress
                   ? t("transfers.activeSummary", {
                       count: active.length,
-                      progress: Math.round(progress),
+                      progress: Math.min(99, Math.round(progress)),
                     })
-                  : t("transfers.activeCount", { count: active.length })
+                  : active.length === 1
+                    ? taskStateLabel(active[0], t)
+                    : t("transfers.activeCount", { count: active.length })
                 : t("transfers.label")}
             </span>
             {failed > 0 ? (
@@ -187,7 +194,7 @@ function TransferStatusPanel() {
           <div className="flex shrink-0 items-center gap-1">
             {showAggregateProgress ? (
               <div className="mr-1 text-xs tabular-nums text-muted-foreground">
-                {Math.round(progress)}%
+                {Math.min(99, Math.round(progress))}%
               </div>
             ) : null}
             <Hint content={t("transfers.clearCompleted")}>
@@ -279,6 +286,8 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
   const [failuresOpen, setFailuresOpen] = useState(false);
   const [failureActionPending, setFailureActionPending] = useState(false);
   const active = isActiveTransfer(task);
+  const byteProgress = showsTransferByteProgress(task);
+  const phaseOnly = active && !byteProgress;
   const progress = transferProgress(task);
   const detail = task.currentFile
     ? basename(task.currentFile)
@@ -357,16 +366,18 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
                 · {t(`transfers.strategy.${task.strategy}`)}
               </span>
             </span>
-            <span
-              className={cn(
-                "shrink-0 text-[10px] text-muted-foreground",
-                (task.status === "failed" ||
-                  task.status === "completed_with_errors") &&
-                  "text-destructive",
-              )}
-            >
-              {taskStateLabel(task, t)}
-            </span>
+            {!phaseOnly ? (
+              <span
+                className={cn(
+                  "shrink-0 text-[10px] text-muted-foreground",
+                  (task.status === "failed" ||
+                    task.status === "completed_with_errors") &&
+                    "text-destructive",
+                )}
+              >
+                {taskStateLabel(task, t)}
+              </span>
+            ) : null}
           </div>
           <Hint content={detail}>
             <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
@@ -458,28 +469,43 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
               ))}
             </div>
           ) : null}
-          {active ||
+          {(active && byteProgress) ||
           task.status === "completed" ||
           task.status === "completed_with_errors" ? (
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}
           <div className="mt-1.5 flex min-h-5 items-center justify-between gap-2">
-            <Hint content={task.failure?.detail}>
-              <div className="min-w-0 truncate text-[10px] tabular-nums text-muted-foreground">
-                {failureMessage
-                  ? t("transfers.failureDetail", { error: failureMessage })
-                  : task.totalBytes > 0
-                    ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
-                    : t("transfers.filesProgress", {
-                        completed: task.completedFiles,
-                        total: task.totalFiles,
-                        count: task.totalFiles,
-                      })}
-                {active && task.speedBytesPerSecond > 0
-                  ? ` · ${formatBytes(task.speedBytesPerSecond)}/s`
-                  : ""}
-              </div>
-            </Hint>
+            {phaseOnly ? (
+              <span
+                role="status"
+                className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+              >
+                {task.status === "running" || task.status === "canceling" ? (
+                  <Spinner
+                    className="size-3 motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                {taskStateLabel(task, t)}
+              </span>
+            ) : (
+              <Hint content={task.failure?.detail}>
+                <div className="min-w-0 truncate text-[10px] tabular-nums text-muted-foreground">
+                  {failureMessage
+                    ? t("transfers.failureDetail", { error: failureMessage })
+                    : task.totalBytes > 0
+                      ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
+                      : t("transfers.filesProgress", {
+                          completed: task.completedFiles,
+                          total: task.totalFiles,
+                          count: task.totalFiles,
+                        })}
+                  {active && byteProgress && task.speedBytesPerSecond > 0
+                    ? ` · ${formatBytes(task.speedBytesPerSecond)}/s`
+                    : ""}
+                </div>
+              </Hint>
+            )}
             <div className="flex shrink-0 items-center gap-0.5">
               {task.status === "paused" ? (
                 <TaskButton
@@ -487,7 +513,8 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
                   icon={PlayIcon}
                   onClick={() => run(transferNative.resume(task.id))}
                 />
-              ) : task.status === "queued" || task.status === "running" ? (
+              ) : task.stage !== "finalizing" &&
+                (task.status === "queued" || task.status === "running") ? (
                 <TaskButton
                   label={t("transfers.pause")}
                   icon={PauseIcon}
@@ -725,5 +752,28 @@ function taskStateLabel(task: TransferTask, t: TFunction<"statusbar">): string {
     return t("transfers.status.completedWithErrors");
   if (task.status === "paused") return t("transfers.status.paused");
   if (task.status === "canceling") return t("transfers.status.canceling");
+  if (
+    task.stage === "transferring" &&
+    task.totalBytes > 0 &&
+    task.transferredBytes >= task.totalBytes
+  )
+    return t("transfers.finishingTransfer");
+  if (
+    task.strategy === "archive" &&
+    task.direction === "upload" &&
+    task.stage === "verifying" &&
+    task.totalBytes > 0 &&
+    task.transferredBytes >= task.totalBytes
+  )
+    return t("transfers.verifyingAndExtracting");
   return t(`transfers.stage.${task.stage}`);
+}
+
+/** 字节传完后切换为阶段提示，百分比只表达仍在进行的字节传输。 */
+function showsTransferByteProgress(task: TransferTask): boolean {
+  return (
+    task.stage === "transferring" &&
+    task.totalBytes > 0 &&
+    task.transferredBytes < task.totalBytes
+  );
 }
