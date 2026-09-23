@@ -4,7 +4,6 @@
     "workstation": "工作台",
     "data": "数据管理",
     "backtests": "回测",
-    "settings": "设置",
     "desk": "三栏工作页（实验）"
   },
   "common": {
@@ -436,6 +435,7 @@
     "security": "证券资料",
     "tasks": "任务",
     "openTaskWindow": "打开浮窗",
+    "settings": "Alpha 设置",
     "views": "分析视图",
     "watchlistTools": "自选工具栏",
     "tools": "辅助面板",

@@ -123,47 +123,6 @@ describe("Workbench Space serialization", () => {
     expect(allocId).toHaveBeenCalledTimes(3);
   });
 
-  it("persists Alpha settings as a locator and reloads its runtime page", () => {
-    const alphaSettings: Tab = {
-      id: 1,
-      kind: "alpha-settings",
-      spaceId: "default",
-      title: "Alpha Settings",
-    };
-    const current: WorkbenchState = {
-      tabs: { 1: alphaSettings },
-      spaces: {
-        default: {
-          root: { kind: "group", id: 2, groupId: 3 },
-          groups: {
-            3: { id: 3, tabIds: [1], activeTabId: 1 },
-          },
-          activeGroupId: 3,
-        },
-      },
-    };
-
-    const serialized = serializeSpaceWorkbench(current, "default");
-    expect(serialized).toEqual({
-      kind: "group",
-      tabs: [{ kind: "alpha-settings" }],
-      activeTabIndex: 0,
-      active: true,
-    });
-    expect(isSerializedWorkbenchNode(serialized)).toBe(true);
-
-    const restored = serialized
-      ? hydrateSpaceWorkbench(serialized, "default", counter())
-      : null;
-    expect(restored?.tabs).toEqual([
-      expect.objectContaining({
-        kind: "alpha-settings",
-        spaceId: "default",
-        cold: true,
-      }),
-    ]);
-  });
-
   it("persists Alpha workstation, desk, data and backtest pages as runtime locators", () => {
     const current: WorkbenchState = {
       tabs: {
@@ -235,7 +194,6 @@ describe("Workbench Space serialization", () => {
         { kind: "alpha-desk" },
         { kind: "alpha-data" },
         { kind: "alpha-backtests" },
-        { kind: "alpha-settings" },
         { kind: "terminal", cwd: "/work" },
       ],
       activeTabIndex: 0,

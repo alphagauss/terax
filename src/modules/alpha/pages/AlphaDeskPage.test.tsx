@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   write: vi.fn(),
   mounts: { chart: 0, backtests: 0 },
   visible: {} as Record<string, boolean>,
+  running: true,
+  settingsMounts: 0,
 }));
 vi.mock("@/lib/sharedStore", () => ({
   readSharedStore: async () => ({ ...mocks.values }),
@@ -29,7 +31,27 @@ vi.mock("@/modules/alpha/query", () => ({
   AlphaQueryProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
-  AlphaServiceBoundary: ({ children }: { children: ReactNode }) => children,
+  AlphaServiceBoundary: ({ children }: { children: ReactNode }) =>
+    mocks.running ? children : <div data-service-stopped />,
+}));
+vi.mock("@/modules/alpha/components/AlphaSettingsDialog", () => ({
+  AlphaSettingsDialog: ({
+    visible,
+    onOpenChange,
+  }: {
+    visible: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) => {
+    useEffect(() => {
+      mocks.settingsMounts++;
+    }, []);
+    mocks.visible.settings = visible;
+    return (
+      <WorkbenchPageDialog open title="settings" onOpenChange={onOpenChange}>
+        <input data-settings-draft />
+      </WorkbenchPageDialog>
+    );
+  },
 }));
 vi.mock("@/modules/alpha/chart/scenes/ConfiguredMarketChartScene", () => ({
   ConfiguredMarketChartScene: ({ visible }: { visible: boolean }) => {
@@ -79,7 +101,10 @@ vi.mock("@/modules/alpha/scenes/TaskMonitorScene", () => ({
 }));
 
 import { AlphaDeskPage } from "@/modules/alpha/pages/AlphaDeskPage";
-import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
+import {
+  WorkbenchPageDialog,
+  WorkbenchPageScope,
+} from "@/modules/workbench/WorkbenchPageOverlays";
 
 let root: ReturnType<typeof createRoot> | undefined;
 let client: QueryClient | undefined;
@@ -87,6 +112,53 @@ afterEach(() => {
   act(() => root?.unmount());
   client?.clear();
   vi.clearAllMocks();
+  mocks.running = true;
+  mocks.settingsMounts = 0;
+  mocks.visible = {};
+});
+
+it("停服时设置入口仍可打开，切页和服务启停不卸载设置现场", async () => {
+  mocks.running = false;
+  mocks.values = {};
+  const container = document.createElement("div");
+  root = createRoot(container);
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = client;
+  const render = async (visible: boolean) =>
+    act(async () =>
+      root?.render(
+        <QueryClientProvider client={queryClient}>
+          <WorkbenchPageScope visible={visible} focused={visible}>
+            <AlphaDeskPage visible={visible} />
+          </WorkbenchPageScope>
+        </QueryClientProvider>,
+      ),
+    );
+  await render(true);
+  expect(container.querySelector("[data-service-stopped]")).not.toBeNull();
+  const settings = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="desk.settings"]',
+  );
+  expect(settings).not.toBeNull();
+  await act(async () => {
+    settings?.click();
+  });
+  const draft = container.querySelector<HTMLInputElement>(
+    "[data-settings-draft]",
+  );
+  if (!draft) throw new Error("Settings did not open");
+  draft.value = "unsaved";
+  expect(mocks.settingsMounts).toBe(1);
+  await render(false);
+  expect(mocks.visible.settings).toBe(false);
+  await render(true);
+  mocks.running = true;
+  await render(true);
+  mocks.running = false;
+  await render(true);
+  expect(container.querySelector("[data-settings-draft]")).toBe(draft);
+  expect(draft.value).toBe("unsaved");
+  expect(mocks.settingsMounts).toBe(1);
 });
 
 it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，偏好不覆盖工作台", async () => {

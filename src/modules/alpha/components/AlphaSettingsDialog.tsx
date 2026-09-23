@@ -1,10 +1,12 @@
 /**
- * 本文件实现 Alpha 的 Workbench 设置页。
+ * 本文件实现三栏工作页的 Alpha 设置对话框，不依赖业务服务已启动。
  * 页面管理服务状态、数据目录和解释器设置，服务控制仍通过 Rust 的幂等命令完成。
  */
 
-import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
+import { Hint } from "@/components/controls/tooltip";
+import { SettingGroup } from "@/components/settings/SettingGroup";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { Switch } from "@/components/ui/switch";
 import { getAlphaSettings, updateAlphaSettings } from "@/modules/alpha/api";
 import {
@@ -30,13 +32,11 @@ import {
   type PythonInterpreter,
   PythonInterpreterDialog,
 } from "@/modules/python";
+import { WorkbenchPageDialog } from "@/modules/workbench/WorkbenchPageOverlays";
 import { LOCAL_WORKSPACE } from "@/modules/workspace";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { SettingGroup } from "@/components/settings/SettingGroup";
-import { SettingRow } from "@/components/settings/SettingRow";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -45,6 +45,7 @@ type Action =
   | "remoteVisibility"
   | "check"
   | "dataDir"
+  | "browseDataDir"
   | "start"
   | "stop"
   | "restart"
@@ -53,6 +54,8 @@ type Action =
 
 type Props = {
   visible: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
 /** 将 Alpha 服务的 UTC 启动时间转换为当前界面语言的本地时间。 */
@@ -77,39 +80,41 @@ function formatRuntimeRevision(value: string): string {
  *
  * Workbench 隐藏页面时停止探测，重新显示后立即刷新并恢复定时轮询。
  */
-export function AlphaSettingsPage(props: Props) {
+export function AlphaSettingsDialog(props: Props) {
   return (
     <AlphaQueryProvider>
-      <AlphaSettingsPageContent {...props} />
+      <AlphaSettingsContent {...props} />
     </AlphaQueryProvider>
   );
 }
 
 /** 连接共享状态并渲染 Alpha 服务设置。 */
-function AlphaSettingsPageContent({ visible }: Props) {
+function AlphaSettingsContent({ visible, open: isOpen, onOpenChange }: Props) {
   const { i18n, t } = useTranslation("alpha");
   const queryClient = useQueryClient();
-  const service = useAlphaServiceStatus(visible);
+  const service = useAlphaServiceStatus(visible && isOpen);
   const status = service.data ?? null;
   const settings = useQuery({
     queryKey: alphaQueryKeys.settings,
     queryFn: getAlphaSettings,
-    enabled: visible && status?.running === true,
+    enabled: visible && isOpen && status?.running === true,
   });
   const [check, setCheck] = useState<PythonCheck | null>(null);
-  const [dataDir, setDataDir] = useState<string | null>(null);
+  const [dataDirDraft, setDataDirDraft] = useState<string | null>(null);
   const [action, setAction] = useState<Action>(null);
   const [pythonPickerOpen, setPythonPickerOpen] = useState(false);
   const showInRemote = useAlphaShowInRemote();
   const savedDataDir = settings.data?.dataDir ?? null;
-
-  useEffect(() => {
-    if (!settings.data) return;
-    setDataDir(settings.data.dataDir);
-  }, [settings.data]);
+  // 未提交目录独立于权威快照，切页刷新和服务重连不能覆盖用户选择。
+  const dataDir = dataDirDraft ?? savedDataDir;
 
   /** 发布生命周期命令结果，并同步暂停或刷新 Alpha 业务查询。 */
   const publishStatus = async (nextStatus: AlphaStatus) => {
+    // 丢弃命令完成前发出的探活结果，避免旧状态晚到后覆盖启停结果。
+    await queryClient.cancelQueries({
+      queryKey: alphaQueryKeys.service,
+      exact: true,
+    });
     queryClient.setQueryData(alphaQueryKeys.service, nextStatus);
     if (nextStatus.running) {
       await queryClient.invalidateQueries({
@@ -143,6 +148,8 @@ function AlphaSettingsPageContent({ visible }: Props) {
   };
 
   const selectDataDir = async () => {
+    if (action !== null) return;
+    setAction("browseDataDir");
     try {
       const selected = await open({
         directory: true,
@@ -150,11 +157,13 @@ function AlphaSettingsPageContent({ visible }: Props) {
         title: t("storage.selectTitle"),
       });
       if (!selected || Array.isArray(selected)) return;
-      setDataDir(selected);
+      setDataDirDraft(selected);
     } catch (error) {
       toast.error(t("errors.setting"), {
         description: String(error),
       });
+    } finally {
+      setAction(null);
     }
   };
 
@@ -163,7 +172,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
     setAction("dataDir");
     try {
       const saved = await updateAlphaSettings({ dataDir });
-      setDataDir(saved.dataDir);
+      setDataDirDraft(null);
       queryClient.setQueryData(alphaQueryKeys.settings, saved);
       await publishStatus(await restartAlpha());
     } catch (error) {
@@ -240,12 +249,16 @@ function AlphaSettingsPageContent({ visible }: Props) {
           : t("service.loading");
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-section p-4 sm:p-page">
-        <PageHeader
-          title={t("header.title")}
-          description={t("header.description")}
-        />
+    <WorkbenchPageDialog
+      open={isOpen}
+      onOpenChange={(next) => {
+        if (action === null) onOpenChange(next);
+      }}
+      title={t("header.title")}
+      className="w-[48rem]"
+    >
+      <div className="flex min-w-0 flex-col gap-section">
+        <p className="text-muted-foreground">{t("header.description")}</p>
 
         <SettingGroup title={t("python.label")}>
           <SettingRow
@@ -462,6 +475,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
         </SettingGroup>
       </div>
       <PythonInterpreterDialog
+        scope="page"
         open={pythonPickerOpen}
         onOpenChange={setPythonPickerOpen}
         root={null}
@@ -470,6 +484,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
         title={t("python.selectTitle")}
         onSelect={selectPython}
       />
-    </div>
+    </WorkbenchPageDialog>
   );
 }

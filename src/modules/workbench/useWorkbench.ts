@@ -49,8 +49,7 @@ type AlphaPageKind =
   | "alpha-desk"
   | "alpha-workstation"
   | "alpha-data"
-  | "alpha-backtests"
-  | "alpha-settings";
+  | "alpha-backtests";
 
 function createInitialState(): WorkbenchState {
   return {
@@ -791,13 +790,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [openAlphaPageTab],
   );
 
-  /** 打开或复用 Alpha 设置页。 */
-  const openAlphaSettingsTab = useCallback(
-    (groupId?: number) =>
-      openAlphaPageTab("alpha-settings", i18n.t("tabs:alphaSettings"), groupId),
-    [openAlphaPageTab],
-  );
-
   const updateTab = useCallback(
     (id: number, patch: TabPatch) =>
       commit((current) => patchTab(current, id, patch)),
@@ -1035,7 +1027,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openAlphaWorkstationTab,
     openAlphaDataTab,
     openAlphaBacktestsTab,
-    openAlphaSettingsTab,
     setAiDiffStatus,
     closeTab,
     updateTab,

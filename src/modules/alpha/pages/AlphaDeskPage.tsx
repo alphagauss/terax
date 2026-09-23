@@ -19,26 +19,101 @@ import {
   ChartAnalysisIcon,
   Database01Icon,
   GridIcon,
+  Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useId, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+const AlphaSettingsDialog = lazy(() =>
+  import("@/modules/alpha/components/AlphaSettingsDialog").then((module) => ({
+    default: module.AlphaSettingsDialog,
+  })),
+);
 
 /** 为三栏页接入与其他 Alpha 页面相同的查询缓存和服务边界。 */
 export function AlphaDeskPage({ visible }: { visible: boolean }) {
   return (
     <AlphaQueryProvider>
-      <AlphaServiceBoundary visible={visible}>
-        <AlphaDeskContent visible={visible} />
-      </AlphaServiceBoundary>
+      <AlphaDeskShell visible={visible} />
     </AlphaQueryProvider>
   );
 }
 
-function AlphaDeskContent({ visible }: { visible: boolean }) {
+/** 常驻工具栏与设置独立于服务状态，业务区域仍按服务可用性挂载。 */
+function AlphaDeskShell({ visible }: { visible: boolean }) {
   const { t } = useTranslation("alpha");
   const preferences = useAlphaDeskPreferences();
   const id = useId();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  return (
+    <div className="flex h-full min-h-0 bg-background">
+      <nav
+        aria-label={t("desk.watchlistTools")}
+        className="flex w-8 shrink-0 flex-col items-center gap-2 border-r py-2"
+      >
+        <Hint content={t("desk.watchlist")}>
+          <Button
+            size="icon-sm"
+            variant={preferences.data?.leftOpen ? "secondary" : "ghost"}
+            disabled={!preferences.data}
+            aria-label={t("desk.watchlist")}
+            aria-expanded={preferences.data?.leftOpen ?? false}
+            aria-controls={`${id}-watchlist`}
+            onClick={() =>
+              preferences.set("leftOpen", !preferences.data?.leftOpen)
+            }
+          >
+            <HugeiconsIcon icon={GridIcon} size={16} />
+          </Button>
+        </Hint>
+        <div className="mt-auto">
+          <Hint content={t("desk.settings")}>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t("desk.settings")}
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen(true)}
+            >
+              <HugeiconsIcon icon={Settings01Icon} size={16} />
+            </Button>
+          </Hint>
+        </div>
+      </nav>
+      <div className="min-w-0 flex-1">
+        <AlphaServiceBoundary visible={visible}>
+          <AlphaDeskContent
+            visible={visible}
+            preferences={preferences}
+            id={id}
+          />
+        </AlphaServiceBoundary>
+      </div>
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <AlphaSettingsDialog
+            open
+            visible={visible}
+            onOpenChange={setSettingsOpen}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+function AlphaDeskContent({
+  visible,
+  preferences,
+  id,
+}: {
+  visible: boolean;
+  preferences: ReturnType<typeof useAlphaDeskPreferences>;
+  id: string;
+}) {
+  const { t } = useTranslation("alpha");
   const [taskWindowOpen, setTaskWindowOpen] = useState(false);
   const state = preferences.data;
   if (!state)
@@ -73,23 +148,6 @@ function AlphaDeskContent({ visible }: { visible: boolean }) {
         </p>
       )}
       <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label={t("desk.watchlistTools")}
-          className="flex w-8 shrink-0 flex-col items-center gap-2 border-r py-2"
-        >
-          <Hint content={t("desk.watchlist")}>
-            <Button
-              size="icon-sm"
-              variant={state.leftOpen ? "secondary" : "ghost"}
-              aria-label={t("desk.watchlist")}
-              aria-expanded={state.leftOpen}
-              aria-controls={`${id}-watchlist`}
-              onClick={() => set("leftOpen", !state.leftOpen)}
-            >
-              <HugeiconsIcon icon={GridIcon} size={16} />
-            </Button>
-          </Hint>
-        </nav>
         <div className="app-scrollbar min-w-0 flex-1 overflow-x-auto">
           <div
             className="flex h-full"

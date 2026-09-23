@@ -4,7 +4,6 @@
     "workstation": "Workstation",
     "data": "Data",
     "backtests": "Backtests",
-    "settings": "Settings",
     "desk": "Three-column desk (experimental)"
   },
   "common": {
@@ -436,6 +435,7 @@
     "security": "Security details",
     "tasks": "Tasks",
     "openTaskWindow": "Open floating window",
+    "settings": "Alpha settings",
     "views": "Analysis views",
     "watchlistTools": "Watchlist tools",
     "tools": "Utility panels",

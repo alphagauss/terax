@@ -1,13 +1,12 @@
 /**
  * 本文件实现 Alpha 活动栏对应的侧边栏导航。
- * 侧边栏只打开两套实验布局、数据、回测和设置标签，不持有业务查询或服务状态。
+ * 侧边栏只打开两套实验布局、数据和回测标签，不持有业务查询或服务状态。
  */
 
 import {
   ChartAnalysisIcon,
   Database01Icon,
   GridIcon,
-  Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
@@ -17,7 +16,6 @@ type Props = {
   onOpenWorkstation: () => void;
   onOpenData: () => void;
   onOpenBacktests: () => void;
-  onOpenSettings: () => void;
 };
 
 /**
@@ -30,7 +28,6 @@ export function AlphaSidebar({
   onOpenWorkstation,
   onOpenData,
   onOpenBacktests,
-  onOpenSettings,
 }: Props) {
   const { t } = useTranslation("alpha");
 
@@ -63,13 +60,6 @@ export function AlphaSidebar({
           onClick={onOpenBacktests}
         />
       </nav>
-      <div className="border-t border-border/60 p-2">
-        <NavItem
-          icon={Settings01Icon}
-          label={t("sidebar.settings")}
-          onClick={onOpenSettings}
-        />
-      </div>
     </aside>
   );
 }
