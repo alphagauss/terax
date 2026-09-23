@@ -140,6 +140,8 @@
       "paused": "Paused",
       "canceling": "Canceling…"
     },
+    "finishingTransfer": "Finishing transfer…",
+    "verifyingAndExtracting": "Verifying and extracting…",
     "stage": {
       "queued": "Queued",
       "scanning": "Scanning…",
@@ -148,7 +150,7 @@
       "transferring": "Transferring…",
       "extracting": "Extracting archive…",
       "verifying": "Verifying…",
-      "finalizing": "Finishing…",
+      "finalizing": "Applying files…",
       "finished": "Finished"
     }
   },

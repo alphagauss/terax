@@ -16,6 +16,7 @@ use crate::modules::transfers::commit::{
     cleanup_local_staging, commit_local_roots_tracked, commit_remote_roots_tracked,
     ensure_remote_target_available, schedule_local_cleanup,
 };
+use crate::modules::transfers::diagnostics::PhaseTimer;
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
 use crate::modules::transfers::models::TransferStage;
@@ -37,6 +38,7 @@ pub(crate) async fn execute_upload(
     plan: RemoteUploadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_upload_total");
     let remote_parent = common_remote_parent(
         plan.roots
             .iter()
@@ -122,6 +124,11 @@ pub(crate) async fn execute_upload(
     }
     super::cleanup::schedule(cleanup_scope, pending_cleanup);
     close_sftp(&plan.session).await;
+    log::info!(
+        "TERAX_TRANSFER_PERF task={} success={}",
+        context.task_id(),
+        result.is_ok()
+    );
     result
 }
 
@@ -130,6 +137,7 @@ pub(crate) async fn execute_download(
     plan: RemoteDownloadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_download_total");
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_download(
         &plan.workspace,
         plan.task_id.clone(),
@@ -173,6 +181,8 @@ pub(crate) async fn execute_download(
             .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
         let mut output = tokio::fs::File::from_std(output);
         let raw = super::session::open_raw(&plan.workspace).await?;
+        let transfer_timer =
+            PhaseTimer::new(context.task_id(), "ssh_download_stream_including_sync_hash");
         let downloaded = super::direct::download_file_into_sha256(
             &raw,
             &archive_path,
@@ -182,6 +192,7 @@ pub(crate) async fn execute_download(
         )
         .await;
         let _ = raw.close_session();
+        drop(transfer_timer);
         let local_sha256 = downloaded?;
         if local_sha256 != archive_sha256 {
             return Err(integrity("downloaded archive checksum mismatch"));
@@ -225,6 +236,11 @@ pub(crate) async fn execute_download(
     }
     super::cleanup::schedule(cleanup_scope, pending_cleanup);
     close_sftp(&plan.session).await;
+    log::info!(
+        "TERAX_TRANSFER_PERF task={} success={}",
+        context.task_id(),
+        result.is_ok()
+    );
     result
 }
 
@@ -234,6 +250,7 @@ async fn upload_archive(
     remote: &str,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_upload_stream_including_sync");
     context.set_stage(TransferStage::Transferring).await;
     let control = context.control();
     let mut reader = tokio::fs::File::open(local)
@@ -439,6 +456,7 @@ async fn create_remote_archive(
     archive: &str,
     context: &ExecutionContext,
 ) -> RunResult<(u64, String)> {
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_remote_pack_and_hash");
     let archive = shell_quote(archive);
     let command = format!(
         "set -e; {archive_command}; wc -c < {archive}; {}",
@@ -460,6 +478,7 @@ async fn verify_and_extract_remote_archive(
     expected_sha256: &str,
     context: &ExecutionContext,
 ) -> RunResult<()> {
+    let _timer = PhaseTimer::new(context.task_id(), "ssh_verify_extract_remove");
     let archive = shell_quote(archive);
     let directory = shell_quote(directory);
     let command = format!(

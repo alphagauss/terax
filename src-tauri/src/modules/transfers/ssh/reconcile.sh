@@ -33,19 +33,60 @@ terax_record_move() {
   terax_undo_to+=("$target")
 }
 
+# 仅批量处理普通文件；目录仍走精确目标移动，重叠目录始终原位递归。
+# mv 可能部分成功或因 no-clobber 跳过条目，必须先登记所有实际移动再报告失败。
+terax_record_file_batch() {
+  local directory=$1
+  shift
+  [ "$#" -gt 0 ] || return 0
+  local source target status=0
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  for source in "$@"; do
+    target=$directory/${source##*/}
+    [ -f "$source" ] && [ ! -L "$source" ] || return 1
+    ! terax_exists "$target" || return 1
+  done
+  mv -n -t "$directory" -- "$@" || status=$?
+  for source in "$@"; do
+    target=$directory/${source##*/}
+    if ! terax_exists "$source" && terax_exists "$target"; then
+      terax_undo_from+=("$source")
+      terax_undo_to+=("$target")
+    else
+      status=1
+    fi
+  done
+  return "$status"
+}
+
+# 使用当前 terax_reconcile 栈帧的局部批次；递归使用独立队列，父目录文件留在原位等待提交。
+terax_flush_file_batch() {
+  terax_record_file_batch "$backup" "${batch_old[@]}" || return $?
+  terax_record_file_batch "$target" "${batch_new[@]}" || return $?
+  batch_old=()
+  batch_new=()
+  batch_bytes=0
+}
+
 terax_record_directory_metadata() {
   local target=$1
   local final_reference=$2
   local original_mode original_atime original_mtime
   local final_mode final_atime final_mtime
-  original_mode=$(stat -c %a -- "$target") || return $?
-  original_atime=$(stat -c %X -- "$target") || return $?
-  original_mtime=$(stat -c %Y -- "$target") || return $?
-  if [ -n "$final_reference" ]; then
-    final_mode=$(stat -c %a -- "$final_reference") || return $?
-    final_atime=$(stat -c %X -- "$final_reference") || return $?
-    final_mtime=$(stat -c %Y -- "$final_reference") || return $?
-  else
+  local metadata
+  metadata=$(stat -c '%a %X %Y' -- "$target" "$final_reference") || return $?
+  {
+    read -r original_mode original_atime original_mtime
+    read -r final_mode final_atime final_mtime
+  } <<< "$metadata"
+  # writable_directories 属于当前协调栈帧，只修改缺少拥有者访问权限的目录。
+  if (( (8#$original_mode & 0700) != 0700 )); then
+    writable_directories+=("$target")
+  fi
+  if (( (8#$final_mode & 0700) != 0700 )); then
+    writable_directories+=("$final_reference")
+  fi
+  if [ "$3" = merge_skip ]; then
     final_mode=$original_mode
     final_atime=$original_atime
     final_mtime=$original_mtime
@@ -59,6 +100,7 @@ terax_record_directory_metadata() {
   terax_final_mtime+=("$final_mtime")
 }
 
+# 回滚独立保留逐目录权限修复，覆盖最终权限批次只成功了一部分的情况。
 terax_restore_metadata() {
   local target=$1
   local mode=$2
@@ -67,6 +109,8 @@ terax_restore_metadata() {
   chmod u+rwx -- "$target" || return $?
   touch -a -d "@$atime" -- "$target" || return $?
   touch -m -d "@$mtime" -- "$target" || return $?
+  # 五位八进制要求 GNU chmod 精确恢复特殊位，避免隐式保留旧目录的 setgid/setuid。
+  printf -v mode '%05o' "$((8#$mode))"
   chmod "$mode" -- "$target"
 }
 
@@ -76,15 +120,17 @@ terax_reconcile() {
   local target=$3
   local backup=$4
   local target_item source_item backup_item name
+  # 按字节计算参数预算，不受文件名字符集影响；批次同时限制条目数和参数长度。
+  local LC_ALL=C
+  local batch_old=() batch_new=() batch_bytes=0 entry_bytes
   [ -d "$source" ] && [ ! -L "$source" ] || return 1
   [ -d "$target" ] && [ ! -L "$target" ] || return 1
-  mkdir -- "$backup"
-  if [ "$mode" = merge_skip ]; then
-    terax_record_directory_metadata "$target" ""
-  else
-    terax_record_directory_metadata "$target" "$source"
+  mkdir -m 700 -- "$backup"
+  local writable_directories=()
+  terax_record_directory_metadata "$target" "$source" "$mode"
+  if [ "${#writable_directories[@]}" -gt 0 ]; then
+    chmod u+rwx -- "${writable_directories[@]}"
   fi
-  chmod u+rwx -- "$source" "$target" "$backup"
 
   if [ "$mode" = replace ]; then
     for target_item in "$target"/* "$target"/.[!.]* "$target"/..?*; do
@@ -105,19 +151,72 @@ terax_reconcile() {
       terax_reconcile "$mode" "$source_item" "$target_item" "$backup_item"
       continue
     fi
+    if [ -f "$source_item" ] && [ ! -L "$source_item" ] && { ! terax_exists "$target_item" || { [ -f "$target_item" ] && [ ! -L "$target_item" ]; }; }; then
+      if terax_exists "$target_item" && [ "$mode" = merge_skip ]; then
+        continue
+      fi
+      entry_bytes=$((${#source_item} + ${#target_item} + ${#backup_item} + 3))
+      if [ "${#batch_new[@]}" -ge 128 ] || [ "$((batch_bytes + entry_bytes))" -gt 32768 ]; then
+        terax_flush_file_batch
+      fi
+      if terax_exists "$target_item"; then
+        batch_old+=("$target_item")
+      fi
+      batch_new+=("$source_item")
+      batch_bytes=$((batch_bytes + entry_bytes))
+      continue
+    fi
     if terax_exists "$target_item"; then
       [ "$mode" = merge_skip ] && continue
       terax_record_move "$target_item" "$backup_item"
     fi
     terax_record_move "$source_item" "$target_item"
   done
+  terax_flush_file_batch
+}
+
+# 时间恢复时全部目标仍可访问；最终权限批次保持子目录先于父目录的原始顺序。
+terax_apply_metadata_batch() {
+  local property=$1 value=$2
+  shift 2
+  [ "$#" -gt 0 ] || return 0
+  case "$property" in
+    atime) touch -a -d "@$value" -- "$@" ;;
+    mtime) touch -m -d "@$value" -- "$@" ;;
+    mode)
+      printf -v value '%05o' "$((8#$value))"
+      chmod "$value" -- "$@"
+      ;;
+  esac
 }
 
 terax_apply_directory_metadata() {
-  local index=$((${#terax_metadata_target[@]} - 1))
-  while [ "$index" -ge 0 ]; do
-    terax_restore_metadata "${terax_metadata_target[$index]}" "${terax_final_mode[$index]}" "${terax_final_atime[$index]}" "${terax_final_mtime[$index]}"
-    index=$((index - 1))
+  local LC_ALL=C
+  local property index value path batch_value batch_bytes
+  local batch=()
+  for property in atime mtime mode; do
+    batch=()
+    batch_value=
+    batch_bytes=128
+    index=$((${#terax_metadata_target[@]} - 1))
+    while [ "$index" -ge 0 ]; do
+      path=${terax_metadata_target[$index]}
+      case "$property" in
+        atime) value=${terax_final_atime[$index]} ;;
+        mtime) value=${terax_final_mtime[$index]} ;;
+        mode) value=${terax_final_mode[$index]} ;;
+      esac
+      if [ "$value" != "$batch_value" ] || [ "${#batch[@]}" -ge 128 ] || [ "$((batch_bytes + ${#path} + 1))" -gt 32768 ]; then
+        terax_apply_metadata_batch "$property" "$batch_value" "${batch[@]}"
+        batch=()
+        batch_bytes=128
+      fi
+      batch+=("$path")
+      batch_value=$value
+      batch_bytes=$((batch_bytes + ${#path} + 1))
+      index=$((index - 1))
+    done
+    terax_apply_metadata_batch "$property" "$batch_value" "${batch[@]}"
   done
 }
 

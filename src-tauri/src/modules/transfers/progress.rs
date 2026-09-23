@@ -233,6 +233,10 @@ impl ExecutionContext {
         &mut self,
         total_bytes: u64,
     ) -> Result<(), TransferRunError> {
+        log::info!(
+            "TERAX_TRANSFER_PERF task={} archive_bytes={total_bytes}",
+            self.task_id
+        );
         self.flush_progress().await;
         self.manager
             .set_archive_size(&self.app, &self.task_id, total_bytes)
@@ -252,6 +256,10 @@ impl ExecutionContext {
         &self,
         total_files: u64,
     ) -> Result<(), TransferRunError> {
+        log::info!(
+            "TERAX_TRANSFER_PERF task={} archive_files={total_files}",
+            self.task_id
+        );
         self.manager
             .set_archive_file_count(&self.app, &self.task_id, total_files)
             .await

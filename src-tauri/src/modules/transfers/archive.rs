@@ -160,6 +160,7 @@ async fn build_archive(
     entries: Vec<PackEntry>,
     context: &mut ExecutionContext,
 ) -> RunResult<LocalArchive> {
+    let _timer = super::diagnostics::PhaseTimer::new(context.task_id(), "local_pack");
     context
         .set_stage(super::models::TransferStage::Archiving)
         .await;
@@ -201,6 +202,8 @@ pub(crate) async fn extract_download_archive_roots(
     roots: Vec<ExtractRoot>,
     context: &mut ExecutionContext,
 ) -> RunResult<u64> {
+    let _timer =
+        super::diagnostics::PhaseTimer::new(context.task_id(), "local_extract_including_sync");
     context
         .set_stage(super::models::TransferStage::Extracting)
         .await;

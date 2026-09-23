@@ -140,6 +140,8 @@
       "paused": "已暂停",
       "canceling": "正在取消…"
     },
+    "finishingTransfer": "正在完成传输…",
+    "verifyingAndExtracting": "正在校验并解包…",
     "stage": {
       "queued": "排队中",
       "scanning": "正在扫描…",
@@ -148,7 +150,7 @@
       "transferring": "正在传输…",
       "extracting": "正在解包…",
       "verifying": "正在校验…",
-      "finalizing": "正在完成…",
+      "finalizing": "正在提交文件…",
       "finished": "已完成"
     }
   },
