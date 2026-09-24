@@ -68,13 +68,14 @@ export const markdownSanitizeSchema = {
 export function buildMarkdownRehypePlugins(
   headingSlugById: Record<string, string>,
   documentPath: string,
+  mode: "dark" | "light",
 ): RehypePlugins {
   const baseDirectory = fileReferenceBaseDirectory(documentPath) ?? undefined;
   const windowsLocal = IS_WINDOWS && currentWorkspaceEnv().kind === "local";
   return [
     defaultRehypePlugins.raw,
     [rehypeFileReferences, { baseDirectory, windowsLocal }],
-    rehypeRelativeMarkdownImages,
+    [rehypeRelativeMarkdownImages, mode],
     rehypeGithubAlerts,
     [rehypeSanitize, markdownSanitizeSchema],
     defaultRehypePlugins.harden,

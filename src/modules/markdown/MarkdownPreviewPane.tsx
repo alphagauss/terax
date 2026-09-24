@@ -59,6 +59,7 @@ import {
   MarkdownViewToggle,
   type MarkdownViewToggleHandle,
 } from "@/modules/markdown/MarkdownViewToggle";
+import { useTheme } from "@/modules/theme/ThemeProvider";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "./rendered-find.css";
@@ -114,6 +115,7 @@ export function MarkdownPreviewPane({
   onCloseTab,
 }: Props) {
   const { t } = useTranslation("markdown");
+  const { resolvedMode } = useTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("rendered");
   const [preparedDocument, setPreparedDocument] = useState<{
     path: string;
@@ -780,6 +782,7 @@ export function MarkdownPreviewPane({
                       ref={rendererRef}
                       document={document}
                       documentPath={path}
+                      mode={resolvedMode}
                       visible={visible}
                       scrollContainer={scrollContainer}
                       onFragmentNavigate={handleFragmentNavigate}

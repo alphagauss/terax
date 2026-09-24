@@ -49,6 +49,7 @@ describe("Markdown file references", () => {
         <MarkdownDocumentRenderer
           document={prepareMarkdownDocument("[config](./config.ts:12)")}
           documentPath="D:/project/README.md"
+          mode="dark"
           visible
           scrollContainer={scrollContainer}
           onFragmentNavigate={() => {}}
@@ -84,6 +85,7 @@ describe("Markdown file references", () => {
         <MarkdownDocumentRenderer
           document={prepareMarkdownDocument("[docs](./docs)")}
           documentPath="/workspace/README.md"
+          mode="dark"
           visible
           scrollContainer={scrollContainer}
           onFragmentNavigate={() => {}}
