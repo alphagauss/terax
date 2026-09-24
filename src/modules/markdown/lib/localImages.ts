@@ -1,5 +1,5 @@
 /**
- * 本文件处理 Markdown 相对图片路径。
+ * 本文件处理 Markdown 相对图片路径与 picture 候选。
  *
  * 解析阶段只写入内部协议，实际文件访问由接近视口的图片组件按工作区环境执行。
  */
@@ -106,13 +106,57 @@ export function resolveMarkdownImagePath(
 /**
  * 将相对图片节点改写为 sanitizer 可审计的内部协议。
  *
- * picture 的 source 无法经过 React 图片组件控制，因此移除其候选源并使用 img 回退。
+ * picture 先按应用明暗模式选出单张图片，再交给受控图片组件加载。
  */
-export function rehypeRelativeMarkdownImages() {
-  return (tree: unknown) => visitImages(tree as HastNode, false);
+export function rehypeRelativeMarkdownImages(mode: "dark" | "light") {
+  return (tree: unknown) => visitImages(tree as HastNode, mode, false);
 }
 
-function visitImages(node: HastNode, insidePicture: boolean): void {
+function visitImages(
+  node: HastNode,
+  mode: "dark" | "light",
+  insidePicture: boolean,
+): void {
+  if (node.type === "element" && node.tagName === "picture") {
+    const fallback = node.children?.find(
+      (child) => child.type === "element" && child.tagName === "img",
+    );
+    if (fallback) {
+      let selectedSource: string | undefined;
+      for (const child of node.children ?? []) {
+        if (child === fallback) break;
+        if (child.type !== "element" || child.tagName !== "source") continue;
+        const media = child.properties?.media;
+        const match =
+          typeof media === "string"
+            ? /^\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)$/i.exec(
+                media.trim(),
+              )
+            : null;
+        if (media !== undefined && match?.[1]?.toLowerCase() !== mode) {
+          continue;
+        }
+        const srcSet = child.properties?.srcSet ?? child.properties?.srcset;
+        if (typeof srcSet !== "string") continue;
+        const candidate = srcSet.trim();
+        if (
+          /[\s,]/.test(candidate) ||
+          (!isRelativeMarkdownImageSource(candidate) &&
+            !/^https?:\/\//i.test(candidate))
+        ) {
+          continue;
+        }
+        selectedSource = candidate;
+        break;
+      }
+      node.tagName = "img";
+      node.properties = { ...fallback.properties };
+      if (selectedSource) node.properties.src = selectedSource;
+      delete node.properties.srcSet;
+      delete node.properties.srcset;
+      node.children = [];
+    }
+  }
   const picture =
     insidePicture || (node.type === "element" && node.tagName === "picture");
   if (picture && node.type === "element" && node.tagName === "source") {
@@ -133,7 +177,7 @@ function visitImages(node: HastNode, insidePicture: boolean): void {
       node.properties = properties;
     }
   }
-  for (const child of node.children ?? []) visitImages(child, picture);
+  for (const child of node.children ?? []) visitImages(child, mode, picture);
 }
 
 function joinNormalizedPath(baseDir: string, relative: string): string {

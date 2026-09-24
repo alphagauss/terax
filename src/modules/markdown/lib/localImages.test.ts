@@ -51,13 +51,13 @@ describe("Markdown relative image paths", () => {
         },
       ],
     };
-    rehypeRelativeMarkdownImages()(tree);
+    rehypeRelativeMarkdownImages("dark")(tree);
     expect(tree.children[0]?.properties).toEqual({
       src: encodeRelativeMarkdownImage("./image.png"),
     });
   });
 
-  it("removes picture candidates that bypass the controlled image component", () => {
+  it("selects a picture candidate before the controlled image component", () => {
     const tree = {
       type: "root",
       children: [
@@ -76,19 +76,20 @@ describe("Markdown relative image paths", () => {
             {
               type: "element",
               tagName: "img",
-              properties: { src: "./fallback.png" },
+              properties: { src: "./fallback.png", alt: "Fallback" },
             },
           ],
         },
       ],
     };
 
-    rehypeRelativeMarkdownImages()(tree);
-    expect(tree.children[0]?.children[0]?.properties).toEqual({
-      media: "(min-width: 800px)",
-    });
-    expect(tree.children[0]?.children[1]?.properties).toEqual({
-      src: encodeRelativeMarkdownImage("./fallback.png"),
+    rehypeRelativeMarkdownImages("dark")(tree);
+    expect(tree.children[0]).toMatchObject({
+      tagName: "img",
+      properties: {
+        src: encodeRelativeMarkdownImage("./fallback.png"),
+        alt: "Fallback",
+      },
     });
   });
 

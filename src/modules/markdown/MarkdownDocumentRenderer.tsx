@@ -359,6 +359,7 @@ export type MarkdownDocumentRendererHandle = {
 type Props = {
   document: MarkdownDocument;
   documentPath: string;
+  mode: "dark" | "light";
   visible: boolean;
   scrollContainer: HTMLElement;
   onFragmentNavigate: (fragment: string) => void;
@@ -378,6 +379,7 @@ export const MarkdownDocumentRenderer = forwardRef<
   {
     document,
     documentPath,
+    mode,
     visible,
     scrollContainer,
     onFragmentNavigate,
@@ -395,8 +397,8 @@ export const MarkdownDocumentRenderer = forwardRef<
     [document.outline],
   );
   const rehypePlugins = useMemo(
-    () => buildMarkdownRehypePlugins(headingSlugById, documentPath),
-    [documentPath, headingSlugById],
+    () => buildMarkdownRehypePlugins(headingSlugById, documentPath, mode),
+    [documentPath, headingSlugById, mode],
   );
   const store = useMemo(
     () =>
@@ -537,6 +539,7 @@ export const MarkdownDocumentRenderer = forwardRef<
     ],
   );
 
+  // Streamdown 缓存解析结果，切换明暗模式时需重新解析 picture 候选。
   return (
     <MarkdownFragmentNavigationContext.Provider value={onFragmentNavigate}>
       <MarkdownFileNavigationContext.Provider
@@ -554,6 +557,7 @@ export const MarkdownDocumentRenderer = forwardRef<
             {progressive ? (
               <ProgressiveBlockContext.Provider value={progressiveContext}>
                 <Streamdown
+                  key={mode}
                   className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                   components={markdownComponents}
                   plugins={streamdownPlugins}
@@ -571,6 +575,7 @@ export const MarkdownDocumentRenderer = forwardRef<
               </ProgressiveBlockContext.Provider>
             ) : (
               <Streamdown
+                key={mode}
                 tableMaxHeight="none"
                 className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                 components={markdownComponents}

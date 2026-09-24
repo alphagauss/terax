@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 function render(
   markdown: string,
   headingSlugById: Record<string, string> = {},
+  mode: "dark" | "light" = "dark",
 ): string {
   return renderToStaticMarkup(
     createElement(
@@ -26,6 +27,7 @@ function render(
         rehypePlugins: buildMarkdownRehypePlugins(
           headingSlugById,
           "D:/project/docs/current.md",
+          mode,
         ),
       },
       markdown,
@@ -126,6 +128,30 @@ describe("Markdown rehype pipeline", () => {
     expect(html).toContain("data-footnote-ref");
     expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/image\.png"/);
     expect(html).toContain('src="terax-relative-image:.%2Fassets%2Flocal.png"');
+  });
+
+  it("uses the controlled image path for picture theme variants", () => {
+    const source =
+      '<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso"></picture></p>';
+    const dark = render(source, {}, "dark");
+    const light = render(source, {}, "light");
+
+    expect(dark).toContain('src="terax-relative-image:assets%2Fhero-dark.png"');
+    expect(light).toContain('src="terax-relative-image:assets%2Fhero.png"');
+    expect(dark).not.toContain("<picture");
+    expect(light).not.toContain("<source");
+    expect(dark).toContain('alt="kiso"');
+    expect(dark).toContain('width="100%"');
+  });
+
+  it("falls back when a picture candidate cannot use the controlled image path", () => {
+    const html = render(
+      '<picture><source media="(prefers-color-scheme: dark)" srcset="javascript:alert(1)"><img src="assets/safe.png" alt="Safe"></picture>',
+    );
+
+    expect(html).toContain('src="terax-relative-image:assets%2Fsafe.png"');
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("<source");
   });
 
   it("emits a GitHub-compatible public heading id for fragment links", () => {

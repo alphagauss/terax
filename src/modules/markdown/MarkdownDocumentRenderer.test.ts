@@ -45,6 +45,7 @@ it.each([false, true])(
       createElement(MarkdownDocumentRenderer, {
         document: model,
         documentPath: "D:/formula.md",
+        mode: "dark",
         visible: false,
         scrollContainer: document.createElement(
           "div",
