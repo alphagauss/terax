@@ -24,7 +24,7 @@
     "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready.",
     "connectionClosed": "SSH connection closed",
     "reconnecting": "Reconnecting automatically…",
-    "manualReconnect": "Manual reconnection is required.",
+    "manualReconnect": "You can reconnect manually.",
     "reconnectAction": "Reconnect current SSH",
     "hostKey": {
       "unknownTitle": "Trust remote host?",

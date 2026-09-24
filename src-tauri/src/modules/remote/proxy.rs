@@ -60,10 +60,10 @@ async fn connect_socks5(
             proxy.password.as_deref().unwrap_or(""),
         )
         .await
-        .map_err(io_err)?,
+        .map_err(socks_io_err)?,
         _ => Socks5Stream::connect(proxy_addr, target)
             .await
-            .map_err(io_err)?,
+            .map_err(socks_io_err)?,
     };
     Ok(Box::new(stream))
 }
@@ -119,13 +119,14 @@ async fn connect_http_connect(
     }
     let header = String::from_utf8_lossy(&header);
     let status = header.lines().next().unwrap_or("");
-    let accepted = status
-        .split_whitespace()
-        .nth(1)
-        .is_some_and(|code| code == "200");
-    if !accepted {
+    let status_code = status.split_whitespace().nth(1);
+    if status_code != Some("200") {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::ConnectionRefused,
+            if status_code == Some("407") {
+                std::io::ErrorKind::PermissionDenied
+            } else {
+                std::io::ErrorKind::ConnectionRefused
+            },
             format!("proxy CONNECT rejected: {status}"),
         ));
     }
@@ -156,6 +157,19 @@ fn io_err(error: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(error.to_string())
 }
 
+fn socks_io_err(error: tokio_socks::Error) -> std::io::Error {
+    let kind = match error {
+        tokio_socks::Error::NoAcceptableAuthMethods
+        | tokio_socks::Error::PasswordAuthFailure(_)
+        | tokio_socks::Error::AuthorizationRequired
+        | tokio_socks::Error::InvalidAuthValues(_)
+        | tokio_socks::Error::IdentdAuthFailure
+        | tokio_socks::Error::InvalidUserIdAuthFailure => std::io::ErrorKind::PermissionDenied,
+        _ => std::io::ErrorKind::Other,
+    };
+    std::io::Error::new(kind, error.to_string())
+}
+
 fn base64_encode(input: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(input.len().div_ceil(3) * 4);
@@ -182,6 +196,34 @@ fn base64_encode(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn proxy_auth_failures_require_user_action() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = ProxyConfig::parse(&format!("http://{}", listener.local_addr().unwrap()), None)
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 512];
+            stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let error = connect(Some(&proxy), "example.com", 22)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            socks_io_err(tokio_socks::Error::PasswordAuthFailure(1)).kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        server.await.unwrap();
+    }
 
     #[tokio::test]
     async fn explicit_proxy_preserves_auth_ipv6_target_and_ssh_banner() {

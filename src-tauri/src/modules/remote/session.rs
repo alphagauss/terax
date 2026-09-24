@@ -45,6 +45,7 @@ pub struct ClientHandler {
     pub host_keys: Arc<HostKeyVerifier>,
     pub(super) remote_forwards: RemoteForwardRegistry,
     pub cancellation: CancellationToken,
+    host_key_rejected: Arc<AtomicBool>,
     health: Arc<SshTransportHealth>,
 }
 
@@ -62,10 +63,15 @@ impl Handler for ClientHandler {
         let port = self.port;
         let key = key.clone();
         let cancellation = self.cancellation.clone();
+        let host_key_rejected = self.host_key_rejected.clone();
         async move {
-            Ok(host_keys
+            let accepted = host_keys
                 .check(&app, &profile_id, &host, port, &key, &cancellation)
-                .await)
+                .await;
+            if !accepted && !cancellation.is_cancelled() {
+                host_key_rejected.store(true, Ordering::Release);
+            }
+            Ok(accepted)
         }
     }
 
@@ -159,13 +165,31 @@ pub struct WorkspaceConnect {
 pub(crate) struct ConnectFailure {
     pub message: String,
     pub credentials_required: bool,
+    pub retryable: bool,
 }
 
 impl ConnectFailure {
+    fn transport(message: String, host_key_rejected: bool) -> Self {
+        if host_key_rejected {
+            message.into()
+        } else {
+            Self::retryable(message)
+        }
+    }
+
+    fn retryable(message: String) -> Self {
+        Self {
+            message,
+            credentials_required: false,
+            retryable: true,
+        }
+    }
+
     fn credentials(message: String) -> Self {
         Self {
             message,
             credentials_required: true,
+            retryable: false,
         }
     }
 }
@@ -175,6 +199,7 @@ impl From<String> for ConnectFailure {
         Self {
             message,
             credentials_required: false,
+            retryable: false,
         }
     }
 }
@@ -243,6 +268,7 @@ impl RemoteWorkspace {
         let config = Arc::new(client_config());
 
         let remote_forwards = RemoteForwardRegistry::default();
+        let host_key_rejected = Arc::new(AtomicBool::new(false));
         let handler = |health: Arc<SshTransportHealth>| ClientHandler {
             app: app.clone(),
             profile_id: profile.id.clone(),
@@ -251,6 +277,7 @@ impl RemoteWorkspace {
             host_keys: host_keys.clone(),
             remote_forwards: remote_forwards.clone(),
             cancellation: cancellation.clone(),
+            host_key_rejected: host_key_rejected.clone(),
             health,
         };
         let mut health = Arc::new(SshTransportHealth::new());
@@ -265,16 +292,7 @@ impl RemoteWorkspace {
         .await?;
         let transport_ready_at = Instant::now();
 
-        let accepts_secret = profile.auth_method != SshAuthMethod::Agent;
-        if authenticate_primary(&mut handle, &profile, secret.as_str())
-            .await
-            .map_err(|error| {
-                if accepts_secret {
-                    ConnectFailure::credentials(error)
-                } else {
-                    error.into()
-                }
-            })?
+        if authenticate_primary(&mut handle, &profile, secret.as_str()).await?
             == PrimaryAuthResult::KeyboardInteractiveRequired
         {
             // Several servers and russh versions do not reliably continue
@@ -300,8 +318,7 @@ impl RemoteWorkspace {
                 .await?
             };
             if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
-                .await
-                .map_err(ConnectFailure::credentials)?
+                .await?
             {
                 return Err(ConnectFailure::credentials(
                     "SSH server rejected the supplied credentials".into(),
@@ -373,8 +390,12 @@ impl RemoteWorkspace {
                         );
                         detect_workspace(&workspace, &root_assignment, &requested_root)
                             .await
-                            .map_err(|probe_error| {
-                                format!("{error}; fallback workspace probe failed: {probe_error}")
+                            .map_err(|mut probe_error| {
+                                probe_error.message = format!(
+                                    "{error}; fallback workspace probe failed: {}",
+                                    probe_error.message
+                                );
+                                probe_error
                             })
                             .map(|probe| (probe, None))
                     }
@@ -390,7 +411,7 @@ impl RemoteWorkspace {
             Ok(foreground) => foreground,
             Err(error) => {
                 workspace.disconnect().await;
-                return Err(error.into());
+                return Err(error);
             }
         };
         let probe_elapsed = probe_started_at.elapsed();
@@ -833,22 +854,39 @@ async fn connect_transport(
     handler: ClientHandler,
     traffic: Arc<SshTrafficMeter>,
     health: Arc<SshTransportHealth>,
-) -> Result<Handle<ClientHandler>, String> {
+) -> Result<Handle<ClientHandler>, ConnectFailure> {
+    let host_keys = handler.host_keys.clone();
+    let host_key_rejected = handler.host_key_rejected.clone();
     let stream = tokio::time::timeout(
         Duration::from_secs(15),
         super::proxy::connect(proxy, &profile.host, profile.port),
     )
     .await
-    .map_err(|_| "SSH TCP connection timed out".to_string())?
-    .map_err(|e| format!("SSH TCP connection failed: {e}"))?;
+    .map_err(|_| ConnectFailure::retryable("SSH TCP connection timed out".into()))?
+    .map_err(|e| {
+        let message = format!("SSH TCP connection failed: {e}");
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            message.into()
+        } else {
+            ConnectFailure::retryable(message)
+        }
+    })?;
     let stream = CountingSshStream::new(stream, traffic, health);
-    tokio::time::timeout(
+    let error = match tokio::time::timeout(
         Duration::from_secs(20),
         client::connect_stream(config, stream, handler),
     )
     .await
-    .map_err(|_| "SSH handshake timed out".to_string())?
-    .map_err(|e| format!("SSH handshake failed: {e}"))
+    {
+        Ok(Ok(handle)) => return Ok(handle),
+        Ok(Err(error)) => format!("SSH handshake failed: {error}"),
+        Err(_) => "SSH handshake timed out".into(),
+    };
+    let pending = host_keys.cancel_pending(&profile.id).await;
+    Err(ConnectFailure::transport(
+        error,
+        host_key_rejected.load(Ordering::Acquire) || pending,
+    ))
 }
 
 #[derive(Debug)]
@@ -884,14 +922,25 @@ async fn detect_workspace(
     workspace: &RemoteWorkspace,
     root_assignment: &str,
     requested_root: &str,
-) -> Result<WorkspaceProbe, String> {
+) -> Result<WorkspaceProbe, ConnectFailure> {
     let probe = format!(
         "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; printf '%s\\000%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\" \"$root\""
     );
     let output = workspace
         .exec(&probe, None, Duration::from_secs(10))
-        .await?;
-    parse_workspace_probe(output, requested_root)
+        .await
+        .map_err(ConnectFailure::retryable)?;
+    if output.timed_out {
+        return Err(ConnectFailure::retryable(
+            "timed out while detecting the remote SSH workspace".into(),
+        ));
+    }
+    if output.exit_code.is_none() {
+        return Err(ConnectFailure::retryable(
+            "SSH server closed the workspace probe without reporting an exit status".into(),
+        ));
+    }
+    parse_workspace_probe(output, requested_root).map_err(Into::into)
 }
 
 /// 解析合并探测结果并锁定绝对、无控制字符的 Home 与 Workspace root。
@@ -1003,13 +1052,15 @@ async fn authenticate_primary(
     handle: &mut Handle<ClientHandler>,
     profile: &SshProfile,
     secret: &str,
-) -> Result<PrimaryAuthResult, String> {
+) -> Result<PrimaryAuthResult, ConnectFailure> {
     let result = match profile.auth_method {
         SshAuthMethod::Password => {
             let password = handle
                 .authenticate_password(&profile.username, secret)
                 .await
-                .map_err(|e| format!("password authentication failed: {e}"))?;
+                .map_err(|e| {
+                    ConnectFailure::retryable(format!("password authentication failed: {e}"))
+                })?;
             return Ok(password_auth_result(password.success()));
         }
         SshAuthMethod::PrivateKey => {
@@ -1017,21 +1068,41 @@ async fn authenticate_primary(
             let expanded = expand_local_home(path);
             let key =
                 russh::keys::load_secret_key(&expanded, (!secret.is_empty()).then_some(secret))
-                    .map_err(|e| format!("load private key {}: {e}", expanded.display()))?;
+                    .map_err(|e| {
+                        ConnectFailure::credentials(format!(
+                            "load private key {}: {e}",
+                            expanded.display()
+                        ))
+                    })?;
             let hash = key.algorithm().is_rsa().then_some(HashAlg::Sha256);
             let key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
             handle
                 .authenticate_publickey(&profile.username, key)
                 .await
-                .map_err(|e| format!("public-key authentication failed: {e}"))?
+                .map_err(|e| {
+                    ConnectFailure::retryable(format!("public-key authentication failed: {e}"))
+                })?
                 .success()
         }
-        SshAuthMethod::Agent => authenticate_agent(handle, &profile.username).await?,
+        SshAuthMethod::Agent => authenticate_agent(handle, &profile.username)
+            .await
+            .map_err(|error| {
+                if handle.is_closed() {
+                    ConnectFailure::retryable(error)
+                } else {
+                    error.into()
+                }
+            })?,
     };
     if result {
         Ok(PrimaryAuthResult::Authenticated)
     } else {
-        Err("SSH server rejected the supplied credentials".into())
+        let error = "SSH server rejected the supplied credentials";
+        Err(if profile.auth_method == SshAuthMethod::Agent {
+            error.into()
+        } else {
+            ConnectFailure::credentials(error.into())
+        })
     }
 }
 
@@ -1047,11 +1118,13 @@ async fn authenticate_keyboard_interactive(
     handle: &mut Handle<ClientHandler>,
     username: &str,
     secret: &str,
-) -> Result<bool, String> {
+) -> Result<bool, ConnectFailure> {
     let mut response = handle
         .authenticate_keyboard_interactive_start(username, None)
         .await
-        .map_err(|e| format!("keyboard-interactive authentication failed: {e}"))?;
+        .map_err(|e| {
+            ConnectFailure::retryable(format!("keyboard-interactive authentication failed: {e}"))
+        })?;
     loop {
         match response {
             KeyboardInteractiveAuthResponse::Success => return Ok(true),
@@ -1075,7 +1148,11 @@ async fn authenticate_keyboard_interactive(
                         prompts.iter().map(|_| secret.to_string()).collect(),
                     )
                     .await
-                    .map_err(|e| format!("keyboard-interactive response failed: {e}"))?;
+                    .map_err(|e| {
+                        ConnectFailure::retryable(format!(
+                            "keyboard-interactive response failed: {e}"
+                        ))
+                    })?;
             }
         }
     }
@@ -1200,11 +1277,19 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 mod path_tests {
     use super::{
         build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
-        password_auth_result, task_preheat_eligible, workspace_root_assignment, ExecCompletion,
-        ExecOutput, PrimaryAuthResult,
+        password_auth_result, task_preheat_eligible, workspace_root_assignment, ConnectFailure,
+        ExecCompletion, ExecOutput, PrimaryAuthResult,
     };
     use bytes::Bytes;
     use russh::ChannelMsg;
+
+    #[test]
+    fn background_reconnect_retries_transport_failures_but_stops_for_user_action() {
+        assert!(ConnectFailure::transport("network unavailable".into(), false).retryable);
+        assert!(!ConnectFailure::transport("host key rejected".into(), true).retryable);
+        assert!(!ConnectFailure::credentials("authentication failed".into()).retryable);
+        assert!(!ConnectFailure::from("invalid workspace root").retryable);
+    }
 
     #[test]
     fn builds_safe_workspace_root_assignments() {

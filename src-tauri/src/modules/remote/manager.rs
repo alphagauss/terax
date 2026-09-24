@@ -27,10 +27,15 @@ const MAX_RTT_AGE: Duration = Duration::from_secs(10);
 const WAKE_PROBE_AGE: Duration = Duration::from_secs(5);
 const TRANSPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const TRANSPORT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+const BACKGROUND_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 const CONNECT_SUPERSEDED: &str = "SSH connection attempt was superseded";
 
-fn reconnect_delay(attempt: u32) -> Duration {
-    Duration::from_secs(u64::from(attempt.saturating_sub(1).min(5)))
+fn reconnect_delay(attempt: u32, max_fast_attempts: u32) -> Duration {
+    if attempt > max_fast_attempts {
+        BACKGROUND_RECONNECT_INTERVAL
+    } else {
+        Duration::from_secs(u64::from(attempt.saturating_sub(1).min(5)))
+    }
 }
 
 #[derive(Clone)]
@@ -208,7 +213,10 @@ impl RemoteManager {
             self.traffic.clone(),
         );
         let connected = match tokio::select! {
-            _ = lifecycle.cancellation.cancelled() => return Err(CONNECT_SUPERSEDED.into()),
+            _ = lifecycle.cancellation.cancelled() => {
+                self.host_keys.cancel_pending(&profile_id).await;
+                return Err(CONNECT_SUPERSEDED.into());
+            },
             result = connect => result,
         } {
             Ok(connected) => connected,
@@ -541,10 +549,13 @@ impl RemoteManager {
         if !profile.reconnect_enabled {
             return;
         }
-        for attempt in 1..=profile.reconnect_max_attempts {
+        let mut attempt = 1;
+        loop {
+            let background = attempt > profile.reconnect_max_attempts;
+            let delay = reconnect_delay(attempt, profile.reconnect_max_attempts);
             tokio::select! {
                 _ = lifecycle.cancellation.cancelled() => return,
-                _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
+                _ = tokio::time::sleep(delay) => {}
             }
             let guard = tokio::select! {
                 _ = lifecycle.cancellation.cancelled() => return,
@@ -562,18 +573,31 @@ impl RemoteManager {
                 Ok(_) => return,
                 Err(error) if error.message == CONNECT_SUPERSEDED => return,
                 Err(error) => {
-                    log::warn!("SSH reconnect attempt {attempt} failed: {}", error.message);
-                    if attempt == profile.reconnect_max_attempts {
-                        self.publish_disconnected(
-                            app,
-                            &lifecycle,
-                            &profile_id,
-                            error.message,
-                            error.credentials_required,
-                        )
-                        .await;
+                    if background {
+                        log::warn!("SSH background reconnect failed: {}", error.message);
+                    } else {
+                        log::warn!("SSH reconnect attempt {attempt} failed: {}", error.message);
+                    }
+                    if !error.retryable || attempt == profile.reconnect_max_attempts {
+                        let retryable = error.retryable;
+                        if !self
+                            .publish_disconnected(
+                                app,
+                                &lifecycle,
+                                &profile_id,
+                                error.message,
+                                error.credentials_required,
+                            )
+                            .await
+                            || !retryable
+                        {
+                            return;
+                        }
                     }
                 }
+            }
+            if !background {
+                attempt += 1;
             }
         }
     }
@@ -1002,8 +1026,9 @@ pub fn exec_blocking(
 #[cfg(test)]
 mod tests {
     use super::{
-        reconnect_delay, RemoteManager, HEALTH_MONITOR_TICK, IDLE_PROBE_AGE,
-        INITIAL_RTT_PROBE_GRACE, MAX_RTT_AGE, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_TIMEOUT,
+        reconnect_delay, RemoteManager, BACKGROUND_RECONNECT_INTERVAL, HEALTH_MONITOR_TICK,
+        IDLE_PROBE_AGE, INITIAL_RTT_PROBE_GRACE, MAX_RTT_AGE, TRANSPORT_CLEANUP_TIMEOUT,
+        TRANSPORT_PROBE_TIMEOUT,
     };
     use crate::modules::remote::models::ForegroundIntent;
     use std::sync::atomic::Ordering;
@@ -1028,9 +1053,10 @@ mod tests {
 
     #[test]
     fn reconnect_attempts_start_immediately_then_back_off() {
-        assert_eq!(reconnect_delay(1), Duration::ZERO);
-        assert_eq!(reconnect_delay(2), Duration::from_secs(1));
-        assert_eq!(reconnect_delay(7), Duration::from_secs(5));
+        assert_eq!(reconnect_delay(1, 7), Duration::ZERO);
+        assert_eq!(reconnect_delay(2, 7), Duration::from_secs(1));
+        assert_eq!(reconnect_delay(7, 7), Duration::from_secs(5));
+        assert_eq!(reconnect_delay(8, 7), BACKGROUND_RECONNECT_INTERVAL);
     }
 
     #[tokio::test]

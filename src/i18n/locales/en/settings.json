@@ -648,7 +648,8 @@
       "proxyUrl": "socks5://127.0.0.1:1080"
     },
     "hints": {
-      "name": "Optional. Empty names are saved as username@host."
+      "name": "Optional. Empty names are saved as username@host.",
+      "reconnect": "When enabled, the next connection will use quick retries after a disconnect, followed by periodic retries while the network is unavailable."
     },
     "groups": {
       "defaultName": "Default",
