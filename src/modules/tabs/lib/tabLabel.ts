@@ -21,7 +21,6 @@ export function labelFor(t: Tab): string {
   if (t.kind === "alpha-desk") return t.title;
   if (t.kind === "alpha-workstation") return t.title;
   if (t.kind === "alpha-data") return t.title;
-  if (t.kind === "alpha-backtests") return t.title;
   if (t.customTitle) return t.customTitle;
   if (!t.cwd) return t.title;
   const parts = t.cwd.split(/[\\/]/).filter(Boolean);

@@ -1,10 +1,9 @@
 /**
  * 本文件实现 Alpha 活动栏对应的侧边栏导航。
- * 侧边栏只打开两套实验布局、数据和回测标签，不持有业务查询或服务状态。
+ * 侧边栏只打开两套实验布局和数据标签，不持有业务查询或服务状态。
  */
 
 import {
-  ChartAnalysisIcon,
   Database01Icon,
   GridIcon,
 } from "@hugeicons/core-free-icons";
@@ -15,7 +14,6 @@ type Props = {
   onOpenDesk: () => void;
   onOpenWorkstation: () => void;
   onOpenData: () => void;
-  onOpenBacktests: () => void;
 };
 
 /**
@@ -27,7 +25,6 @@ export function AlphaSidebar({
   onOpenDesk,
   onOpenWorkstation,
   onOpenData,
-  onOpenBacktests,
 }: Props) {
   const { t } = useTranslation("alpha");
 
@@ -53,11 +50,6 @@ export function AlphaSidebar({
           icon={Database01Icon}
           label={t("sidebar.data")}
           onClick={onOpenData}
-        />
-        <NavItem
-          icon={ChartAnalysisIcon}
-          label={t("sidebar.backtests")}
-          onClick={onOpenBacktests}
         />
       </nav>
     </aside>

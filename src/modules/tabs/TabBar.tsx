@@ -45,7 +45,6 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
 import {
   Cancel01Icon,
-  ChartAnalysisIcon,
   ComputerTerminal02Icon,
   Database01Icon,
   GitCompareIcon,
@@ -865,16 +864,6 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={GridIcon}
-        size={14}
-        strokeWidth={2}
-        className="shrink-0"
-      />
-    );
-  }
-  if (tab.kind === "alpha-backtests") {
-    return (
-      <HugeiconsIcon
-        icon={ChartAnalysisIcon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

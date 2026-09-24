@@ -28,7 +28,6 @@ describe("AlphaSidebar", () => {
     const onOpenDesk = vi.fn();
     const onOpenWorkstation = vi.fn();
     const onOpenData = vi.fn();
-    const onOpenBacktests = vi.fn();
     const container = document.createElement("div");
     root = createRoot(container);
 
@@ -38,13 +37,12 @@ describe("AlphaSidebar", () => {
           onOpenDesk,
           onOpenWorkstation,
           onOpenData,
-          onOpenBacktests,
         }),
       );
     });
 
     const buttons = container.querySelectorAll("button");
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(3);
     buttons.forEach((button) => {
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -52,6 +50,5 @@ describe("AlphaSidebar", () => {
     expect(onOpenDesk).toHaveBeenCalledWith();
     expect(onOpenWorkstation).toHaveBeenCalledWith();
     expect(onOpenData).toHaveBeenCalledWith();
-    expect(onOpenBacktests).toHaveBeenCalledWith();
   });
 });

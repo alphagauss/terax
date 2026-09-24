@@ -210,7 +210,6 @@ export default function App() {
     openAlphaDeskTab,
     openAlphaWorkstationTab,
     openAlphaDataTab,
-    openAlphaBacktestsTab,
     closeTab,
     updateTab,
     setDocumentDirty,
@@ -632,8 +631,7 @@ export default function App() {
       if (
         tab.kind === "alpha-desk" ||
         tab.kind === "alpha-workstation" ||
-        tab.kind === "alpha-data" ||
-        tab.kind === "alpha-backtests"
+        tab.kind === "alpha-data"
       ) {
         disposeTab(tab.id);
       }
@@ -1930,9 +1928,6 @@ export default function App() {
                 }
                 onOpenData={() =>
                   openWorkspaceFromSidebar("alpha", openAlphaDataTab)
-                }
-                onOpenBacktests={() =>
-                  openWorkspaceFromSidebar("alpha", openAlphaBacktestsTab)
                 }
               />
             ),

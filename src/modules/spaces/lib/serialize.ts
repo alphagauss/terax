@@ -29,8 +29,7 @@ export type SerializedTab =
   | { kind: "markdown"; path: string; explorerRoot?: string }
   | { kind: "alpha-desk" }
   | { kind: "alpha-workstation" }
-  | { kind: "alpha-data" }
-  | { kind: "alpha-backtests" };
+  | { kind: "alpha-data" };
 
 export type SerializedWorkbenchNode =
   | {
@@ -54,8 +53,7 @@ function isSerializableTab(tab: Tab): boolean {
     tab.kind === "markdown" ||
     tab.kind === "alpha-desk" ||
     tab.kind === "alpha-workstation" ||
-    tab.kind === "alpha-data" ||
-    tab.kind === "alpha-backtests"
+    tab.kind === "alpha-data"
   );
 }
 
@@ -101,8 +99,6 @@ function serializeTab(tab: Tab): SerializedTab | null {
       return { kind: "alpha-workstation" };
     case "alpha-data":
       return { kind: "alpha-data" };
-    case "alpha-backtests":
-      return { kind: "alpha-backtests" };
     default:
       return null;
   }
@@ -253,14 +249,6 @@ function hydrateTab(
         spaceId,
         cold: true,
         title: i18n.t("tabs:alphaData"),
-      } satisfies Tab;
-    case "alpha-backtests":
-      return {
-        id: allocId(),
-        kind: "alpha-backtests",
-        spaceId,
-        cold: true,
-        title: i18n.t("tabs:alphaBacktests"),
       } satisfies Tab;
   }
 }
@@ -413,8 +401,7 @@ function isSerializedTab(value: unknown): value is SerializedTab {
   if (
     tab.kind === "alpha-desk" ||
     tab.kind === "alpha-workstation" ||
-    tab.kind === "alpha-data" ||
-    tab.kind === "alpha-backtests"
+    tab.kind === "alpha-data"
   ) {
     return true;
   }

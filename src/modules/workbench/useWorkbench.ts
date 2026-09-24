@@ -48,8 +48,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type AlphaPageKind =
   | "alpha-desk"
   | "alpha-workstation"
-  | "alpha-data"
-  | "alpha-backtests";
+  | "alpha-data";
 
 function createInitialState(): WorkbenchState {
   return {
@@ -779,17 +778,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [openAlphaPageTab],
   );
 
-  /** 打开或复用 Alpha 回测页。 */
-  const openAlphaBacktestsTab = useCallback(
-    (groupId?: number) =>
-      openAlphaPageTab(
-        "alpha-backtests",
-        i18n.t("tabs:alphaBacktests"),
-        groupId,
-      ),
-    [openAlphaPageTab],
-  );
-
   const updateTab = useCallback(
     (id: number, patch: TabPatch) =>
       commit((current) => patchTab(current, id, patch)),
@@ -1026,7 +1014,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openAlphaDeskTab,
     openAlphaWorkstationTab,
     openAlphaDataTab,
-    openAlphaBacktestsTab,
     setAiDiffStatus,
     closeTab,
     updateTab,

@@ -92,10 +92,6 @@ type AlphaDataTab = TabBase & {
   kind: "alpha-data";
 };
 
-type AlphaBacktestsTab = TabBase & {
-  kind: "alpha-backtests";
-};
-
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -106,7 +102,6 @@ export type Tab =
   | GitDiffTab
   | GitCommitFileDiffTab
   | AlphaDataTab
-  | AlphaBacktestsTab
   | (TabBase & { kind: "alpha-desk" })
   | AlphaWorkstationTab;
 
