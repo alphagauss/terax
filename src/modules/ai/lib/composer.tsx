@@ -6,7 +6,12 @@
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { sessionMetadata } from "@/modules/ai/store/chatStore";
 import { currentWorkspaceEnv } from "@/modules/workspace";
-import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
+import {
+  currentWorkspaceBootstrap,
+  deleteWorkspaceValue,
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 import {
   pickNativeAttachments,
   readPathAttachment,
@@ -80,6 +85,12 @@ type MessagePart =
 type Voice = ReturnType<typeof useWhisperRecording>;
 type ComposerFiles = FileList | readonly File[];
 
+type ComposerDraft = {
+  value: string;
+  files: FileAttachment[];
+  pickedSnippets: Snippet[];
+};
+
 type ComposerCtx = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -128,7 +139,7 @@ type ProviderProps = {
 /**
  * 为 AI 输入框提供跨面板持久化的草稿、附件和命令状态。
  *
- * Provider 始终挂载，因此关闭侧边栏不会丢失尚未发送的输入。
+ * Provider 始终挂载；输入复用 Workspace Store 保存，恢复与清理由窗口生命周期决定。
  */
 export function AiComposerProvider({
   children,
@@ -183,9 +194,27 @@ export function AiComposerProvider({
     (state) => getAgentMetaForSession(state, sessionId).pendingSteering,
   );
 
-  const [value, setValue] = useState("");
-  const [files, setFiles] = useState<FileAttachment[]>([]);
-  const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
+  const savedDraft = getWorkspaceValue<ComposerDraft>("ai:composerDraft");
+  const [value, setValue] = useState(savedDraft?.value ?? "");
+  const [files, setFiles] = useState<FileAttachment[]>(savedDraft?.files ?? []);
+  const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>(
+    savedDraft?.pickedSnippets ?? [],
+  );
+
+  // 图片保留 Data URL，随草稿覆盖或删除；自动保存与关闭刷盘由 Workspace Store 负责。
+  useEffect(() => {
+    const write =
+      value || files.length || pickedSnippets.length
+        ? setWorkspaceValue("ai:composerDraft", {
+            value,
+            files,
+            pickedSnippets,
+          })
+        : deleteWorkspaceValue("ai:composerDraft");
+    void write.catch((error) =>
+      console.error("Failed to save composer draft", error),
+    );
+  }, [value, files, pickedSnippets]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
   const revealingWorkingDirectoryRef = useRef(false);
