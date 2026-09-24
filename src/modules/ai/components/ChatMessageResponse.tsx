@@ -3,9 +3,11 @@ import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
 import { MarkdownCode } from "@/modules/markdown/markdown-code";
 import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import { cn } from "@/lib/utils";
+import { IS_WINDOWS } from "@/lib/platform";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { FileReferenceLink } from "@/modules/file-actions/FileReferenceLink";
 import {
   decodeFileReference,
@@ -50,9 +52,13 @@ export function ChatFileReferenceBaseProvider({
 }
 
 function buildChatRehypePlugins(baseDirectory: string | null) {
+  const windowsLocal = IS_WINDOWS && currentWorkspaceEnv().kind === "local";
   return [
     defaultRehypePlugins.raw,
-    [rehypeFileReferences, { baseDirectory: baseDirectory ?? undefined }],
+    [
+      rehypeFileReferences,
+      { baseDirectory: baseDirectory ?? undefined, windowsLocal },
+    ],
     [
       sanitize,
       {

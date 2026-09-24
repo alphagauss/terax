@@ -117,8 +117,10 @@ type Node = {
 /** 在 sanitizer 前封装路径，避免 Windows 盘符被作为未知协议删除。 */
 export function rehypeFileReferences({
   baseDirectory,
+  windowsLocal = false,
 }: {
   baseDirectory?: string;
+  windowsLocal?: boolean;
 } = {}) {
   return (tree: Node) => {
     const visit = (node: Node) => {
@@ -132,6 +134,9 @@ export function rehypeFileReferences({
         } catch {
           /* 合法文件名可以包含裸百分号。 */
         }
+        // POSIX 可使用 /d: 目录，只修正 Windows 本地链接中的多余斜杠。
+        if (windowsLocal && /^\/[A-Za-z]:\//.test(decoded))
+          decoded = decoded.slice(1);
         const reference = baseDirectory
           ? parseRelativeFileReference(baseDirectory, decoded)
           : parseFileReference(decoded);

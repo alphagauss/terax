@@ -3,6 +3,8 @@ import {
   fileReferenceBaseDirectory,
   parseFileReference,
   parseRelativeFileReference,
+  rehypeFileReferences,
+  decodeFileReference,
 } from "@/modules/file-actions/references";
 import { describe, expect, it } from "vitest";
 
@@ -50,5 +52,29 @@ describe("file references", () => {
     expect(
       parseRelativeFileReference("/workspace", "https://example.com"),
     ).toBeNull();
+  });
+
+  it("strips a leading slash from drive paths only for local Windows links", () => {
+    const link = {
+      type: "element",
+      tagName: "a",
+      properties: { href: "/d:/project/file.ts:70" },
+    };
+    rehypeFileReferences({ windowsLocal: true })(link);
+    expect(decodeFileReference(link.properties.href)).toMatchObject({
+      path: "d:/project/file.ts",
+      line: 70,
+    });
+
+    const remoteLink = {
+      type: "element",
+      tagName: "a",
+      properties: { href: "/d:/project/file.ts:70" },
+    };
+    rehypeFileReferences()(remoteLink);
+    expect(decodeFileReference(remoteLink.properties.href)).toMatchObject({
+      path: "/d:/project/file.ts",
+      line: 70,
+    });
   });
 });
