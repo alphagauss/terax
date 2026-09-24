@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   values: {} as Record<string, unknown>,
   write: vi.fn(),
-  mounts: { chart: 0, backtests: 0 },
+  mounts: { chart: 0, backtests: 0, data: 0 },
   visible: {} as Record<string, boolean>,
   running: true,
   settingsMounts: 0,
@@ -69,6 +69,15 @@ vi.mock("@/modules/alpha/scenes/BacktestResultsScene", () => ({
     }, []);
     mocks.visible.backtests = visible;
     return <div data-backtests />;
+  },
+}));
+vi.mock("@/modules/alpha/scenes/DataManagementScene", () => ({
+  DataManagementScene: ({ visible }: { visible: boolean }) => {
+    useEffect(() => {
+      mocks.mounts.data++;
+    }, []);
+    mocks.visible.data = visible;
+    return <input data-data-draft />;
   },
 }));
 vi.mock("@/modules/alpha/scenes/WatchlistScene", () => ({
@@ -166,7 +175,7 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
     workstation: { mainSymbol: "000001.SZSE" },
     "desk.symbol": "000002.SZSE",
   };
-  mocks.mounts = { chart: 0, backtests: 0 };
+  mocks.mounts = { chart: 0, backtests: 0, data: 0 };
   const container = document.createElement("div");
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -222,9 +231,19 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   await click("desk.backtests");
   expect(mocks.visible.chart).toBe(false);
   expect(mocks.visible.backtests).toBe(true);
+  await click("desk.data");
+  expect(mocks.visible.backtests).toBe(false);
+  expect(mocks.visible.data).toBe(true);
+  const dataDraft =
+    container.querySelector<HTMLInputElement>("[data-data-draft]");
+  if (!dataDraft) throw new Error("Data management did not open");
+  dataDraft.value = "saved search";
   await click("desk.market");
   expect(container.querySelector("[data-chart]")).toBe(chart);
-  expect(mocks.mounts).toEqual({ chart: 1, backtests: 1 });
+  expect(container.querySelector("[data-data-draft]")).toBe(dataDraft);
+  expect(dataDraft.value).toBe("saved search");
+  expect(mocks.visible.data).toBe(false);
+  expect(mocks.mounts).toEqual({ chart: 1, backtests: 1, data: 1 });
   await click("desk.tasks");
   expect(mocks.visible.tasks).toBe(true);
   await click("desk.security");
@@ -240,7 +259,7 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   await click("desk.watchlist");
   expect(mocks.visible.watchlist).toBe(false);
   expect(container.querySelector("[data-chart]")).toBe(chart);
-  expect(mocks.mounts).toEqual({ chart: 1, backtests: 1 });
+  expect(mocks.mounts).toEqual({ chart: 1, backtests: 1, data: 1 });
   await click("desk.tasks");
   await click("desk.openTaskWindow");
   const taskWindow = container.querySelector(

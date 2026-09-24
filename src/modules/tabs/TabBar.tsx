@@ -46,7 +46,6 @@ import { workspacePageFromTab } from "@/modules/workspace-handoff";
 import {
   Cancel01Icon,
   ComputerTerminal02Icon,
-  Database01Icon,
   GitCompareIcon,
   Globe02Icon,
   GridIcon,
@@ -844,16 +843,6 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={GitCompareIcon}
-        size={14}
-        strokeWidth={2}
-        className="shrink-0"
-      />
-    );
-  }
-  if (tab.kind === "alpha-data") {
-    return (
-      <HugeiconsIcon
-        icon={Database01Icon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

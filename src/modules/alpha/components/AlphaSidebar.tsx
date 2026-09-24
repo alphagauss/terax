@@ -1,19 +1,15 @@
 /**
  * 本文件实现 Alpha 活动栏对应的侧边栏导航。
- * 侧边栏只打开两套实验布局和数据标签，不持有业务查询或服务状态。
+ * 侧边栏只打开两套实验布局，不持有业务查询或服务状态。
  */
 
-import {
-  Database01Icon,
-  GridIcon,
-} from "@hugeicons/core-free-icons";
+import { GridIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   onOpenDesk: () => void;
   onOpenWorkstation: () => void;
-  onOpenData: () => void;
 };
 
 /**
@@ -21,11 +17,7 @@ type Props = {
  *
  * 点击导航项时在当前工作组打开或复用对应的业务页面。
  */
-export function AlphaSidebar({
-  onOpenDesk,
-  onOpenWorkstation,
-  onOpenData,
-}: Props) {
+export function AlphaSidebar({ onOpenDesk, onOpenWorkstation }: Props) {
   const { t } = useTranslation("alpha");
 
   return (
@@ -45,11 +37,6 @@ export function AlphaSidebar({
           icon={GridIcon}
           label={t("sidebar.workstation")}
           onClick={onOpenWorkstation}
-        />
-        <NavItem
-          icon={Database01Icon}
-          label={t("sidebar.data")}
-          onClick={onOpenData}
         />
       </nav>
     </aside>

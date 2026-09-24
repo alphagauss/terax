@@ -2,7 +2,6 @@
   "sidebar": {
     "title": "Alpha",
     "workstation": "工作台",
-    "data": "数据管理",
     "desk": "三栏工作页（实验）"
   },
   "common": {
@@ -431,6 +430,7 @@
     "watchlist": "自选",
     "market": "行情",
     "backtests": "回测",
+    "data": "数据管理",
     "security": "证券资料",
     "tasks": "任务",
     "openTaskWindow": "打开浮窗",

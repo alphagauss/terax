@@ -36,8 +36,15 @@ vi.mock("@/lib/sharedStore", () => ({
       });
     }),
 }));
-import { useAlphaDeskPreferences } from "@/modules/alpha/desk/preferences";
+import {
+  parseAlphaDeskPreferences,
+  useAlphaDeskPreferences,
+} from "@/modules/alpha/desk/preferences";
 import { flushAlphaDeskWrites } from "@/modules/alpha/desk/writes";
+
+it("恢复三栏页的数据管理视图", () => {
+  expect(parseAlphaDeskPreferences({ "desk.view": "data" }).view).toBe("data");
+});
 
 it("慢写入期间连续切换即时生效，外部快照不覆盖待保存修改，失败后恢复权威值", async () => {
   const client = new QueryClient({

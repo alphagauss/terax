@@ -2,7 +2,6 @@
   "sidebar": {
     "title": "Alpha",
     "workstation": "Workstation",
-    "data": "Data",
     "desk": "Three-column desk (experimental)"
   },
   "common": {
@@ -431,6 +430,7 @@
     "watchlist": "Watchlist",
     "market": "Market",
     "backtests": "Backtests",
+    "data": "Data",
     "security": "Security details",
     "tasks": "Tasks",
     "openTaskWindow": "Open floating window",

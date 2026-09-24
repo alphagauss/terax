@@ -7,7 +7,6 @@
 import { AlphaDeskPage } from "@/modules/alpha/pages/AlphaDeskPageLazy";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { AlphaDataPage } from "@/modules/alpha/pages/AlphaDataPageLazy";
 import { AlphaWorkstationPage } from "@/modules/alpha/pages/AlphaWorkstationPageLazy";
 import {
   AiDiffView,
@@ -113,7 +112,6 @@ export function WorkbenchRegisteredView({
         tab.kind !== "terminal" &&
           tab.kind !== "alpha-desk" &&
           tab.kind !== "alpha-workstation" &&
-          tab.kind !== "alpha-data" &&
           "pt-2 pr-0 pb-2 pl-3",
       )}
     >
@@ -179,7 +177,6 @@ export function WorkbenchRegisteredView({
       {tab.kind === "alpha-workstation" && (
         <AlphaWorkstationPage visible={visible} />
       )}
-      {tab.kind === "alpha-data" && <AlphaDataPage visible={visible} />}
     </div>
   );
 }

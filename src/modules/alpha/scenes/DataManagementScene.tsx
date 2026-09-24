@@ -1,6 +1,6 @@
 /**
- * 本文件实现 Alpha 数据目录页面。
- * 页面按需查询证券目录、订阅同步任务进度并展示单证券 K 线，不在浏览器中执行全量搜索或质量计算。
+ * 本文件实现三栏工作页的数据管理场景。
+ * 场景按需查询证券目录、订阅同步任务进度并展示单证券 K 线，不在浏览器中执行全量搜索或质量计算。
  */
 
 import {
@@ -33,13 +33,12 @@ import {
   AlphaSectionTitle,
 } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { AlphaSecurityTable } from "@/modules/alpha/components/AlphaSecurityTable";
-import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
 import {
   subscribeAlphaEventConnection,
   subscribeAlphaTasks,
   taskDisplayStatus,
 } from "@/modules/alpha/events/tasks";
-import { alphaQueryKeys, AlphaQueryProvider } from "@/modules/alpha/query";
+import { alphaQueryKeys } from "@/modules/alpha/query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -51,19 +50,8 @@ type Props = {
   visible: boolean;
 };
 
-/** 为数据目录页接入 Alpha 共享查询缓存。 */
-export function AlphaDataPage(props: Props) {
-  return (
-    <AlphaQueryProvider>
-      <AlphaServiceBoundary visible={props.visible}>
-        <AlphaDataPageContent {...props} />
-      </AlphaServiceBoundary>
-    </AlphaQueryProvider>
-  );
-}
-
 /** 连接数据目录、日线同步质量、Facets、分页和按需行情查询。 */
-function AlphaDataPageContent({ visible }: Props) {
+export function DataManagementScene({ visible }: Props) {
   const { t, i18n } = useTranslation("alpha");
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");

@@ -123,7 +123,7 @@ describe("Workbench Space serialization", () => {
     expect(allocId).toHaveBeenCalledTimes(3);
   });
 
-  it("persists Alpha workstation, desk and data pages as runtime locators", () => {
+  it("persists Alpha workstation and desk pages as runtime locators", () => {
     const current: WorkbenchState = {
       tabs: {
         6: {
@@ -131,12 +131,6 @@ describe("Workbench Space serialization", () => {
           kind: "alpha-desk",
           spaceId: "default",
           title: "Alpha Desk",
-        },
-        1: {
-          id: 1,
-          kind: "alpha-data",
-          spaceId: "default",
-          title: "Alpha Data",
         },
         3: {
           id: 3,
@@ -149,7 +143,7 @@ describe("Workbench Space serialization", () => {
         default: {
           root: { kind: "group", id: 4, groupId: 5 },
           groups: {
-            5: { id: 5, tabIds: [1, 3, 6], activeTabId: 3 },
+            5: { id: 5, tabIds: [3, 6], activeTabId: 3 },
           },
           activeGroupId: 5,
         },
@@ -159,12 +153,8 @@ describe("Workbench Space serialization", () => {
     const serialized = serializeSpaceWorkbench(current, "default");
     expect(serialized).toEqual({
       kind: "group",
-      tabs: [
-        { kind: "alpha-data" },
-        { kind: "alpha-workstation" },
-        { kind: "alpha-desk" },
-      ],
-      activeTabIndex: 1,
+      tabs: [{ kind: "alpha-workstation" }, { kind: "alpha-desk" }],
+      activeTabIndex: 0,
       active: true,
     });
 
@@ -172,7 +162,6 @@ describe("Workbench Space serialization", () => {
       ? hydrateSpaceWorkbench(serialized, "default", counter())
       : null;
     expect(restored?.tabs.map((tab) => tab.kind)).toEqual([
-      "alpha-data",
       "alpha-workstation",
       "alpha-desk",
     ]);
@@ -184,7 +173,6 @@ describe("Workbench Space serialization", () => {
       tabs: [
         { kind: "alpha-workstation" },
         { kind: "alpha-desk" },
-        { kind: "alpha-data" },
         { kind: "terminal", cwd: "/work" },
       ],
       activeTabIndex: 0,

@@ -88,10 +88,6 @@ type AlphaWorkstationTab = TabBase & {
   kind: "alpha-workstation";
 };
 
-type AlphaDataTab = TabBase & {
-  kind: "alpha-data";
-};
-
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -101,7 +97,6 @@ export type Tab =
   | FileEditsTab
   | GitDiffTab
   | GitCommitFileDiffTab
-  | AlphaDataTab
   | (TabBase & { kind: "alpha-desk" })
   | AlphaWorkstationTab;
 

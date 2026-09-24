@@ -209,7 +209,6 @@ export default function App() {
     openCommitFileDiffTab,
     openAlphaDeskTab,
     openAlphaWorkstationTab,
-    openAlphaDataTab,
     closeTab,
     updateTab,
     setDocumentDirty,
@@ -628,11 +627,7 @@ export default function App() {
   useEffect(() => {
     if (alphaAvailable) return;
     for (const tab of tabsRef.current) {
-      if (
-        tab.kind === "alpha-desk" ||
-        tab.kind === "alpha-workstation" ||
-        tab.kind === "alpha-data"
-      ) {
+      if (tab.kind === "alpha-desk" || tab.kind === "alpha-workstation") {
         disposeTab(tab.id);
       }
     }
@@ -1925,9 +1920,6 @@ export default function App() {
                 }
                 onOpenWorkstation={() =>
                   openWorkspaceFromSidebar("alpha", openAlphaWorkstationTab)
-                }
-                onOpenData={() =>
-                  openWorkspaceFromSidebar("alpha", openAlphaDataTab)
                 }
               />
             ),

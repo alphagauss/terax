@@ -11,6 +11,7 @@ import { AlphaDeskDivider } from "@/modules/alpha/desk/AlphaDeskDivider";
 import { useAlphaDeskPreferences } from "@/modules/alpha/desk/preferences";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
 import { BacktestResultsScene } from "@/modules/alpha/scenes/BacktestResultsScene";
+import { DataManagementScene } from "@/modules/alpha/scenes/DataManagementScene";
 import { SecurityDetailsScene } from "@/modules/alpha/scenes/SecurityDetailsScene";
 import { TaskMonitorScene } from "@/modules/alpha/scenes/TaskMonitorScene";
 import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
@@ -140,6 +141,7 @@ function AlphaDeskContent({
   const set = preferences.set;
   const marketVisible = visible && state.view === "market";
   const backtestsVisible = visible && state.view === "backtests";
+  const dataVisible = visible && state.view === "data";
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       {preferences.saveError && (
@@ -198,7 +200,7 @@ function AlphaDeskContent({
                 aria-label={t("desk.views")}
                 className="flex h-10 shrink-0 items-center gap-1 border-b px-2"
               >
-                {(["market", "backtests"] as const).map((view) => (
+                {(["market", "backtests", "data"] as const).map((view) => (
                   <Button
                     key={view}
                     size="sm"
@@ -239,6 +241,13 @@ function AlphaDeskContent({
                 className="min-h-0 flex-1"
               >
                 <BacktestResultsScene visible={backtestsVisible} />
+              </section>
+              <section
+                aria-label={t("desk.data")}
+                hidden={state.view !== "data"}
+                className="min-h-0 flex-1"
+              >
+                <DataManagementScene visible={dataVisible} />
               </section>
             </main>
             {state.right && (

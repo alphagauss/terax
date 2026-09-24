@@ -27,7 +27,6 @@ describe("AlphaSidebar", () => {
   it("opens each Alpha page without forwarding the click event", async () => {
     const onOpenDesk = vi.fn();
     const onOpenWorkstation = vi.fn();
-    const onOpenData = vi.fn();
     const container = document.createElement("div");
     root = createRoot(container);
 
@@ -36,19 +35,17 @@ describe("AlphaSidebar", () => {
         createElement(AlphaSidebar, {
           onOpenDesk,
           onOpenWorkstation,
-          onOpenData,
         }),
       );
     });
 
     const buttons = container.querySelectorAll("button");
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(2);
     buttons.forEach((button) => {
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(onOpenDesk).toHaveBeenCalledWith();
     expect(onOpenWorkstation).toHaveBeenCalledWith();
-    expect(onOpenData).toHaveBeenCalledWith();
   });
 });

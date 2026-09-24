@@ -1,5 +1,5 @@
 /**
- * 本文件测试 Alpha 数据目录页的按需加载和手动刷新流程。
+ * 本文件测试三栏工作页数据管理场景的按需加载和手动刷新流程。
  * 重点锁定筛选、按需行情、同步与异常重试，以及刷新强制绕过概览缓存。
  */
 
@@ -28,11 +28,6 @@ vi.mock("@/modules/alpha/api", () => ({
   startAlphaBarSync: mocks.startAlphaBarSync,
 }));
 
-vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
-  AlphaServiceBoundary: ({ children }: { children: React.ReactNode }) =>
-    children,
-}));
-
 vi.mock("@/modules/alpha/chart/scenes/MarketChartScene", () => ({
   MarketChartScene: (props: Record<string, unknown>) => {
     mocks.sceneProps = props;
@@ -51,8 +46,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-import { AlphaDataPage } from "@/modules/alpha/pages/AlphaDataPage";
-import { clearAlphaQueryCache } from "@/modules/alpha/query";
+import {
+  AlphaQueryProvider,
+  clearAlphaQueryCache,
+} from "@/modules/alpha/query";
+import { DataManagementScene } from "@/modules/alpha/scenes/DataManagementScene";
 
 const overview = {
   summary: {
@@ -98,7 +96,7 @@ const security = {
   },
 };
 
-describe("AlphaDataPage", () => {
+describe("DataManagementScene", () => {
   let root: ReturnType<typeof createRoot> | null = null;
 
   beforeEach(() => {
@@ -143,12 +141,42 @@ describe("AlphaDataPage", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
+  it("隐藏视图不查询数据，重新显示时恢复查询", async () => {
+    root = createRoot(document.createElement("div"));
+    const render = (visible: boolean) =>
+      root?.render(
+        createElement(
+          AlphaQueryProvider,
+          null,
+          createElement(DataManagementScene, { visible }),
+        ),
+      );
+
+    await act(async () => render(false));
+    expect(mocks.getAlphaDataOverview).not.toHaveBeenCalled();
+    expect(mocks.getAlphaSecurities).not.toHaveBeenCalled();
+    expect(mocks.getAlphaSyncOverview).not.toHaveBeenCalled();
+
+    await act(async () => render(true));
+    await vi.waitFor(() => {
+      expect(mocks.getAlphaDataOverview).toHaveBeenCalled();
+      expect(mocks.getAlphaSecurities).toHaveBeenCalled();
+      expect(mocks.getAlphaSyncOverview).toHaveBeenCalled();
+    });
+  });
+
   it("打开页面不选择行情，选择证券后把标的交给公共图表 scene", async () => {
     const container = document.createElement("div");
     root = createRoot(container);
 
     await act(async () => {
-      root?.render(createElement(AlphaDataPage, { visible: true }));
+      root?.render(
+        createElement(
+          AlphaQueryProvider,
+          null,
+          createElement(DataManagementScene, { visible: true }),
+        ),
+      );
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -190,7 +218,13 @@ describe("AlphaDataPage", () => {
     const container = document.createElement("div");
     root = createRoot(container);
     await act(async () => {
-      root?.render(createElement(AlphaDataPage, { visible: true }));
+      root?.render(
+        createElement(
+          AlphaQueryProvider,
+          null,
+          createElement(DataManagementScene, { visible: true }),
+        ),
+      );
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -226,7 +260,13 @@ describe("AlphaDataPage", () => {
     const container = document.createElement("div");
     root = createRoot(container);
     await act(async () => {
-      root?.render(createElement(AlphaDataPage, { visible: true }));
+      root?.render(
+        createElement(
+          AlphaQueryProvider,
+          null,
+          createElement(DataManagementScene, { visible: true }),
+        ),
+      );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const buttons = Array.from(container.querySelectorAll("button"));

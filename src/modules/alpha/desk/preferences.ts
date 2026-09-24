@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 
 export type AlphaDeskPreferences = {
   symbol: string;
-  view: "market" | "backtests";
+  view: "market" | "backtests" | "data";
   leftOpen: boolean;
   right: "security" | "tasks" | null;
   leftWidth: number;
@@ -55,12 +55,13 @@ export function parseAlphaDeskPreferences(
   }
   const symbol = read("symbol");
   const right = read("right");
+  const view = read("view");
   return {
     symbol:
       typeof symbol === "string"
         ? (normalizeAlphaVtSymbol(symbol) ?? "000001.SZSE")
         : "000001.SZSE",
-    view: read("view") === "backtests" ? "backtests" : "market",
+    view: view === "backtests" || view === "data" ? view : "market",
     leftOpen: read("leftOpen") !== false,
     right: right === "security" || right === "tasks" ? right : null,
     leftWidth: width("leftWidth", 240),
