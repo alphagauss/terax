@@ -9,6 +9,8 @@ import {
   rehypeFileReferences,
   withFileReferenceProtocol,
 } from "@/modules/file-actions/references";
+import { IS_WINDOWS } from "@/lib/platform";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { rehypeMarkdownSourcePositions } from "@/modules/markdown/lib/anchor";
 import { rehypeGithubAlerts } from "@/modules/markdown/lib/githubAlerts";
 import { rehypeRelativeMarkdownImages } from "@/modules/markdown/lib/localImages";
@@ -68,9 +70,10 @@ export function buildMarkdownRehypePlugins(
   documentPath: string,
 ): RehypePlugins {
   const baseDirectory = fileReferenceBaseDirectory(documentPath) ?? undefined;
+  const windowsLocal = IS_WINDOWS && currentWorkspaceEnv().kind === "local";
   return [
     defaultRehypePlugins.raw,
-    [rehypeFileReferences, { baseDirectory }],
+    [rehypeFileReferences, { baseDirectory, windowsLocal }],
     rehypeRelativeMarkdownImages,
     rehypeGithubAlerts,
     [rehypeSanitize, markdownSanitizeSchema],
