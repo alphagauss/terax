@@ -295,9 +295,8 @@ function desktopDraftParameterSelections(): ModelParameterSelections {
     : {};
 }
 
-/** 串行保存主窗口的活动会话选择，空值表示下次启动进入新草稿。 */
+/** 串行保存当前窗口的活动会话选择，空值表示下次启动进入新草稿。 */
 function persistActiveSession(id: string | null): Promise<void> {
-  if (!currentWorkspaceBootstrap().isPrimary) return Promise.resolve();
   const operation = activeSessionPersistence.then(() =>
     id === null
       ? deleteWorkspaceValue("ai:activeSessionId")
@@ -754,22 +753,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
   runLockSessionIds: {},
   sessionSyncError: null,
 
-  /** 加载会话列表；主窗口只恢复有效记录，其他情况创建内存草稿。 */
+  /** 加载会话列表；按当前窗口状态恢复有效记录，其他情况创建内存草稿。 */
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
     try {
       const sessions = await listSessions();
-      const primary = currentWorkspaceBootstrap().isPrimary;
-      const savedActive = primary
-        ? getWorkspaceValue<string>("ai:activeSessionId")
-        : undefined;
+      const savedActive = getWorkspaceValue<string>("ai:activeSessionId");
       const restored = savedActive
         ? (sessions.find((session) => session.id === savedActive) ?? null)
         : null;
       const draftId = restored ? null : newSessionId();
       const activeId = restored?.id ?? draftId;
       if (restored && get().chatViewVisible) await seedSession(restored.id);
-      if (primary && savedActive && !restored) await persistActiveSession(null);
+      if (savedActive && !restored) await persistActiveSession(null);
       set({
         sessions,
         draftSessionId: draftId,
