@@ -35,6 +35,8 @@ export type SidebarContainerDefinition = {
   defaultOrder: number;
   allowedLocations: readonly SidebarLocation[];
   minimumWidth: number;
+  /** 直接打开工作页的导航项不参与侧边栏内容激活。 */
+  opensPage?: boolean;
 };
 
 export type SidebarPlacements = Record<SidebarLocation, SidebarContainerId[]>;

@@ -339,7 +339,8 @@ export function useSidebarLayout(
 
   const openContainer = useCallback(
     (id: SidebarContainerId) => {
-      if (temporarilyHiddenRef.current) return false;
+      if (temporarilyHiddenRef.current || getSidebarContainer(id).opensPage)
+        return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       if (
         location === "primary" &&
@@ -370,7 +371,8 @@ export function useSidebarLayout(
 
   const toggleContainer = useCallback(
     (id: SidebarContainerId) => {
-      if (temporarilyHiddenRef.current) return false;
+      if (temporarilyHiddenRef.current || getSidebarContainer(id).opensPage)
+        return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       const current = runtimeRef.current[location];
       if (
@@ -396,14 +398,22 @@ export function useSidebarLayout(
         runtimeRef.current.secondaryMode === "maximized"
       ) {
         const activeId =
-          current.activeId ?? placementsRef.current.primary[0] ?? null;
+          current.activeId ??
+          placementsRef.current.primary.find(
+            (id) => !getSidebarContainer(id).opensPage,
+          ) ??
+          null;
         return activeId ? openContainer(activeId) : false;
       }
       if (!current.collapsed) {
         return closeLocation(location);
       }
       const activeId =
-        current.activeId ?? placementsRef.current[location][0] ?? null;
+        current.activeId ??
+        placementsRef.current[location].find(
+          (id) => !getSidebarContainer(id).opensPage,
+        ) ??
+        null;
       return activeId ? openContainer(activeId) : false;
     },
     [closeLocation, openContainer],
