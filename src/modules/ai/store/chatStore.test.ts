@@ -946,7 +946,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(io.workspaceDelete).toHaveBeenCalledOnce();
   });
 
-  it("always opens a draft in a temporary window", async () => {
+  it("restores the recorded session in a temporary window with retained state", async () => {
     io.isPrimary = false;
     io.list.mockResolvedValue([first, second]);
     io.workspaceGet.mockReturnValue(first.id);
@@ -954,11 +954,25 @@ describe("chat store multi-process lifecycle", () => {
     await useChatStore.getState().hydrateSessions();
 
     expect(useChatStore.getState().sessions).toEqual([first, second]);
-    expect(useChatStore.getState().activeSessionId).toBe(
-      useChatStore.getState().draftSessionId,
+    expect(useChatStore.getState().activeSessionId).toBe(first.id);
+    expect(io.workspaceGet).toHaveBeenCalledWith("ai:activeSessionId");
+    expect(io.read).toHaveBeenCalledWith(first.id);
+  });
+
+  it("persists temporary window selection and clears it when opening a draft", async () => {
+    io.isPrimary = false;
+    useChatStore.setState({ sessions: [first], chatViewVisible: false });
+    useChatStore.getState().switchSession(first.id);
+    await vi.waitFor(() =>
+      expect(io.workspaceSet).toHaveBeenCalledWith(
+        "ai:activeSessionId",
+        first.id,
+      ),
     );
-    expect(io.workspaceGet).not.toHaveBeenCalled();
-    expect(io.read).not.toHaveBeenCalled();
+    useChatStore.getState().newSession();
+    await vi.waitFor(() =>
+      expect(io.workspaceDelete).toHaveBeenCalledWith("ai:activeSessionId"),
+    );
   });
 
   it("opens an unlisted draft when no persisted session exists", async () => {
