@@ -178,11 +178,14 @@ function readRuntimeLocation(
   const record = isRecord(value) ? value : {};
   const activeId =
     isContainerId(record.activeId) &&
+    !getSidebarContainer(record.activeId).opensPage &&
     placements[location].includes(record.activeId) &&
     !hiddenContainerIds.has(record.activeId)
       ? record.activeId
-      : (placements[location].find((id) => !hiddenContainerIds.has(id)) ??
-        null);
+      : (placements[location].find(
+          (id) =>
+            !getSidebarContainer(id).opensPage && !hiddenContainerIds.has(id),
+        ) ?? null);
   const minWidth =
     location === "primary"
       ? PRIMARY_SIDEBAR_MIN_WIDTH
@@ -254,7 +257,9 @@ export function runtimeAfterSidebarContainerMove(
   if (next[sourceLocation].activeId === id) {
     const fallback =
       nextPlacements[sourceLocation].find((candidate) => {
-        return !hidden.has(candidate);
+        return (
+          !getSidebarContainer(candidate).opensPage && !hidden.has(candidate)
+        );
       }) ?? null;
     next[sourceLocation].activeId = fallback;
     if (fallback === null) next[sourceLocation].collapsed = true;
