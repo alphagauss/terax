@@ -196,6 +196,12 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   });
   const chart = container.querySelector("[data-chart]");
   expect(chart).not.toBeNull();
+  const watchlist = container.querySelector<HTMLElement>(
+    'aside[aria-label="desk.watchlist"]',
+  );
+  const details = container.querySelector<HTMLElement>('aside[id$="-details"]');
+  expect(watchlist?.hasAttribute("inert")).toBe(false);
+  expect(details?.hasAttribute("inert")).toBe(true);
   const leftTools = container.querySelector(
     'nav[aria-label="desk.watchlistTools"]',
   );
@@ -246,6 +252,8 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(mocks.mounts).toEqual({ chart: 1, backtests: 1, data: 1 });
   await click("desk.tasks");
   expect(mocks.visible.tasks).toBe(true);
+  expect(container.querySelector('aside[id$="-details"]')).toBe(details);
+  expect(details?.hasAttribute("inert")).toBe(false);
   await click("desk.security");
   expect(mocks.visible.tasks).toBe(false);
   expect(mocks.visible.security).toBe(true);
@@ -258,8 +266,16 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(mocks.values.alphaShowInRemoteEnvironments).toBe(true);
   await click("desk.watchlist");
   expect(mocks.visible.watchlist).toBe(false);
+  expect(container.querySelector('aside[aria-label="desk.watchlist"]')).toBe(
+    watchlist,
+  );
+  expect(watchlist?.hasAttribute("inert")).toBe(true);
   expect(container.querySelector("[data-chart]")).toBe(chart);
   expect(mocks.mounts).toEqual({ chart: 1, backtests: 1, data: 1 });
+  await click("desk.watchlist");
+  expect(watchlist?.hasAttribute("inert")).toBe(false);
+  await click("desk.security");
+  expect(details?.hasAttribute("inert")).toBe(true);
   await click("desk.tasks");
   await click("desk.openTaskWindow");
   const taskWindow = container.querySelector(

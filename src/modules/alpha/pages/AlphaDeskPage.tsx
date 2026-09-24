@@ -4,6 +4,7 @@
  */
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
+import { readMotionDurationMs, readMotionEasing } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ConfiguredMarketChartScene } from "@/modules/alpha/chart/scenes/ConfiguredMarketChartScene";
 import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
@@ -23,7 +24,15 @@ import {
   Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { lazy, Suspense, useId, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 const AlphaSettingsDialog = lazy(() =>
@@ -57,6 +66,7 @@ function AlphaDeskShell({ visible }: { visible: boolean }) {
           <Button
             size="icon-sm"
             variant={preferences.data?.leftOpen ? "secondary" : "ghost"}
+            className="transition-none"
             disabled={!preferences.data}
             aria-label={t("desk.watchlist")}
             aria-expanded={preferences.data?.leftOpen ?? false}
@@ -117,6 +127,52 @@ function AlphaDeskContent({
   const { t } = useTranslation("alpha");
   const [taskWindowOpen, setTaskWindowOpen] = useState(false);
   const state = preferences.data;
+  const leftOpen = state?.leftOpen;
+  const leftWidth = state?.leftWidth;
+  const mainRef = useRef<HTMLElement>(null);
+  const mainAnimationRef = useRef<Animation | null>(null);
+  const previousLeftOpenRef = useRef(leftOpen);
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (leftOpen === undefined || leftWidth === undefined || !main) return;
+    const previousOpen = previousLeftOpenRef.current;
+    previousLeftOpenRef.current = leftOpen;
+    if (previousOpen === undefined || previousOpen === leftOpen) return;
+
+    const transform = mainAnimationRef.current
+      ? getComputedStyle(main).transform
+      : "none";
+    const interruptedOffset =
+      transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41;
+    const startOffset =
+      (leftOpen ? -1 : 1) * (leftWidth + 1) + interruptedOffset;
+    mainAnimationRef.current?.cancel();
+    const duration = readMotionDurationMs("--dur-pane", 150);
+    if (Math.abs(startOffset) < 0.5 || duration <= 0 || !main.animate) return;
+
+    // 面板宽度只在切换边界提交，图表不随动画逐帧重新测量。
+    const animation = main.animate(
+      [
+        { transform: `translate3d(${startOffset}px, 0, 0)` },
+        { transform: "translate3d(0, 0, 0)" },
+      ],
+      {
+        duration,
+        easing: readMotionEasing(
+          "--ease-emphasized",
+          "cubic-bezier(0.16, 1, 0.3, 1)",
+        ),
+      },
+    );
+    mainAnimationRef.current = animation;
+    const clear = () => {
+      if (mainAnimationRef.current === animation)
+        mainAnimationRef.current = null;
+    };
+    animation.onfinish = clear;
+    animation.oncancel = clear;
+  }, [leftOpen, leftWidth]);
+  useEffect(() => () => mainAnimationRef.current?.cancel(), []);
   if (!state)
     return (
       <div
@@ -152,7 +208,7 @@ function AlphaDeskContent({
       <div className="flex min-h-0 flex-1">
         <div className="app-scrollbar min-w-0 flex-1 overflow-x-auto">
           <div
-            className="flex h-full"
+            className="relative flex h-full overflow-hidden"
             style={{
               minWidth:
                 360 +
@@ -163,12 +219,20 @@ function AlphaDeskContent({
             <aside
               id={`${id}-watchlist`}
               aria-label={t("desk.watchlist")}
-              hidden={!state.leftOpen}
+              aria-hidden={!state.leftOpen}
+              inert={!state.leftOpen}
               className={cn(
-                "h-full shrink-0 flex-col",
-                state.leftOpen && "flex",
+                "z-20 flex h-full shrink-0 flex-col overflow-hidden bg-background transition-[opacity,transform] duration-pane ease-emphasized motion-reduce:transition-none",
+                !state.leftOpen &&
+                  "pointer-events-none absolute inset-y-0 left-0",
               )}
-              style={{ width: state.leftWidth }}
+              style={{
+                width: state.leftWidth,
+                opacity: state.leftOpen ? 1 : 0,
+                transform: state.leftOpen
+                  ? "translate3d(0, 0, 0)"
+                  : "translate3d(-100%, 0, 0)",
+              }}
             >
               <div className="flex h-10 shrink-0 items-center justify-between border-b px-2">
                 <strong className="text-xs">{t("desk.watchlist")}</strong>
@@ -195,7 +259,7 @@ function AlphaDeskContent({
                 onCommit={(width) => set("leftWidth", width)}
               />
             )}
-            <main className="flex min-w-0 flex-1 flex-col">
+            <main ref={mainRef} className="flex min-w-0 flex-1 flex-col">
               <nav
                 aria-label={t("desk.views")}
                 className="flex h-10 shrink-0 items-center gap-1 border-b px-2"
@@ -257,9 +321,20 @@ function AlphaDeskContent({
             )}
             <aside
               id={`${id}-details`}
-              hidden={!state.right}
-              className={cn("h-full shrink-0 flex-col", state.right && "flex")}
-              style={{ width: state.rightWidth }}
+              aria-hidden={!state.right}
+              inert={!state.right}
+              className={cn(
+                "z-20 flex h-full shrink-0 flex-col overflow-hidden bg-background transition-[opacity,transform] duration-pane ease-emphasized motion-reduce:transition-none",
+                !state.right &&
+                  "pointer-events-none absolute inset-y-0 right-0",
+              )}
+              style={{
+                width: state.rightWidth,
+                opacity: state.right ? 1 : 0,
+                transform: state.right
+                  ? "translate3d(0, 0, 0)"
+                  : "translate3d(100%, 0, 0)",
+              }}
             >
               <div className="flex h-10 shrink-0 items-center justify-between border-b px-2">
                 <strong className="text-xs">
@@ -316,6 +391,7 @@ function AlphaDeskContent({
               <Button
                 size="icon-sm"
                 variant={state.right === key ? "secondary" : "ghost"}
+                className="transition-none"
                 aria-label={t(`desk.${key}`)}
                 aria-expanded={state.right === key}
                 aria-controls={`${id}-details`}
