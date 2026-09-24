@@ -38,9 +38,7 @@ import { native } from "@/modules/ai/lib/native";
 import { buildOpenFileGroups } from "@/modules/ai/lib/openFileCandidates";
 import { useApprovalStore } from "@/modules/ai/store/approvalStore";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
-import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
 import { useAlphaShowInRemote } from "@/modules/alpha/preferences";
-import { flushAlphaWorkstationWrites } from "@/modules/alpha/workstation/store";
 import { flushAlphaDeskWrites } from "@/modules/alpha/desk/writes";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
@@ -208,7 +206,6 @@ export default function App() {
     openGitDiffTab,
     openCommitFileDiffTab,
     openAlphaDeskTab,
-    openAlphaWorkstationTab,
     closeTab,
     updateTab,
     setDocumentDirty,
@@ -589,7 +586,6 @@ export default function App() {
     const stateResults = await Promise.allSettled([
       flushSpacePersistence(),
       flushCompletedSessionRuns(),
-      flushAlphaWorkstationWrites(),
       flushAlphaDeskWrites(),
     ]);
     const storeResults = await Promise.allSettled([
@@ -627,7 +623,7 @@ export default function App() {
   useEffect(() => {
     if (alphaAvailable) return;
     for (const tab of tabsRef.current) {
-      if (tab.kind === "alpha-desk" || tab.kind === "alpha-workstation") {
+      if (tab.kind === "alpha-desk") {
         disposeTab(tab.id);
       }
     }
@@ -1801,6 +1797,25 @@ export default function App() {
       (container): container is (typeof sidebar.containers)[number] =>
         container !== undefined && visibleSidebarContainerIds.has(container.id),
     );
+  /** Alpha 入口只聚焦工作页；折叠侧栏不改变上次使用的侧栏内容。 */
+  const activatePrimaryNavigation = (id: SidebarContainerId) => {
+    if (id === "alpha") {
+      if (sidebar.runtime.secondaryMode === "maximized") {
+        sidebar.setSecondaryMode("normal");
+      }
+      sidebar.closeLocation("primary");
+      openAlphaDeskTab();
+      return;
+    }
+    if (sidebar.activityBar.position === "default") sidebar.toggleContainer(id);
+    else sidebar.openContainer(id);
+  };
+  const primaryNavigationActiveId =
+    activeTab?.kind === "alpha-desk"
+      ? "alpha"
+      : sidebar.runtime.primary.collapsed
+        ? null
+        : sidebar.runtime.primary.activeId;
   const sidebarBadges = {
     "source-control": sourceControl.changedCount,
   };
@@ -1909,23 +1924,6 @@ export default function App() {
         />
       ),
     },
-    ...(alphaAvailable
-      ? [
-          {
-            id: "alpha" as const,
-            content: (
-              <AlphaSidebar
-                onOpenDesk={() =>
-                  openWorkspaceFromSidebar("alpha", openAlphaDeskTab)
-                }
-                onOpenWorkstation={() =>
-                  openWorkspaceFromSidebar("alpha", openAlphaWorkstationTab)
-                }
-              />
-            ),
-          },
-        ]
-      : []),
     {
       id: "channels",
       content: (
@@ -1979,9 +1977,9 @@ export default function App() {
               <SidebarActivityBar
                 {...sidebarConfigurationProps}
                 containers={primarySidebarContainers}
-                activeId={sidebar.runtime.primary.activeId}
+                activeId={primaryNavigationActiveId}
                 badges={sidebarBadges}
-                onActivate={sidebar.toggleContainer}
+                onActivate={activatePrimaryNavigation}
                 onMove={sidebar.moveContainer}
                 onReset={sidebar.resetContainerLocation}
               />
@@ -2031,9 +2029,9 @@ export default function App() {
                     <SidebarActivityBar
                       {...sidebarConfigurationProps}
                       containers={primarySidebarContainers}
-                      activeId={sidebar.runtime.primary.activeId}
+                      activeId={primaryNavigationActiveId}
                       badges={sidebarBadges}
-                      onActivate={sidebar.openContainer}
+                      onActivate={activatePrimaryNavigation}
                       onMove={sidebar.moveContainer}
                       onReset={sidebar.resetContainerLocation}
                     />
@@ -2046,9 +2044,9 @@ export default function App() {
                     <SidebarActivityBar
                       {...sidebarConfigurationProps}
                       containers={primarySidebarContainers}
-                      activeId={sidebar.runtime.primary.activeId}
+                      activeId={primaryNavigationActiveId}
                       badges={sidebarBadges}
-                      onActivate={sidebar.openContainer}
+                      onActivate={activatePrimaryNavigation}
                       onMove={sidebar.moveContainer}
                       onReset={sidebar.resetContainerLocation}
                     />

@@ -84,10 +84,6 @@ export type GitCommitFileDiffTab = TabBase & {
   preview: boolean;
 };
 
-type AlphaWorkstationTab = TabBase & {
-  kind: "alpha-workstation";
-};
-
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -97,8 +93,7 @@ export type Tab =
   | FileEditsTab
   | GitDiffTab
   | GitCommitFileDiffTab
-  | (TabBase & { kind: "alpha-desk" })
-  | AlphaWorkstationTab;
+  | (TabBase & { kind: "alpha-desk" });
 
 export type TabPatch = Partial<{
   title: string;

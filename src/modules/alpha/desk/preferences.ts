@@ -1,4 +1,4 @@
-/** 三栏实验页独立的展示偏好，按字段写入共享存储，不触碰自由画布状态。 */
+/** Alpha 展示偏好按字段写入共享存储，不覆盖其他配置。 */
 import {
   onSharedStoreChange,
   readSharedStore,
@@ -8,8 +8,8 @@ import {
   createDefaultAlphaChartPanelConfig,
   parseAlphaChartPanelConfig,
   type AlphaChartPanelConfig,
-} from "@/modules/alpha/workstation/chartPanelConfig";
-import { normalizeAlphaVtSymbol } from "@/modules/alpha/workstation/model";
+} from "@/modules/alpha/chart/chartPanelConfig";
+import { normalizeAlphaVtSymbol } from "@/modules/alpha/market/symbol";
 import { trackAlphaDeskWrite } from "@/modules/alpha/desk/writes";
 import {
   useMutation,

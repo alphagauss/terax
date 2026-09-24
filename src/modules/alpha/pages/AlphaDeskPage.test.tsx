@@ -170,9 +170,9 @@ it("停服时设置入口仍可打开，切页和服务启停不卸载设置现�
   expect(mocks.settingsMounts).toBe(1);
 });
 
-it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，偏好不覆盖工作台", async () => {
+it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，偏好不覆盖其他配置", async () => {
   mocks.values = {
-    workstation: { mainSymbol: "000001.SZSE" },
+    alphaShowInRemoteEnvironments: true,
     "desk.symbol": "000002.SZSE",
   };
   mocks.mounts = { chart: 0, backtests: 0, data: 0 };
@@ -255,7 +255,7 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
     "desk.symbol",
     "600000.SSE",
   );
-  expect(mocks.values.workstation).toEqual({ mainSymbol: "000001.SZSE" });
+  expect(mocks.values.alphaShowInRemoteEnvironments).toBe(true);
   await click("desk.watchlist");
   expect(mocks.visible.watchlist).toBe(false);
   expect(container.querySelector("[data-chart]")).toBe(chart);

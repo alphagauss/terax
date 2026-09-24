@@ -1,12 +1,12 @@
 /**
- * 本文件测试工作台图表面板的指标与对比配置序列化。
+ * 本文件测试Alpha 行情图表的指标与对比配置序列化。
  * 重点锁定指标上限以及对比标的默认值、唯一性、数量和颜色边界。
  */
 
 import {
   createDefaultAlphaChartPanelConfig,
   parseAlphaChartPanelConfig,
-} from "@/modules/alpha/workstation/chartPanelConfig";
+} from "@/modules/alpha/chart/chartPanelConfig";
 import { describe, expect, it } from "vitest";
 
 function rsi(instanceId: string) {

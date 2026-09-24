@@ -29,6 +29,6 @@ Rust 不自动重连业务 WebSocket。前端按订阅生命周期复用连接�
 
 ## UI 与计算
 
-Alpha 通过自身活动栏与侧栏打开 Workbench 页面，三栏实验页与自由画布使用独立入口和展示配置，设置从三栏页内打开。界面复用 Terax 控件、主题、国际化和通知。策略源码由 Workspace 浏览编辑，Alpha 发现、加载与执行。
+Alpha 通过活动栏图标直接打开或聚焦 Workbench 中的 Alpha 页面，不提供专属侧边栏。入口与布局行为见 [Alpha 工作站](alpha-quant-workstation.md)，设置从页内打开。界面复用 Terax 控件、主题、国际化和通知。策略源码由 Workspace 浏览编辑，Alpha 发现、加载与执行。
 
 可选 alpha-native 只替换完整计算边界，不能改变 Python 公开行为或 FastAPI 协议；使用差分测试验证结果。Rust 代理不承载 Python 领域模型。图表与工作台规则见 [Alpha 工作站](alpha-quant-workstation.md)。

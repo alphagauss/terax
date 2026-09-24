@@ -9,10 +9,10 @@ import {
 import { expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  values: { "desk.leftOpen": true, workstation: { locked: true } } as Record<
-    string,
-    unknown
-  >,
+  values: {
+    "desk.leftOpen": true,
+    alphaShowInRemoteEnvironments: true,
+  } as Record<string, unknown>,
   writes: [] as {
     key: string;
     value: unknown;
@@ -105,7 +105,7 @@ it("慢写入期间连续切换即时生效，外部快照不覆盖待保存修�
     await flushing;
     expect(flushed).toBe(true);
     expect(latest?.saveError?.message).toBe("write failed");
-    expect(mocks.values.workstation).toEqual({ locked: true });
+    expect(mocks.values.alphaShowInRemoteEnvironments).toBe(true);
     await act(async () => {
       latest?.set("right", "tasks");
       latest?.set("view", "backtests");

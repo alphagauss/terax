@@ -21,7 +21,7 @@ import type {
   ChartStudyInstance,
   ChartStudyResult,
 } from "@/modules/alpha/chart/studies/model";
-import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/model";
 import { marketDirectionColors } from "@/modules/alpha/market/metadata";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";

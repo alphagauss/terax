@@ -123,27 +123,21 @@ describe("Workbench Space serialization", () => {
     expect(allocId).toHaveBeenCalledTimes(3);
   });
 
-  it("persists Alpha workstation and desk pages as runtime locators", () => {
+  it("persists Alpha pages as runtime locators", () => {
     const current: WorkbenchState = {
       tabs: {
         6: {
           id: 6,
           kind: "alpha-desk",
           spaceId: "default",
-          title: "Alpha Desk",
-        },
-        3: {
-          id: 3,
-          kind: "alpha-workstation",
-          spaceId: "default",
-          title: "Alpha Workstation",
+          title: "Alpha",
         },
       },
       spaces: {
         default: {
           root: { kind: "group", id: 4, groupId: 5 },
           groups: {
-            5: { id: 5, tabIds: [3, 6], activeTabId: 3 },
+            5: { id: 5, tabIds: [6], activeTabId: 6 },
           },
           activeGroupId: 5,
         },
@@ -153,7 +147,7 @@ describe("Workbench Space serialization", () => {
     const serialized = serializeSpaceWorkbench(current, "default");
     expect(serialized).toEqual({
       kind: "group",
-      tabs: [{ kind: "alpha-workstation" }, { kind: "alpha-desk" }],
+      tabs: [{ kind: "alpha-desk" }],
       activeTabIndex: 0,
       active: true,
     });
@@ -161,20 +155,13 @@ describe("Workbench Space serialization", () => {
     const restored = serialized
       ? hydrateSpaceWorkbench(serialized, "default", counter())
       : null;
-    expect(restored?.tabs.map((tab) => tab.kind)).toEqual([
-      "alpha-workstation",
-      "alpha-desk",
-    ]);
+    expect(restored?.tabs.map((tab) => tab.kind)).toEqual(["alpha-desk"]);
   });
 
   it("drops persisted Alpha pages when the current environment hides Alpha", () => {
     const serialized: SerializedWorkbenchNode = {
       kind: "group",
-      tabs: [
-        { kind: "alpha-workstation" },
-        { kind: "alpha-desk" },
-        { kind: "terminal", cwd: "/work" },
-      ],
+      tabs: [{ kind: "alpha-desk" }, { kind: "terminal", cwd: "/work" }],
       activeTabIndex: 0,
       active: true,
     };

@@ -29,7 +29,7 @@ import type {
   ChartStudyResult,
   ChartStudySeriesKind,
 } from "@/modules/alpha/chart/studies/model";
-import type { ChartTimeRange } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { ChartTimeRange } from "@/modules/alpha/chart/sync/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import {

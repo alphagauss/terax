@@ -27,8 +27,7 @@ export type SerializedTab =
   | { kind: "editor"; path: string; explorerRoot?: string }
   | { kind: "web-preview"; url: string }
   | { kind: "markdown"; path: string; explorerRoot?: string }
-  | { kind: "alpha-desk" }
-  | { kind: "alpha-workstation" };
+  | { kind: "alpha-desk" };
 
 export type SerializedWorkbenchNode =
   | {
@@ -50,8 +49,7 @@ function isSerializableTab(tab: Tab): boolean {
     tab.kind === "editor" ||
     tab.kind === "web-preview" ||
     tab.kind === "markdown" ||
-    tab.kind === "alpha-desk" ||
-    tab.kind === "alpha-workstation"
+    tab.kind === "alpha-desk"
   );
 }
 
@@ -93,8 +91,6 @@ function serializeTab(tab: Tab): SerializedTab | null {
       };
     case "alpha-desk":
       return { kind: "alpha-desk" };
-    case "alpha-workstation":
-      return { kind: "alpha-workstation" };
     default:
       return null;
   }
@@ -229,14 +225,6 @@ function hydrateTab(
         spaceId,
         cold: true,
         title: i18n.t("tabs:alphaDesk"),
-      } satisfies Tab;
-    case "alpha-workstation":
-      return {
-        id: allocId(),
-        kind: "alpha-workstation",
-        spaceId,
-        cold: true,
-        title: i18n.t("tabs:alphaWorkstation"),
       } satisfies Tab;
   }
 }
@@ -386,7 +374,7 @@ function isSerializedTab(value: unknown): value is SerializedTab {
     );
   }
   if (tab.kind === "web-preview") return typeof tab.url === "string";
-  if (tab.kind === "alpha-desk" || tab.kind === "alpha-workstation") {
+  if (tab.kind === "alpha-desk") {
     return true;
   }
   if (tab.kind === "editor" || tab.kind === "markdown") {

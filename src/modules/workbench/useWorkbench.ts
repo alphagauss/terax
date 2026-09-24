@@ -45,8 +45,6 @@ import {
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type AlphaPageKind = "alpha-desk" | "alpha-workstation";
-
 function createInitialState(): WorkbenchState {
   return {
     tabs: {},
@@ -719,20 +717,24 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   );
 
   /**
-   * 在目标工作组中打开或复用指定 Alpha 业务页。
+   * 打开或聚焦当前 Space 中的 Alpha 页面。
    *
-   * 每类页面在单个工作组内保持唯一，跨工作组仍可独立布局。
+   * 优先复用目标工作组中的页面，再查找当前 Space 的其他工作组。
    */
-  const openAlphaPageTab = useCallback(
-    (kind: AlphaPageKind, title: string, groupId?: number) => {
+  const openAlphaDeskTab = useCallback(
+    (groupId?: number) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
       if (!group) return null;
-      const existing = group.tabIds
-        .map((id) => stateRef.current.tabs[id])
-        .find((tab) => tab?.kind === kind);
+      const existing =
+        group.tabIds
+          .map((id) => stateRef.current.tabs[id])
+          .find((tab) => tab?.kind === "alpha-desk") ??
+        Object.values(stateRef.current.tabs).find(
+          (tab) => tab.spaceId === spaceId && tab.kind === "alpha-desk",
+        );
       if (existing) {
         revealTab(existing.id);
         return existing.id;
@@ -740,32 +742,14 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const id = allocId();
       const tab: Tab = {
         id,
-        kind,
+        kind: "alpha-desk",
         spaceId,
-        title,
+        title: i18n.t("tabs:alphaDesk"),
       };
       addPage(tab, target);
       return id;
     },
     [addPage, allocId, revealTab, targetGroup],
-  );
-
-  /** 打开或复用独立的 Alpha 三栏实验页。 */
-  const openAlphaDeskTab = useCallback(
-    (groupId?: number) =>
-      openAlphaPageTab("alpha-desk", i18n.t("tabs:alphaDesk"), groupId),
-    [openAlphaPageTab],
-  );
-
-  /** 打开或复用 Alpha 综合工作台。 */
-  const openAlphaWorkstationTab = useCallback(
-    (groupId?: number) =>
-      openAlphaPageTab(
-        "alpha-workstation",
-        i18n.t("tabs:alphaWorkstation"),
-        groupId,
-      ),
-    [openAlphaPageTab],
   );
 
   const updateTab = useCallback(
@@ -1002,7 +986,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openGitDiffTab,
     openCommitFileDiffTab,
     openAlphaDeskTab,
-    openAlphaWorkstationTab,
     setAiDiffStatus,
     closeTab,
     updateTab,

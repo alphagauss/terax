@@ -1,6 +1,6 @@
 /**
- * 本文件提供 Alpha 三栏实验页面的懒加载入口。
- * 三栏和图表实现只在 Workbench 实际挂载三栏实验标签时进入前端模块图。
+ * 本文件提供 Alpha 页面的懒加载入口。
+ * 页面和图表实现只在 Workbench 实际挂载 Alpha 标签时进入前端模块图。
  */
 
 import { lazy, Suspense } from "react";
@@ -11,7 +11,7 @@ const AlphaDeskPageInner = lazy(() =>
   })),
 );
 
-/** 按需挂载 Alpha 三栏实验页面。 */
+/** 按需挂载 Alpha 页面。 */
 export function AlphaDeskPage({ visible }: { visible: boolean }) {
   return (
     <Suspense fallback={null}>

@@ -58,6 +58,41 @@ describe("useSidebarLayout temporary hiding", () => {
     vi.clearAllMocks();
   });
 
+  it("工作页入口不激活侧栏，收起后仍可恢复原侧栏内容", async () => {
+    workspaceStorage.get.mockReturnValue(undefined);
+    workspaceStorage.set.mockResolvedValue();
+    const root = createRoot(document.createElement("div"));
+    roots.push(root);
+    let controls: Controls | undefined;
+    await act(async () =>
+      root.render(
+        createElement(Harness, {
+          temporarilyHidden: false,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      ),
+    );
+    const current = () => {
+      if (!controls) throw new Error("sidebar controls are unavailable");
+      return controls;
+    };
+    expect(current().openContainer("alpha")).toBe(false);
+    expect(current().toggleContainer("alpha")).toBe(false);
+    await act(async () => current().closeLocation("primary"));
+    await act(async () => current().closeLocation("primary"));
+    expect(current().runtime.primary).toMatchObject({
+      activeId: "explorer",
+      collapsed: true,
+    });
+    await act(async () => current().toggleLocation("primary"));
+    expect(current().runtime.primary).toMatchObject({
+      activeId: "explorer",
+      collapsed: false,
+    });
+  });
+
   it("blocks visibility changes and restores the runtime layout", async () => {
     workspaceStorage.get.mockReturnValue(undefined);
     workspaceStorage.set.mockResolvedValue();

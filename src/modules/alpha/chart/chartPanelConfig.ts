@@ -1,5 +1,5 @@
 /**
- * 本文件定义工作台图表面板的可持久化配置边界。
+ * 本文件定义Alpha 行情图表的可持久化配置边界。
  * 配置包含公共行情图表选项、实时开关、有界指标实例和最多三个对比标的，并为缺失字段补默认值。
  */
 
@@ -18,7 +18,7 @@ import {
   MAX_SEPARATE_CHART_STUDIES,
 } from "@/modules/alpha/chart/studies/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
-import { normalizeAlphaVtSymbol } from "@/modules/alpha/workstation/model";
+import { normalizeAlphaVtSymbol } from "@/modules/alpha/market/symbol";
 import { z } from "zod";
 
 export type AlphaChartPanelConfig = MarketChartOptions & {

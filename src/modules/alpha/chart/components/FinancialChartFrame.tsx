@@ -54,7 +54,7 @@ import type {
   ChartStudyResult,
 } from "@/modules/alpha/chart/studies/model";
 import { StudyLegend } from "@/modules/alpha/chart/studies/StudyLegend";
-import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";

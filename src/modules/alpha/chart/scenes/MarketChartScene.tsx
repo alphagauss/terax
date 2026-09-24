@@ -24,7 +24,7 @@ import {
   normalizeVisibleStudyInstances,
   studyCalculationSignature,
 } from "@/modules/alpha/chart/studies/model";
-import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/model";
 import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";

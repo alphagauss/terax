@@ -121,3 +121,29 @@ describe("useWorkbench Git diff previews", () => {
     ]);
   });
 });
+
+describe("Alpha 页面入口", () => {
+  it("重复打开与跨工作组返回均聚焦已有页面，保留页面身份", () => {
+    root = createRoot(document.createElement("div"));
+    act(() => root?.render(createElement(Harness)));
+    act(() => workbench?.openAlphaDeskTab());
+    const alphaId = workbench?.activeId;
+    act(() => workbench?.openAlphaDeskTab());
+    expect(workbench?.tabs).toHaveLength(1);
+    expect(workbench?.activeId).toBe(alphaId);
+    act(() =>
+      workbench?.openGitDiffTab({
+        path: "file.ts",
+        repoRoot: "/work",
+        side: "worktree",
+      }),
+    );
+    act(() => workbench?.splitTab(workbench.activeId, "right", true));
+    expect(workbench?.activeId).not.toBe(alphaId);
+    act(() => workbench?.openAlphaDeskTab());
+    expect(workbench?.activeId).toBe(alphaId);
+    expect(
+      workbench?.tabs.filter((tab) => tab.kind === "alpha-desk"),
+    ).toHaveLength(1);
+  });
+});

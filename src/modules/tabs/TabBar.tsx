@@ -45,10 +45,10 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
 import {
   Cancel01Icon,
+  ChartCandlestickIcon,
   ComputerTerminal02Icon,
   GitCompareIcon,
   Globe02Icon,
-  GridIcon,
   IncognitoIcon,
   PencilEdit02Icon,
   PlusSignIcon,
@@ -849,10 +849,10 @@ export function TabIcon({ tab }: { tab: Tab }) {
       />
     );
   }
-  if (tab.kind === "alpha-workstation" || tab.kind === "alpha-desk") {
+  if (tab.kind === "alpha-desk") {
     return (
       <HugeiconsIcon
-        icon={GridIcon}
+        icon={ChartCandlestickIcon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

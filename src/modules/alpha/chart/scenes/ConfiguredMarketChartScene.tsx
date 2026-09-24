@@ -1,11 +1,11 @@
 /**
- * 本文件组合受控行情配置，供自由画布与三栏实验页复用。
+ * 本文件将 Alpha 展示偏好连接到公共行情场景。
  * 场景只拆分行情选项、实时开关、指标与对比配置，连接可选同步桥并回传更新，不拥有网格、绑定或持久化状态。
  */
 
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
-import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
-import type { AlphaChartPanelConfig } from "@/modules/alpha/workstation/chartPanelConfig";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/model";
+import type { AlphaChartPanelConfig } from "@/modules/alpha/chart/chartPanelConfig";
 import { useCallback, useMemo } from "react";
 
 /** 渲染带指标、对比与实时设置的公共行情图表。 */

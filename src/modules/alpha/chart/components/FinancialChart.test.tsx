@@ -5,7 +5,7 @@
 
 // @vitest-environment happy-dom
 
-import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/model";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";

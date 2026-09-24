@@ -7,7 +7,6 @@
 import { AlphaDeskPage } from "@/modules/alpha/pages/AlphaDeskPageLazy";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { AlphaWorkstationPage } from "@/modules/alpha/pages/AlphaWorkstationPageLazy";
 import {
   AiDiffView,
   type EditorPaneHandle,
@@ -111,7 +110,6 @@ export function WorkbenchRegisteredView({
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
         tab.kind !== "terminal" &&
           tab.kind !== "alpha-desk" &&
-          tab.kind !== "alpha-workstation" &&
           "pt-2 pr-0 pb-2 pl-3",
       )}
     >
@@ -174,9 +172,6 @@ export function WorkbenchRegisteredView({
         <GitDiffView ref={registerFindHandle} tab={tab} visible={visible} />
       )}
       {tab.kind === "alpha-desk" && <AlphaDeskPage visible={visible} />}
-      {tab.kind === "alpha-workstation" && (
-        <AlphaWorkstationPage visible={visible} />
-      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * 独立的三栏 Alpha 实验页，所有分区位于同一个 Workbench 页面内。
+ * Alpha 主页面，所有分区位于同一个 Workbench 页面内。
  * 分区隐藏保留场景实例，布局只管理展示状态，不拥有行情和后台任务。
  */
 import { Button } from "@/components/controls/button";
@@ -32,7 +32,7 @@ const AlphaSettingsDialog = lazy(() =>
   })),
 );
 
-/** 为三栏页接入与其他 Alpha 页面相同的查询缓存和服务边界。 */
+/** 为 Alpha 页面接入查询缓存和服务边界。 */
 export function AlphaDeskPage({ visible }: { visible: boolean }) {
   return (
     <AlphaQueryProvider>
@@ -211,9 +211,6 @@ function AlphaDeskContent({
                     {t(`desk.${view}`)}
                   </Button>
                 ))}
-                <span className="ml-auto truncate text-[10px] text-muted-foreground">
-                  {t("desk.experimental")}
-                </span>
               </nav>
               <section
                 aria-label={t("desk.market")}

@@ -1,9 +1,4 @@
 {
-  "sidebar": {
-    "title": "Alpha",
-    "workstation": "Workstation",
-    "desk": "Three-column desk (experimental)"
-  },
   "common": {
     "refresh": "Refresh",
     "retry": "Retry",
@@ -21,47 +16,6 @@
     "saving_report": "Saving report",
     "finalizing": "Finalizing",
     "finished": "Finished"
-  },
-  "workstation": {
-    "mainSymbol": "Main symbol",
-    "invalidSymbol": "Use SYMBOL.EXCHANGE",
-    "lock": "Lock layout",
-    "unlock": "Unlock layout",
-    "sync": {
-      "range": "Sync range",
-      "crosshair": "Sync crosshair"
-    },
-    "templates": {
-      "action": "Layout templates",
-      "singleChart": {
-        "title": "Single chart",
-        "description": "One full-width chart following the main symbol"
-      },
-      "comparison": {
-        "title": "Chart comparison",
-        "description": "Main-symbol chart beside a pinned chart"
-      }
-    },
-    "panels": {
-      "chart": "Chart"
-    },
-    "panelList": {
-      "action": "Panels",
-      "empty": "No panels",
-      "collapsed": "Collapsed"
-    },
-    "panel": {
-      "loading": "Loading panel...",
-      "unknown": "Unavailable panel type: {{type}}",
-      "failed": "This panel could not be loaded.",
-      "follow": "Follow",
-      "pinned": "Pinned",
-      "pinCurrent": "Pin to {{symbol}}",
-      "restoreFollow": "Resume following the main symbol",
-      "remove": "Remove panel",
-      "collapse": "Collapse panel",
-      "expand": "Expand panel"
-    }
   },
   "data": {
     "title": "Data",
@@ -242,7 +196,7 @@
         },
         "dialog": {
           "title": "Chart indicators",
-          "description": "Add or edit server-computed indicators for this workstation panel.",
+          "description": "Add or edit server-computed indicators for the current chart.",
           "search": "Search indicators",
           "select": "Select an indicator to configure.",
           "loadError": "Could not load the indicator catalog.",
@@ -426,7 +380,6 @@
     "previous": "Previous",
     "next": "Next",
     "resultCount": "{{count}} results",
-    "experimental": "Experimental layout",
     "watchlist": "Watchlist",
     "market": "Market",
     "backtests": "Backtests",

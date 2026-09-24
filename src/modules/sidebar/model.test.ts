@@ -245,3 +245,34 @@ describe("runtimeAfterSidebarContainerMove", () => {
     });
   });
 });
+
+describe("工作页活动栏入口", () => {
+  it("Alpha 可以排序，但不能移动到副侧栏或成为侧栏活动内容", () => {
+    const placements = DEFAULT_SIDEBAR_PLACEMENT_STATE.placements;
+    expect(moveSidebarContainer(placements, "alpha", "secondary", 0)).toBe(
+      placements,
+    );
+    const reordered = moveSidebarContainer(placements, "alpha", "primary", 0);
+    expect(reordered.primary[0]).toBe("alpha");
+    const runtime = normalizeSidebarRuntimeState(
+      {
+        ...DEFAULT_SIDEBAR_RUNTIME_STATE,
+        primary: {
+          ...DEFAULT_SIDEBAR_RUNTIME_STATE.primary,
+          activeId: "alpha",
+        },
+      },
+      reordered,
+    );
+    expect(runtime.primary.activeId).toBe("explorer");
+    const noContent = normalizeSidebarRuntimeState(runtime, reordered, [
+      "explorer",
+      "search",
+      "source-control",
+    ]);
+    expect(noContent.primary).toMatchObject({
+      activeId: null,
+      collapsed: true,
+    });
+  });
+});

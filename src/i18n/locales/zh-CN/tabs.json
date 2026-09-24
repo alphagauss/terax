@@ -11,7 +11,6 @@
   "privacy": "隐私",
   "editor": "编辑器",
   "webPreview": "网页预览",
-  "alphaWorkstation": "Alpha 工作台",
   "runPythonFile": "运行 Python 文件",
   "splitRight": "向右拆分",
   "splitAndMove": "拆分和移动",
@@ -37,5 +36,5 @@
     "right": "向右拆分"
   },
   "startFromDirectory": "从 {{name}} 启动",
-  "alphaDesk": "Alpha 三栏工作页"
+  "alphaDesk": "Alpha"
 }
