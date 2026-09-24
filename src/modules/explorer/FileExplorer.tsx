@@ -194,7 +194,7 @@ type RemoteNoticePhase = Extract<
   "connecting" | "reconnecting" | "disconnected"
 >;
 
-/** 展示 SSH 连接过程或需要用户处理的最终断开状态。 */
+/** 展示 SSH 连接过程和断开状态，并保留手动重连入口。 */
 function RemoteConnectionNotice({
   phase,
   onReconnect,

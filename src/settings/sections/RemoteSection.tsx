@@ -928,12 +928,17 @@ export function RemoteSection() {
                       update("reconnectEnabled", value === true)
                     }
                   />
-                  <Label
-                    htmlFor={`ssh-reconnect-${form.id}`}
-                    className="flex-1 text-[12px] font-normal"
-                  >
-                    {t("remote.fields.reconnect")}
-                  </Label>
+                  <div className="min-w-0 flex-1">
+                    <Label
+                      htmlFor={`ssh-reconnect-${form.id}`}
+                      className="text-[12px] font-normal"
+                    >
+                      {t("remote.fields.reconnect")}
+                    </Label>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {t("remote.hints.reconnect")}
+                    </p>
+                  </div>
                   <Label className="text-[11px] text-muted-foreground">
                     {t("remote.fields.reconnectAttempts")}
                   </Label>

@@ -205,6 +205,14 @@ impl HostKeyVerifier {
             .map(|pending| pending.prompt.clone())
     }
 
+    /// 建连失败或被替换后移除失效的主机密钥确认，避免后台重试重复提示。
+    pub async fn cancel_pending(&self, profile_id: &str) -> bool {
+        let mut pending = self.pending.lock().await;
+        let count = pending.len();
+        pending.retain(|_, entry| entry.prompt.profile_id != profile_id);
+        pending.len() != count
+    }
+
     /// 完成一次仍在等待的主机密钥确认，并按用户选择写入 known_hosts。
     pub async fn confirm(
         &self,
@@ -266,5 +274,7 @@ mod tests {
         let restored = verifier.pending_prompt("profile").await.unwrap();
         assert_eq!(restored.request_id, prompt.request_id);
         assert!(verifier.pending_prompt("other").await.is_none());
+        assert!(verifier.cancel_pending("profile").await);
+        assert!(verifier.pending_prompt("profile").await.is_none());
     }
 }

@@ -300,7 +300,7 @@ pub enum ForegroundIntent {
 ///
 /// `version` 在每次状态迁移时递增，前端据此拒绝迟到事件；`epoch` 只在新 transport
 /// 完整通过 shell 与 Workspace root 探测后递增，用于失效旧的终端和文件请求。
-/// `reconnecting` 表示自动恢复仍在进行，`disconnected` 表示流程已停止并需要用户处理。
+/// `reconnecting` 表示快速自动恢复，`disconnected` 表示当前不可用；网络故障时仍可低频重试。
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(
     tag = "phase",
