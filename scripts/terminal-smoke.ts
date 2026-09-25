@@ -120,6 +120,8 @@ try {
     getCustomInstructions: () => "",
     getDefaultSubagentModel: () => null,
     getMaxConcurrentSubagents: () => 3,
+    getMaxAgentSteps: () => null,
+    getMaxSubagentSteps: () => 32,
     getProviderBaseURLs: () => ({
       ollama: `http://127.0.0.1:${address.port}/v1`,
     }),

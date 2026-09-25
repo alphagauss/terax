@@ -22,7 +22,7 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo nextest run --locked
 ```
 
-没有 nextest 时使用 `cargo test --locked`；局部修改可以选择相关测试。Alpha Python 和实验性终端的专用命令分别见 [Alpha](../../alpha/docs/README.md) 与 [终端宿主](../architecture/terminal-agent.md)。
+没有 nextest 时使用 `cargo test --locked`；局部修改可以选择相关测试。实验性终端的专用命令见 [终端宿主](../architecture/terminal-agent.md)。
 
 ## 测试边界
 

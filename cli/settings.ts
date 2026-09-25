@@ -5,14 +5,17 @@
 
 import { readModelUsages } from "@/modules/ai/lib/modelUsage";
 
-import { createInstance } from "i18next";
+import i18n from "i18next";
 import { invokeNative } from "@/lib/nativeHost";
 import {
+  clampAgentSteps,
   clampMaxConcurrentSubagents,
   isModelRef,
   isProviderInstance,
   modelRequiresCredential,
   normalizeConfiguredModels,
+  normalizeMainAgentSteps,
+  MAX_SUBAGENT_STEPS_DEFAULT,
   providerFromBuiltinId,
   PROVIDERS,
   type ModelRef,
@@ -25,7 +28,9 @@ import {
 } from "@/modules/ai/lib/keyring";
 import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
 import en from "@/i18n/locales/en/tui.json";
+import enAi from "@/i18n/locales/en/ai.json";
 import zh from "@/i18n/locales/zh-CN/tui.json";
+import zhAi from "@/i18n/locales/zh-CN/ai.json";
 
 /** 从现有设置解析单次 Agent 配置；显式模型仍须属于已知 Provider 实例。 */
 export async function loadTerminalSettings(modelOption?: string) {
@@ -33,11 +38,13 @@ export async function loadTerminalSettings(modelOption?: string) {
     "shared_store_read",
     { store: "settings" },
   );
-  const i18n = createInstance();
   await i18n.init({
     lng: settings.language === "en" ? "en" : "zh-CN",
     fallbackLng: "en",
-    resources: { en: { translation: en }, "zh-CN": { translation: zh } },
+    resources: {
+      en: { translation: en, ai: enAi },
+      "zh-CN": { translation: zh, ai: zhAi },
+    },
     interpolation: { escapeValue: false },
   });
   const t = (key: keyof typeof en, values?: Record<string, string | number>) =>
@@ -110,6 +117,15 @@ export async function loadTerminalSettings(modelOption?: string) {
     typeof settings.maxConcurrentSubagents === "number"
       ? clampMaxConcurrentSubagents(settings.maxConcurrentSubagents)
       : 3;
+  const maxAgentSteps = normalizeMainAgentSteps(
+    typeof settings.maxAgentSteps === "number" ? settings.maxAgentSteps : null,
+  );
+  const maxSubagentSteps = clampAgentSteps(
+    typeof settings.maxSubagentSteps === "number"
+      ? settings.maxSubagentSteps
+      : MAX_SUBAGENT_STEPS_DEFAULT,
+    MAX_SUBAGENT_STEPS_DEFAULT,
+  );
   return {
     t,
     model,
@@ -124,6 +140,8 @@ export async function loadTerminalSettings(modelOption?: string) {
           : "",
       getDefaultSubagentModel: () => readModelUsages(settings).subagent.model,
       getMaxConcurrentSubagents: () => concurrency,
+      getMaxAgentSteps: () => maxAgentSteps,
+      getMaxSubagentSteps: () => maxSubagentSteps,
       getProviderBaseURLs: () => providerBaseURLs,
       getProviderModels: () => providerModels,
       getCustomProviders: () => customProviders,

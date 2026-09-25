@@ -1,5 +1,5 @@
 /** 单次非流式交接请求。保留模型前缀及工具定义，但绝不执行工具或进入 Agent 循环。 */
-import i18n from "@/i18n";
+import i18n from "i18next";
 import { generateText, type ModelMessage, type ToolSet } from "ai";
 import {
   buildConfiguredLanguageModel,

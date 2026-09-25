@@ -712,15 +712,7 @@ async fn read_file_pipelined(
     size: u64,
     chunk_len: u32,
 ) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
-    read_file_range_pipelined(
-        session,
-        handle,
-        0,
-        size,
-        chunk_len,
-        FILE_READ_PIPELINE,
-    )
-    .await
+    read_file_range_pipelined(session, handle, 0, size, chunk_len, FILE_READ_PIPELINE).await
 }
 
 /// 在单个 handle 上流水线读取绝对 offset 对应的有界区间。
@@ -740,13 +732,7 @@ async fn read_file_range_pipelined(
     let mut output = vec![0; output_len];
     let mut queued = plan_file_read_range_chunks(base_offset, size, chunk_len);
     let mut pending = FuturesUnordered::new();
-    fill_file_read_pipeline(
-        &mut pending,
-        &mut queued,
-        &session,
-        &handle,
-        max_inflight,
-    );
+    fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle, max_inflight);
 
     while let Some((chunk, result)) = pending.next().await {
         let data = result?.data;
@@ -777,13 +763,7 @@ async fn read_file_range_pipelined(
                 len: chunk.len - data.len() as u32,
             });
         }
-        fill_file_read_pipeline(
-            &mut pending,
-            &mut queued,
-            &session,
-            &handle,
-            max_inflight,
-        );
+        fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle, max_inflight);
     }
     Ok(output)
 }

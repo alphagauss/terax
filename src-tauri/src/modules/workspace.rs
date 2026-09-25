@@ -1273,7 +1273,7 @@ mod user_path_tests {
 
     #[tokio::test]
     async fn expands_only_current_user_home_without_shell_evaluation() {
-        let home = crate::modules::fs::to_canon(&dirs::home_dir().unwrap());
+        let home = crate::modules::fs::to_canon(dirs::home_dir().unwrap());
         let expected = format!("{}/project", home.trim_end_matches('/'));
         assert_eq!(
             expand_user_path("~/project".into(), &WorkspaceEnv::Local)
@@ -1307,9 +1307,7 @@ mod user_path_tests {
                 .unwrap();
         assert_eq!(
             canonical,
-            crate::modules::fs::to_canon(
-                &std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap()
-            )
+            crate::modules::fs::to_canon(std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap())
         );
         assert!(crate::modules::fs::tree::list_subdirs(
             "~".into(),

@@ -23,9 +23,6 @@ vi.mock("@/modules/workspace", () => ({
 vi.mock("@/modules/ai/lib/native", () => ({
   native: { workspaceAuthorize: mocks.authorize },
 }));
-vi.mock("@/modules/alpha/preferences", () => ({
-  getInitialAlphaShowInRemote: () => false,
-}));
 vi.mock("@/modules/remote", () => ({
   remoteNative: { setForeground: vi.fn() },
 }));

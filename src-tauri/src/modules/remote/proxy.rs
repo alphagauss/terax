@@ -206,8 +206,13 @@ mod tests {
             .unwrap();
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 512];
-            stream.read(&mut request).await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 512];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read > 0 && request.len() + read <= 4096);
+                request.extend_from_slice(&chunk[..read]);
+            }
             stream
                 .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
                 .await
