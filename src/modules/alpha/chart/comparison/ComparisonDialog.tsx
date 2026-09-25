@@ -4,7 +4,6 @@
  */
 
 import { Button } from "@/components/controls/button";
-import { DialogFooter } from "@/components/controls/dialog";
 import { Input } from "@/components/controls/input";
 import { Spinner } from "@/components/ui/spinner";
 import { getAlphaSecurities } from "@/modules/alpha/api";
@@ -185,11 +184,6 @@ export default function ComparisonDialog({
           )}
         </div>
       </div>
-      <DialogFooter className="border-t border-border/60 px-5 py-3">
-        <Button variant="outline" onClick={() => onOpenChange(false)}>
-          {t("data.chart.comparisons.actions.close")}
-        </Button>
-      </DialogFooter>
     </WorkbenchPageDialog>
   );
 }

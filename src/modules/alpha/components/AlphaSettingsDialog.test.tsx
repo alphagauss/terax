@@ -391,8 +391,8 @@ describe("AlphaSettingsDialog", () => {
       const dialog = container.querySelector(
         '[data-workbench-page-overlay="dialog"]',
       );
-      const close = [...container.querySelectorAll("button")].find(
-        (button) => button.textContent === "close",
+      const close = container.querySelector<HTMLButtonElement>(
+        '[data-workbench-page-overlay="dialog"] button[aria-label="close"]',
       );
       await act(async () => close?.click());
       expect(onOpenChange).not.toHaveBeenCalled();
@@ -494,8 +494,8 @@ describe("AlphaSettingsDialog", () => {
       const choose = [...container.querySelectorAll("button")].find(
         (button) => button.textContent === "storage.select",
       );
-      const close = [...container.querySelectorAll("button")].find(
-        (button) => button.textContent === "close",
+      const close = container.querySelector<HTMLButtonElement>(
+        '[data-workbench-page-overlay="dialog"] button[aria-label="close"]',
       );
       await act(async () => choose?.click());
       expect(choose?.disabled).toBe(true);
