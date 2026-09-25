@@ -89,6 +89,10 @@ const pressEscape = async (element: HTMLElement) =>
       }),
     );
   });
+const waitForExit = async () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
 
 it("遮罩关闭须显式启用，只响应可见顶层遮罩的主键操作", async () => {
   const close = vi.fn();
@@ -202,10 +206,13 @@ it("页内模态只隔离本页，后台保留草稿且不响应其他页面的 
   expect(lifecycle.mount).toHaveBeenCalledTimes(2);
   expect(lifecycle.unmount).not.toHaveBeenCalled();
   await pressEscape(input);
-  expect(dialog.isConnected).toBe(false);
+  expect(dialog.dataset.state).toBe("closed");
+  expect(dialog.inert).toBe(true);
   expect(floating.inert).toBe(false);
   expect(edit.closest("[inert]")).toBeNull();
   expect(document.activeElement).toBe(edit);
+  await waitForExit();
+  expect(dialog.isConnected).toBe(false);
 });
 
 it("非模态浮窗不锁定页面，多个模态按打开顺序恢复且 Tab 保留在顶层", async () => {
@@ -265,11 +272,42 @@ it("非模态浮窗不锁定页面，多个模态按打开顺序恢复且 Tab �
   });
   expect(document.activeElement).toBe(dialogs[1].querySelector("button"));
   await pressEscape(input);
+  expect(dialogs[1].dataset.state).toBe("closed");
+  expect(dialogs[0].inert).toBe(false);
+  expect(document.activeElement).toBe(trigger);
+  await waitForExit();
   expect(
     container.querySelectorAll('[data-workbench-page-overlay="dialog"]'),
   ).toHaveLength(1);
-  expect(dialogs[0].inert).toBe(false);
-  expect(document.activeElement).toBe(trigger);
+});
+
+it("退出期间重新打开复用原浮层，并取消旧卸载计时", async () => {
+  const render = async (open: boolean) =>
+    act(async () =>
+      root.render(
+        <WorkbenchPageScope visible focused>
+          <WorkbenchPageDialog open={open} title="edit" onOpenChange={() => {}}>
+            <Draft />
+          </WorkbenchPageDialog>
+        </WorkbenchPageScope>,
+      ),
+    );
+  await render(true);
+  const dialog = find('[data-workbench-page-overlay="dialog"]');
+  const input = find<HTMLInputElement>("input", dialog);
+  input.value = "retained";
+  await render(false);
+  expect(dialog.dataset.state).toBe("closed");
+  expect(dialog.inert).toBe(true);
+  await render(true);
+  expect(find('[data-workbench-page-overlay="dialog"]')).toBe(dialog);
+  expect(dialog.inert).toBe(false);
+  await waitForExit();
+  expect(dialog.isConnected).toBe(true);
+  expect(input.value).toBe("retained");
+  await render(false);
+  await waitForExit();
+  expect(dialog.isConnected).toBe(false);
 });
 
 it("页面实例池跨标签、Space 和分组移动保留浮层宿主，关页才释放", async () => {
