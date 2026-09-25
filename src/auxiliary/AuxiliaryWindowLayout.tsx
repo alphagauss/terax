@@ -60,15 +60,11 @@ export function AuxiliaryWindowLayout({
   }, [title]);
 
   useEffect(() => {
-    const nativeWindow = getCurrentWindow();
     if (!IS_MAC) {
-      const frame = window.requestAnimationFrame(() => {
-        void nativeWindow
-          .show()
-          .then(() => nativeWindow.setFocus())
-          .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
-      });
-      return () => window.cancelAnimationFrame(frame);
+      void invoke("show_auxiliary_window").catch((error) =>
+        console.error("显示并聚焦辅助窗口失败", error),
+      );
+      return;
     }
 
     let frame: number | null = null;
@@ -100,10 +96,9 @@ export function AuxiliaryWindowLayout({
       }
       if (!shown && !closed) {
         shown = true;
-        await nativeWindow
-          .show()
-          .then(() => nativeWindow.setFocus())
-          .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
+        await invoke("show_auxiliary_window").catch((error) =>
+          console.error("显示并聚焦辅助窗口失败", error),
+        );
       }
       syncing = false;
       // 显示窗口的异步调用期间也可能切换主题，收尾时补发被合并的更新。
@@ -123,7 +118,10 @@ export function AuxiliaryWindowLayout({
       attributes: true,
       attributeFilter: ["class", "style"],
     });
-    schedule();
+    // 隐藏的 WKWebView 可能不调度动画帧，首次显示不能依赖 requestAnimationFrame。
+    // 父级主题已在 layout effect 应用，读取计算样式会同步完成所需样式计算。
+    pending = true;
+    void sync();
     return () => {
       closed = true;
       scheduleAppearanceRef.current = null;

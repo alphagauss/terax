@@ -4,7 +4,7 @@
 //! 从属于当前 Workspace，但保持独立原生层级，不拥有第二套运行时，也不恢复位置或尺寸。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -43,6 +43,7 @@ pub struct AuxiliaryOpenEnvelope {
 pub struct AuxiliaryWindowState {
     next_revision: AtomicU64,
     latest: Mutex<HashMap<String, AuxiliaryOpenEnvelope>>,
+    ready: Mutex<HashSet<String>>,
 }
 
 impl Default for AuxiliaryWindowState {
@@ -50,11 +51,31 @@ impl Default for AuxiliaryWindowState {
         Self {
             next_revision: AtomicU64::new(1),
             latest: Mutex::new(HashMap::new()),
+            ready: Mutex::new(HashSet::new()),
         }
     }
 }
 
 impl AuxiliaryWindowState {
+    fn set_ready(&self, label: &str, ready: bool) {
+        let mut labels = self
+            .ready
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if ready {
+            labels.insert(label.to_string());
+        } else {
+            labels.remove(label);
+        }
+    }
+
+    fn is_ready(&self, label: &str) -> bool {
+        self.ready
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(label)
+    }
+
     fn record(&self, label: &str, request: OpenAuxiliaryWindowRequest) -> AuxiliaryOpenEnvelope {
         let envelope = AuxiliaryOpenEnvelope {
             revision: self.next_revision.fetch_add(1, Ordering::Relaxed),
@@ -228,14 +249,18 @@ pub async fn open_auxiliary_window(
     let envelope = state.record(definition.label, request.clone());
 
     if let Some(window) = app.get_webview_window(definition.label) {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
+        // 未就绪窗口的重复请求只更新目标；就绪后允许恢复被系统隐藏的窗口。
+        if state.is_ready(definition.label) {
+            window.show().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
         window
             .emit(AUXILIARY_OPEN_EVENT, envelope)
             .map_err(|error| error.to_string())?;
         return Ok(());
     }
 
+    state.set_ready(definition.label, false);
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "Workspace 主窗口不存在，无法创建辅助窗口".to_string())?;
@@ -249,6 +274,7 @@ pub async fn open_auxiliary_window(
         .maximizable(definition.maximizable)
         .closable(true)
         .visible(false);
+    #[cfg(not(target_os = "macos"))]
     let builder = match definition.level {
         AuxiliaryWindowLevel::Independent => builder,
         AuxiliaryWindowLevel::AboveWorkspace => {
@@ -274,6 +300,65 @@ pub async fn open_auxiliary_window(
     }
 
     place_window(&window, &main, definition.placement, source_point);
+    Ok(())
+}
+
+/// 页面提交后统一完成首次显示，避免隐藏 WebView 等待动画帧或提前进入原生层级。
+#[tauri::command]
+pub async fn show_auxiliary_window(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<'_, AuxiliaryWindowState>,
+) -> Result<(), String> {
+    if !is_registered_label(window.label()) {
+        return Err("当前窗口不是已注册的辅助窗口".into());
+    }
+    // 与创建流程同步，确保 build 返回后的定位也已完成；不能在 UI 线程上等待此锁。
+    let definition = {
+        let _open_guard = AUXILIARY_WINDOW_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state
+            .latest(window.label())
+            .ok_or_else(|| "辅助窗口尚无打开请求".to_string())?
+            .request
+            .definition()
+    };
+    let native_window = window.clone();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    window
+        .run_on_main_thread(move || {
+            let result = (|| -> Result<(), String> {
+                #[cfg(target_os = "macos")]
+                if definition.level == AuxiliaryWindowLevel::AboveWorkspace {
+                    use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
+                    let main = app
+                        .get_webview_window("main")
+                        .ok_or_else(|| "Workspace 主窗口不存在".to_string())?;
+                    let parent = main.ns_window().map_err(|error| error.to_string())?;
+                    let child = native_window
+                        .ns_window()
+                        .map_err(|error| error.to_string())?;
+                    // AppKit 加入子窗口时可能立即显示，必须在定位和页面外观就绪后执行。
+                    // 两个 WebviewWindow 在此闭包内保活，且所有原生操作均在主线程执行。
+                    unsafe {
+                        let parent = &*parent.cast::<NSWindow>();
+                        let child = &*child.cast::<NSWindow>();
+                        if child.parentWindow().is_none() {
+                            parent.addChildWindow_ordered(child, NSWindowOrderingMode::Above);
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (app, definition);
+                native_window.show().map_err(|error| error.to_string())?;
+                native_window.set_focus().map_err(|error| error.to_string())
+            })();
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    receiver.await.map_err(|error| error.to_string())??;
+    state.set_ready(window.label(), true);
     Ok(())
 }
 
@@ -607,6 +692,24 @@ mod tests {
             request.source_point(),
             Some(AuxiliarySourcePoint { x: 42.0, y: 84.0 })
         );
+    }
+
+    #[test]
+    fn repeated_requests_do_not_bypass_readiness_and_recreation_resets_it() {
+        let state = AuxiliaryWindowState::default();
+        let request = OpenAuxiliaryWindowRequest::FileProperties {
+            path: "/first".into(),
+            source_point: None,
+        };
+        state.record(FILE_PROPERTIES_LABEL, request.clone());
+        state.record(FILE_PROPERTIES_LABEL, request.clone());
+        assert!(!state.is_ready(FILE_PROPERTIES_LABEL));
+        state.set_ready(FILE_PROPERTIES_LABEL, true);
+        state.record(FILE_PROPERTIES_LABEL, request);
+        assert!(state.is_ready(FILE_PROPERTIES_LABEL));
+        state.set_ready(FILE_PROPERTIES_LABEL, false);
+        assert!(!state.is_ready(FILE_PROPERTIES_LABEL));
+        assert!(!state.is_ready(SETTINGS_LABEL));
     }
 
     #[test]

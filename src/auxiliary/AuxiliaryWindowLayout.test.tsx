@@ -30,7 +30,12 @@ vi.mock("@/lib/platform", () => ({
 vi.mock("@/modules/theme", () => ({
   useTheme: () => ({ mode: mocks.mode }),
 }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: unknown) =>
+    command === "show_auxiliary_window"
+      ? mocks.show()
+      : mocks.invoke(command, args),
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     show: mocks.show,
@@ -71,7 +76,7 @@ describe("macOS 辅助窗口标题栏", () => {
     vi.clearAllMocks();
   });
 
-  it("先同步原生外观再显示，并在主题变化后更新", async () => {
+  it("隐藏窗口不执行动画帧也能先同步外观再显示，并持续更新主题", async () => {
     let sampledColor = 24;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
@@ -119,7 +124,6 @@ describe("macOS 辅助窗口标题栏", () => {
         </AuxiliaryWindowLayout>,
       );
     });
-    await act(async () => frames.shift()?.(0));
     expect(mocks.invoke).toHaveBeenCalledWith(
       "set_auxiliary_window_appearance",
       {
@@ -146,7 +150,7 @@ describe("macOS 辅助窗口标题栏", () => {
 
     await act(async () => finishShow?.());
     await act(async () => frames.shift()?.(0));
-    expect(mocks.setFocus).toHaveBeenCalledTimes(1);
+    expect(mocks.setFocus).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenLastCalledWith(
       "set_auxiliary_window_appearance",
       { mode: "dark", background: [24, 24, 24] },
