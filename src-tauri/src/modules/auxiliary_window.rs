@@ -184,7 +184,7 @@ impl OpenAuxiliaryWindowRequest {
                 minimizable: false,
                 maximizable: false,
                 placement: AuxiliaryWindowPlacement::NearSourcePoint,
-                level: AuxiliaryWindowLevel::Independent,
+                level: AuxiliaryWindowLevel::AboveWorkspace,
             },
         }
     }
@@ -601,7 +601,7 @@ mod tests {
             definition.placement,
             AuxiliaryWindowPlacement::NearSourcePoint
         );
-        assert_eq!(definition.level, AuxiliaryWindowLevel::Independent);
+        assert_eq!(definition.level, AuxiliaryWindowLevel::AboveWorkspace);
         assert_eq!(request.initial_url(), "auxiliary.html");
         assert_eq!(
             request.source_point(),
