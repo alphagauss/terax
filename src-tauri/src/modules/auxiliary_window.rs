@@ -292,6 +292,86 @@ pub fn get_auxiliary_window_request(
         .ok_or_else(|| format!("辅助窗口 {label} 尚无打开请求"))
 }
 
+/// 原生辅助窗口外观模式；system 继承 macOS 外观。
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuxiliaryAppearanceMode {
+    Light,
+    Dark,
+    System,
+}
+
+/// 将 macOS 辅助窗口的原生标题栏外观与页面实际配色保持一致。
+///
+/// 只接受注册表内窗口自身调用，避免改变整个应用的 NSAppearance。
+#[tauri::command]
+pub async fn set_auxiliary_window_appearance(
+    window: WebviewWindow,
+    mode: AuxiliaryAppearanceMode,
+    background: [u8; 3],
+) -> Result<(), String> {
+    if !is_registered_label(window.label()) {
+        return Err("当前窗口不是已注册的辅助窗口".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let native_window = window.clone();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        window
+            .run_on_main_thread(move || {
+                let _ = sender.send(apply_auxiliary_window_appearance(
+                    &native_window,
+                    mode,
+                    background,
+                ));
+            })
+            .map_err(|error| error.to_string())?;
+        receiver.await.map_err(|error| error.to_string())?
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (mode, background);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_auxiliary_window_appearance(
+    window: &WebviewWindow,
+    mode: AuxiliaryAppearanceMode,
+    background: [u8; 3],
+) -> Result<(), String> {
+    use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+        NSColor, NSWindow,
+    };
+
+    let native = window.ns_window().map_err(|error| error.to_string())?;
+    // 窗口句柄在主线程闭包内由 WebviewWindow 保活，AppKit 属性必须在此线程修改。
+    let native = unsafe { &*native.cast::<NSWindow>() };
+    let name = match mode {
+        AuxiliaryAppearanceMode::Dark => Some(unsafe { NSAppearanceNameDarkAqua }),
+        AuxiliaryAppearanceMode::Light => Some(unsafe { NSAppearanceNameAqua }),
+        AuxiliaryAppearanceMode::System => None,
+    };
+    let appearance = name
+        .map(|name| NSAppearance::appearanceNamed(name).ok_or("无法取得 macOS 窗口外观"))
+        .transpose()?;
+    // 跟随系统时清除窗口覆盖，否则 WebView 的 prefers-color-scheme 会被旧外观污染。
+    native.setAppearance(appearance.as_deref());
+
+    let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+        f64::from(background[0]) / 255.0,
+        f64::from(background[1]) / 255.0,
+        f64::from(background[2]) / 255.0,
+        1.0,
+    );
+    native.setBackgroundColor(Some(&color));
+    Ok(())
+}
+
 /// 主窗口销毁后关闭本进程的所有辅助窗口，避免独立原生窗口阻止进程退出。
 pub fn destroy_all_auxiliary_windows(app: &tauri::AppHandle) {
     for (label, window) in app.webview_windows() {
@@ -411,6 +491,23 @@ fn place_near_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appearance_command_only_accepts_registered_auxiliary_labels() {
+        assert!(is_registered_label(SETTINGS_LABEL));
+        assert!(is_registered_label(FILE_PROPERTIES_LABEL));
+        assert!(!is_registered_label("auxiliary-unregistered"));
+        assert!(!is_registered_label("main"));
+    }
+
+    #[test]
+    fn appearance_mode_accepts_only_supported_values() {
+        assert_eq!(
+            serde_json::from_str::<AuxiliaryAppearanceMode>("\"system\"").unwrap(),
+            AuxiliaryAppearanceMode::System
+        );
+        assert!(serde_json::from_str::<AuxiliaryAppearanceMode>("\"unknown\"").is_err());
+    }
 
     #[test]
     fn auxiliary_capability_allows_focus_and_window_close_lifecycle() {

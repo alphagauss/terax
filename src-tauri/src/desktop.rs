@@ -333,6 +333,7 @@ pub fn run() {
             fullscreen::set_fullscreen,
             auxiliary_window::open_auxiliary_window,
             auxiliary_window::get_auxiliary_window_request,
+            auxiliary_window::set_auxiliary_window_appearance,
             agent::agent_enable_hooks,
             notifications::notification_prepare,
             notifications::notification_send,

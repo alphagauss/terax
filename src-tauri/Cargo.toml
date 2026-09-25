@@ -159,6 +159,7 @@ keyring = { version = "3.6", default-features = false, features = [
 	"apple-native",
 ] }
 objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAppearance", "NSColor", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] }
 
 # Linux 桌面还使用 D-Bus；图片剪贴板由三端共享的原生插件提供。
