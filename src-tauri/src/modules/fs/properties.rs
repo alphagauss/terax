@@ -6,7 +6,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(windows)]
+use std::time::Duration;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::Serialize;
@@ -18,6 +21,7 @@ use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use crate::modules::workspace_process::WorkspaceProcessState;
 
+#[cfg(windows)]
 const DIRECTORY_SCAN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const SFTP_SCAN_CONCURRENCY: usize = 6;
 
@@ -437,6 +441,7 @@ async fn wsl_snapshot(_distro: &str, _path: &str) -> Result<FilePropertiesSnapsh
     Err("WSL properties are only available on Windows".into())
 }
 
+#[cfg(any(windows, test))]
 fn parse_wsl_snapshot(path: &str, output: &[u8]) -> Result<FilePropertiesSnapshot, String> {
     let mut fields = output.split(|byte| *byte == 0);
     if fields.next() != Some(b"TERAX_PROPERTIES_STAT_V1".as_slice()) {
@@ -630,6 +635,7 @@ async fn sftp_scan(
     Ok(summary)
 }
 
+#[cfg(any(windows, test))]
 fn posix_scan_script(path: &str) -> String {
     remote::tasks::tree_summary::script(path)
 }
@@ -679,10 +685,12 @@ fn validate_posix_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(any(windows, test))]
 fn parse_field(field: Option<&[u8]>, name: &str) -> Result<u64, String> {
     parse_text_u64(std::str::from_utf8(field.unwrap_or_default()).ok(), name)
 }
 
+#[cfg(any(windows, test))]
 fn parse_radix_field(field: Option<&[u8]>, radix: u32, name: &str) -> Result<u32, String> {
     u32::from_str_radix(
         std::str::from_utf8(field.unwrap_or_default())
@@ -692,6 +700,7 @@ fn parse_radix_field(field: Option<&[u8]>, radix: u32, name: &str) -> Result<u32
     .map_err(|_| format!("{name} is invalid"))
 }
 
+#[cfg(any(windows, test))]
 fn parse_u32_field(field: Option<&[u8]>, name: &str) -> Result<u32, String> {
     std::str::from_utf8(field.unwrap_or_default())
         .map_err(|_| format!("{name} is not UTF-8"))?
@@ -699,6 +708,7 @@ fn parse_u32_field(field: Option<&[u8]>, name: &str) -> Result<u32, String> {
         .map_err(|_| format!("{name} is invalid"))
 }
 
+#[cfg(any(windows, test))]
 fn seconds_field(field: Option<&[u8]>, name: &str) -> Result<Option<u64>, String> {
     let seconds = std::str::from_utf8(field.unwrap_or_default())
         .map_err(|_| format!("{name} is not UTF-8"))?
@@ -710,6 +720,7 @@ fn seconds_field(field: Option<&[u8]>, name: &str) -> Result<Option<u64>, String
         .map(|seconds| seconds.saturating_mul(1000)))
 }
 
+#[cfg(any(windows, test))]
 fn text_field(field: Option<&[u8]>, name: &str) -> Result<String, String> {
     std::str::from_utf8(field.unwrap_or_default())
         .map(str::to_string)

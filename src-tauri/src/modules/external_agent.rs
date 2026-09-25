@@ -186,9 +186,9 @@ fn agent_name(agent: ExternalAgentId) -> &'static str {
     }
 }
 
-fn probe_command(workspace: &WorkspaceEnv) -> String {
+fn probe_command(_workspace: &WorkspaceEnv) -> String {
     #[cfg(windows)]
-    if matches!(workspace, WorkspaceEnv::Local) {
+    if matches!(_workspace, WorkspaceEnv::Local) {
         return "if (Get-Command claude -ErrorAction SilentlyContinue) { 'claude' }; if (Get-Command codex -ErrorAction SilentlyContinue) { 'codex' }".into();
     }
     let script = "command -v claude >/dev/null 2>&1 && printf 'claude\\n'; command -v codex >/dev/null 2>&1 && printf 'codex\\n'";
@@ -235,9 +235,9 @@ fn launch_command(
     command_with_args(agent_name(agent), &args, workspace)
 }
 
-fn command_with_args(program: &str, args: &[&str], workspace: &WorkspaceEnv) -> String {
+fn command_with_args(program: &str, args: &[&str], _workspace: &WorkspaceEnv) -> String {
     #[cfg(windows)]
-    if matches!(workspace, WorkspaceEnv::Local) {
+    if matches!(_workspace, WorkspaceEnv::Local) {
         let mut command = format!("& {}", powershell_quote(program));
         for arg in args {
             command.push(' ');
