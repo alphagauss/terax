@@ -19,6 +19,7 @@ import {
 } from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
+import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import { ChartAccessibilityLayer } from "@/modules/alpha/chart/accessibility/ChartAccessibilityLayer";
 import { ComparisonLegend } from "@/modules/alpha/chart/comparison/ComparisonLegend";
@@ -165,6 +166,9 @@ export function FinancialChartFrame({
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
   const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
+  // 懒加载入口保持到内部页内对话框退场完成，关闭时不截断动画。
+  const indicatorPresence = usePresence(indicatorDialogOpen);
+  const comparisonPresence = usePresence(comparisonDialogOpen);
   const [liveBar, setLiveBar] = useState<{
     dataKey: string;
     bar: MarketBar;
@@ -765,7 +769,7 @@ export function FinancialChartFrame({
           </Button>
         ) : null}
       </div>
-      {indicatorDialogOpen && onStudiesChange ? (
+      {indicatorPresence.mounted && onStudiesChange ? (
         <Suspense fallback={null}>
           <IndicatorDialog
             open={indicatorDialogOpen}
@@ -779,7 +783,7 @@ export function FinancialChartFrame({
           />
         </Suspense>
       ) : null}
-      {comparisonDialogOpen && onComparisonsChange ? (
+      {comparisonPresence.mounted && onComparisonsChange ? (
         <Suspense fallback={null}>
           <ComparisonDialog
             open={comparisonDialogOpen}

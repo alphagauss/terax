@@ -5,6 +5,7 @@
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import { readMotionDurationMs, readMotionEasing } from "@/lib/motion";
+import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import { ConfiguredMarketChartScene } from "@/modules/alpha/chart/scenes/ConfiguredMarketChartScene";
 import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
@@ -56,6 +57,8 @@ function AlphaDeskShell({ visible }: { visible: boolean }) {
   const preferences = useAlphaDeskPreferences();
   const id = useId();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 懒加载宿主晚于页内对话框卸载，保留关闭时的退场过渡。
+  const settingsPresence = usePresence(settingsOpen);
   return (
     <div className="flex h-full min-h-0 bg-background">
       <nav
@@ -102,10 +105,10 @@ function AlphaDeskShell({ visible }: { visible: boolean }) {
           />
         </AlphaServiceBoundary>
       </div>
-      {settingsOpen && (
+      {settingsPresence.mounted && (
         <Suspense fallback={null}>
           <AlphaSettingsDialog
-            open
+            open={settingsOpen}
             visible={visible}
             onOpenChange={setSettingsOpen}
           />

@@ -36,9 +36,11 @@ vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
 }));
 vi.mock("@/modules/alpha/components/AlphaSettingsDialog", () => ({
   AlphaSettingsDialog: ({
+    open,
     visible,
     onOpenChange,
   }: {
+    open: boolean;
     visible: boolean;
     onOpenChange: (open: boolean) => void;
   }) => {
@@ -47,7 +49,11 @@ vi.mock("@/modules/alpha/components/AlphaSettingsDialog", () => ({
     }, []);
     mocks.visible.settings = visible;
     return (
-      <WorkbenchPageDialog open title="settings" onOpenChange={onOpenChange}>
+      <WorkbenchPageDialog
+        open={open}
+        title="settings"
+        onOpenChange={onOpenChange}
+      >
         <input data-settings-draft />
       </WorkbenchPageDialog>
     );
@@ -168,6 +174,21 @@ it("停服时设置入口仍可打开，切页和服务启停不卸载设置现�
   expect(container.querySelector("[data-settings-draft]")).toBe(draft);
   expect(draft.value).toBe("unsaved");
   expect(mocks.settingsMounts).toBe(1);
+  const close = container.querySelector<HTMLButtonElement>(
+    '[data-workbench-page-overlay="dialog"] button[aria-label="close"]',
+  );
+  await act(async () => close?.click());
+  expect(
+    container
+      .querySelector('[data-workbench-page-overlay="dialog"]')
+      ?.getAttribute("data-state"),
+  ).toBe("closed");
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+  expect(
+    container.querySelector('[data-workbench-page-overlay="dialog"]'),
+  ).toBeNull();
 });
 
 it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，偏好不覆盖其他配置", async () => {
