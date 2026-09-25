@@ -195,13 +195,14 @@ export function TunnelManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 duration-surface ease-emphasized data-open:slide-in-from-bottom-1 data-closed:slide-out-to-bottom-1 sm:max-w-none">
-        <DialogHeader className="border-b border-border/60 px-5 py-4">
+      <DialogContent className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 duration-surface ease-emphasized data-open:slide-in-from-bottom-1 data-closed:slide-out-to-bottom-1 sm:max-w-none [&_[data-slot=dialog-title]]:text-[12px] [&>[data-slot=dialog-close]]:top-0.5 [&>[data-slot=dialog-close]]:right-1">
+        <DialogHeader className="flex h-8 shrink-0 justify-center border-b border-border/60 bg-card px-3 pr-10">
           <DialogTitle>{t("tunnels.title")}</DialogTitle>
-          <DialogDescription>
-            {t("tunnels.description", { name: profileName })}
-          </DialogDescription>
         </DialogHeader>
+
+        <DialogDescription className="border-b border-border/60 px-3 py-2">
+          {t("tunnels.description", { name: profileName })}
+        </DialogDescription>
 
         <div className="grid min-h-0 md:grid-cols-[14rem_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b border-border/60 bg-muted/20 md:border-r md:border-b-0">
