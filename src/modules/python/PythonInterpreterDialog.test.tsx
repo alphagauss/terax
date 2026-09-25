@@ -168,10 +168,15 @@ describe("PythonInterpreterDialog", () => {
         'button[aria-label="close"]',
       );
       await act(async () => close?.click());
+      expect(child?.dataset.state).toBe("closed");
+      expect(child?.inert).toBe(true);
+      expect(parent?.inert).toBe(false);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      });
       expect(
         container.querySelectorAll("[data-workbench-page-overlay]"),
       ).toHaveLength(1);
-      expect(parent?.inert).toBe(false);
     } finally {
       act(() => root.unmount());
       container.remove();

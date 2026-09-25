@@ -4,6 +4,7 @@
  */
 import { closeIconButtonClassName } from "@/components/controls/close-button";
 import { Hint } from "@/components/controls/tooltip";
+import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -161,7 +162,14 @@ function PageOverlay({
   open,
   ...props
 }: WorkbenchPageDialogProps & { modal: boolean }) {
-  return open ? <OpenPageOverlay {...props} /> : null;
+  const { visible } = usePageScope();
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const { mounted } = usePresence(open, visible && !reducedMotion ? 100 : 0);
+  return mounted ? (
+    <OpenPageOverlay {...props} open={open} reducedMotion={!!reducedMotion} />
+  ) : null;
 }
 
 const focusableSelector =
@@ -194,8 +202,10 @@ function focusableElements(container: HTMLElement) {
   ).filter((element) => element.tabIndex >= 0 && isFocusAvailable(element));
 }
 
-/** 打开期间始终保留同一个 Portal 与内容树，后台不注册全局焦点锁或滚动锁。 */
+/** 进出期间保留同一个 Portal；退出时立即释放层级，内容仅留到视觉过渡完成。 */
 function OpenPageOverlay({
+  open,
+  reducedMotion,
   modal,
   title,
   children,
@@ -203,7 +213,7 @@ function OpenPageOverlay({
   className,
   style,
   dismissOnBackdrop = false,
-}: Omit<WorkbenchPageDialogProps, "open"> & { modal: boolean }) {
+}: WorkbenchPageDialogProps & { modal: boolean; reducedMotion: boolean }) {
   const scope = usePageScope();
   const { register, raise, visible, focused, host, layers, topModalId } = scope;
   const { t } = useTranslation("common");
@@ -214,15 +224,26 @@ function OpenPageOverlay({
   );
   const previousFocus = useRef<HTMLElement | null>(null);
   const lastFocus = useRef<HTMLElement | null>(null);
+  const lastZIndex = useRef(1);
   const activeRef = useRef(false);
+  const [entered, setEntered] = useState(false);
   const blocked = topModalId !== null && topModalId !== id;
-  const active = visible && !blocked;
-  activeRef.current = active && focused;
+  const active = open && visible && !blocked;
+  const motionState = open && (entered || reducedMotion) ? "open" : "closed";
+  if (open) activeRef.current = active && focused;
 
-  useLayoutEffect(() => register({ id, modal }), [id, modal, register]);
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   useLayoutEffect(() => {
-    if (!host) return;
+    if (open) return register({ id, modal });
+  }, [id, modal, open, register]);
+
+  useLayoutEffect(() => {
+    if (!host || !open) return;
     const element = document.activeElement;
     const panel = panelRef.current;
     previousFocus.current = element instanceof HTMLElement ? element : null;
@@ -248,7 +269,7 @@ function OpenPageOverlay({
         }
       });
     };
-  }, [host]);
+  }, [host, open]);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -269,13 +290,17 @@ function OpenPageOverlay({
     ).focus({ preventScroll: true });
   }, [active, focused, modal, host, portalContainer]);
 
+  // 退出层已撤销模态注册，仍沿用原层级绘制淡出，避免突然落到内容后面。
+  const layerIndex = layers.findIndex((layer) => layer.id === id);
+  if (layerIndex >= 0) lastZIndex.current = layerIndex + 1;
   if (!host) return null;
   return createPortal(
     <div
       ref={setPortalContainer}
       data-workbench-page-overlay={modal ? "dialog" : "window"}
+      data-state={open ? "open" : "closed"}
       className="pointer-events-none absolute inset-0"
-      style={{ zIndex: layers.findIndex((layer) => layer.id === id) + 1 }}
+      style={{ zIndex: lastZIndex.current }}
       inert={!active}
       aria-hidden={!active}
       onFocusCapture={(event) => {
@@ -316,7 +341,9 @@ function OpenPageOverlay({
         <div
           role="presentation"
           data-workbench-page-backdrop=""
-          className="pointer-events-auto absolute inset-0 isolate bg-black/30 supports-backdrop-filter:backdrop-blur-sm"
+          data-state={open ? "open" : "closed"}
+          data-motion={motionState}
+          className="pointer-events-auto absolute inset-0 isolate bg-black/30 transition-opacity duration-100 ease-standard supports-backdrop-filter:backdrop-blur-sm data-[motion=closed]:opacity-0 data-[state=closed]:pointer-events-none motion-reduce:transition-none"
           onPointerDown={(event) => {
             // 只处理从本页遮罩开始的主键操作，内容拖选和其他页面点击不关闭。
             if (
@@ -338,13 +365,15 @@ function OpenPageOverlay({
         aria-labelledby={`${id}-title`}
         tabIndex={-1}
         onPointerDownCapture={() => {
-          if (!blocked) raise(id);
+          if (open && !blocked) raise(id);
         }}
+        data-state={open ? "open" : "closed"}
+        data-motion={motionState}
         className={cn(
-          "pointer-events-auto absolute flex max-h-[calc(100%-2rem)] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-xl ring-1 ring-foreground/5 outline-none dark:ring-foreground/10",
+          "pointer-events-auto absolute flex max-h-[calc(100%-2rem)] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-xl ring-1 ring-foreground/5 transition-[opacity,scale,translate] duration-100 ease-standard outline-none dark:ring-foreground/10 data-[motion=closed]:opacity-0 data-[state=closed]:pointer-events-none motion-reduce:transition-none",
           modal
-            ? "top-1/2 left-1/2 w-[28rem] -translate-x-1/2 -translate-y-1/2"
-            : "top-4 right-4 w-80",
+            ? "top-1/2 left-1/2 w-[28rem] -translate-x-1/2 -translate-y-1/2 scale-100 data-[motion=closed]:scale-95"
+            : "top-4 right-4 w-80 translate-y-0 data-[motion=closed]:-translate-y-2",
           className,
         )}
         style={style}
