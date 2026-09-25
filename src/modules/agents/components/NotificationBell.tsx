@@ -317,7 +317,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
         </Hint>
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        align="start"
         sideOffset={8}
         className="w-76 overflow-hidden gap-0.5 p-0"
       >

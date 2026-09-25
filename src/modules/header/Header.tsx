@@ -128,12 +128,10 @@ export function Header({
           </Button>
         </Hint>
 
-        {!IS_MAC && (
-          <NotificationBell
-            onActivate={onActivateAgent}
-            onActivateLocal={onActivateLocalAgent}
-          />
-        )}
+        <NotificationBell
+          onActivate={onActivateAgent}
+          onActivateLocal={onActivateLocalAgent}
+        />
       </div>
 
       {!IS_MAC && <span className="mx-1 h-full w-px shrink-0 bg-border/70" />}
@@ -148,25 +146,9 @@ export function Header({
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>
 
-      {IS_MAC && (
-        <>
-          <NotificationBell
-            onActivate={onActivateAgent}
-            onActivateLocal={onActivateLocalAgent}
-          />
-          {settingsButton}
-          {themeButton}
-          {secondarySidebarButton}
-        </>
-      )}
-
-      {!IS_MAC && (
-        <>
-          {settingsButton}
-          {themeButton}
-          {secondarySidebarButton}
-        </>
-      )}
+      {settingsButton}
+      {themeButton}
+      {secondarySidebarButton}
 
       {USE_CUSTOM_WINDOW_CONTROLS && (
         <>
