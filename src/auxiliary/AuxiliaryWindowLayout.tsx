@@ -8,8 +8,10 @@ import { Toaster } from "@/components/ui/sonner";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/modules/theme";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuxiliaryWindowCapabilities } from "./AuxiliaryWindowContext";
 
@@ -20,6 +22,23 @@ type Props = {
   className?: string;
 };
 
+/** 将浏览器已合成的标题栏底色采样为原生窗口可用的 sRGB 颜色。 */
+function readHeaderBackground(header: HTMLElement): [number, number, number] {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context || !header.parentElement) {
+    throw new Error("无法读取辅助窗口标题栏颜色");
+  }
+  canvas.width = 1;
+  canvas.height = 1;
+  context.fillStyle = getComputedStyle(header.parentElement).backgroundColor;
+  context.fillRect(0, 0, 1, 1);
+  context.fillStyle = getComputedStyle(header).backgroundColor;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+  return [red, green, blue];
+}
+
 /** 渲染辅助窗口外壳，并在页面首次提交后显示隐藏创建的原生窗口。 */
 export function AuxiliaryWindowLayout({
   title,
@@ -28,7 +47,11 @@ export function AuxiliaryWindowLayout({
   className,
 }: Props) {
   const { t } = useTranslation("common");
+  const { mode } = useTheme();
   const { minimizable, maximizable } = useAuxiliaryWindowCapabilities();
+  const headerRef = useRef<HTMLElement>(null);
+  const modeRef = useRef(mode);
+  const scheduleAppearanceRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     void getCurrentWindow()
@@ -37,15 +60,82 @@ export function AuxiliaryWindowLayout({
   }, [title]);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const nativeWindow = getCurrentWindow();
-      void nativeWindow
-        .show()
-        .then(() => nativeWindow.setFocus())
-        .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
+    const nativeWindow = getCurrentWindow();
+    if (!IS_MAC) {
+      const frame = window.requestAnimationFrame(() => {
+        void nativeWindow
+          .show()
+          .then(() => nativeWindow.setFocus())
+          .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    let frame: number | null = null;
+    let pending = false;
+    let syncing = false;
+    let shown = false;
+    let closed = false;
+    let appliedAppearance: string | null = null;
+    const sync = async () => {
+      if (syncing) return;
+      syncing = true;
+      while (pending && !closed) {
+        pending = false;
+        try {
+          const header = headerRef.current;
+          if (!header) break;
+          const background = readHeaderBackground(header);
+          const appearance = `${modeRef.current}:${background.join(",")}`;
+          if (appearance !== appliedAppearance) {
+            await invoke("set_auxiliary_window_appearance", {
+              mode: modeRef.current,
+              background,
+            });
+            appliedAppearance = appearance;
+          }
+        } catch (error) {
+          console.error("同步辅助窗口原生标题栏失败", error);
+        }
+      }
+      if (!shown && !closed) {
+        shown = true;
+        await nativeWindow
+          .show()
+          .then(() => nativeWindow.setFocus())
+          .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
+      }
+      syncing = false;
+      // 显示窗口的异步调用期间也可能切换主题，收尾时补发被合并的更新。
+      if (pending && !closed) schedule();
+    };
+    const schedule = () => {
+      pending = true;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        void sync();
+      });
+    };
+    const observer = new MutationObserver(schedule);
+    scheduleAppearanceRef.current = schedule;
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
     });
-    return () => window.cancelAnimationFrame(frame);
+    schedule();
+    return () => {
+      closed = true;
+      scheduleAppearanceRef.current = null;
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
   }, []);
+
+  useEffect(() => {
+    modeRef.current = mode;
+    scheduleAppearanceRef.current?.();
+  }, [mode]);
 
   return (
     <div
@@ -55,6 +145,7 @@ export function AuxiliaryWindowLayout({
       )}
     >
       <header
+        ref={headerRef}
         data-tauri-drag-region
         className={cn(
           "flex h-8 shrink-0 items-center gap-2 border-b border-border/60 bg-card",
