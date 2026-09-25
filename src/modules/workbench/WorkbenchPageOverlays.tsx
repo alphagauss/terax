@@ -2,8 +2,9 @@
  * 为每个工作页提供稳定的浮层宿主，统一管理页内模态、层级和焦点。
  * 页面隐藏只暂停交互，显式关闭才卸载浮层；不创建原生窗口或持有业务任务。
  */
-import { closeIconButtonClassName } from "@/components/controls/close-button";
+import { dialogCloseIconButtonClassName } from "@/components/controls/close-button";
 import { Hint } from "@/components/controls/tooltip";
+import { useBoundedDrag } from "@/components/controls/use-bounded-drag";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -137,7 +138,9 @@ export function WorkbenchPageScope({
 export type WorkbenchPageOverlayProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  title: ReactNode;
+  title?: ReactNode;
+  /** 无可见标题时必须提供可访问名称。 */
+  "aria-label"?: string;
   children: ReactNode;
   className?: string;
   style?: CSSProperties;
@@ -148,8 +151,10 @@ export type WorkbenchPageDialogProps = WorkbenchPageOverlayProps & {
   dismissOnBackdrop?: boolean;
 };
 
-/** 非模态页内浮窗，点击置前；位置与尺寸可由业务通过 style 控制。 */
-export function WorkbenchPageWindow(props: WorkbenchPageOverlayProps) {
+/** 非模态页内浮窗，点击置前；可选标题栏拖动，位置保留至浮窗关闭。 */
+export function WorkbenchPageWindow(
+  props: WorkbenchPageOverlayProps & { draggable?: boolean },
+) {
   return <PageOverlay {...props} modal={false} />;
 }
 
@@ -161,7 +166,7 @@ export function WorkbenchPageDialog(props: WorkbenchPageDialogProps) {
 function PageOverlay({
   open,
   ...props
-}: WorkbenchPageDialogProps & { modal: boolean }) {
+}: WorkbenchPageDialogProps & { modal: boolean; draggable?: boolean }) {
   const { visible } = usePageScope();
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -212,8 +217,14 @@ function OpenPageOverlay({
   onOpenChange,
   className,
   style,
+  draggable = false,
+  "aria-label": ariaLabel,
   dismissOnBackdrop = false,
-}: WorkbenchPageDialogProps & { modal: boolean; reducedMotion: boolean }) {
+}: WorkbenchPageDialogProps & {
+  modal: boolean;
+  reducedMotion: boolean;
+  draggable?: boolean;
+}) {
   const scope = usePageScope();
   const { register, raise, visible, focused, host, layers, topModalId } = scope;
   const { t } = useTranslation("common");
@@ -229,6 +240,9 @@ function OpenPageOverlay({
   const [entered, setEntered] = useState(false);
   const blocked = topModalId !== null && topModalId !== id;
   const active = open && visible && !blocked;
+  const drag = useBoundedDrag(panelRef, host, draggable, active);
+  const hasTitle =
+    title !== undefined && title !== null && title !== "" && title !== false;
   const motionState = open && (entered || reducedMotion) ? "open" : "closed";
   if (open) activeRef.current = active && focused;
 
@@ -362,7 +376,8 @@ function OpenPageOverlay({
       <div
         ref={panelRef}
         role="dialog"
-        aria-labelledby={`${id}-title`}
+        aria-labelledby={hasTitle ? `${id}-title` : undefined}
+        aria-label={ariaLabel}
         tabIndex={-1}
         onPointerDownCapture={() => {
           if (open && !blocked) raise(id);
@@ -378,17 +393,28 @@ function OpenPageOverlay({
         )}
         style={style}
       >
-        <header className="flex h-8 shrink-0 items-center gap-2 border-b border-border/60 bg-card px-2">
-          <h2
-            id={`${id}-title`}
-            className="min-w-0 flex-1 truncate text-[12px] font-medium"
-          >
-            {title}
-          </h2>
+        <header
+          {...drag}
+          className={cn(
+            "flex h-7 shrink-0 items-center justify-end gap-2 px-2",
+            hasTitle && "border-b border-border/60",
+            draggable &&
+              "cursor-grab touch-none select-none border-b border-border/60 bg-card",
+            !hasTitle && !draggable && "absolute top-0 right-0",
+          )}
+        >
+          {hasTitle && (
+            <h2
+              id={`${id}-title`}
+              className="min-w-0 flex-1 truncate text-[12px] font-medium"
+            >
+              {title}
+            </h2>
+          )}
           <Hint content={t("close")}>
             <button
               type="button"
-              className={closeIconButtonClassName}
+              className={dialogCloseIconButtonClassName}
               aria-label={t("close")}
               onClick={() => onOpenChange(false)}
             >
@@ -397,7 +423,12 @@ function OpenPageOverlay({
           </Hint>
         </header>
         <PortalContext.Provider value={portalContainer}>
-          <div className="app-scrollbar min-h-0 overflow-auto p-4">
+          <div
+            className={cn(
+              "app-scrollbar min-h-0 overflow-auto p-4",
+              !hasTitle && !draggable && "pr-10",
+            )}
+          >
             {children}
           </div>
         </PortalContext.Provider>

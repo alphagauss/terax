@@ -195,8 +195,11 @@ export function TunnelManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 duration-surface ease-emphasized data-open:slide-in-from-bottom-1 data-closed:slide-out-to-bottom-1 sm:max-w-none [&_[data-slot=dialog-title]]:text-[12px] [&>[data-slot=dialog-close]]:top-0.5 [&>[data-slot=dialog-close]]:right-1">
-        <DialogHeader className="flex h-8 shrink-0 justify-center border-b border-border/60 bg-card px-3 pr-10">
+      <DialogContent
+        className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 duration-surface ease-emphasized data-open:slide-in-from-bottom-1 data-closed:slide-out-to-bottom-1 sm:max-w-none [&_[data-slot=dialog-title]]:text-[12px]"
+        closeButtonClassName="top-0.5 right-1"
+      >
+        <DialogHeader className="flex h-7 shrink-0 justify-center px-3 pb-0 pr-10">
           <DialogTitle>{t("tunnels.title")}</DialogTitle>
         </DialogHeader>
 
