@@ -164,8 +164,8 @@ describe("PythonInterpreterDialog", () => {
       expect(container.querySelector("input")).toBe(input);
       expect(input.value).toBe("python draft");
       expect(mocks.list).toHaveBeenCalledOnce();
-      const close = [...(child?.querySelectorAll("button") ?? [])].find(
-        (button) => button.textContent === "close",
+      const close = child?.querySelector<HTMLButtonElement>(
+        'button[aria-label="close"]',
       );
       await act(async () => close?.click());
       expect(
@@ -206,8 +206,8 @@ describe("PythonInterpreterDialog", () => {
       const browse = [...container.querySelectorAll("button")].find(
         (button) => button.textContent === "browse",
       );
-      const close = [...container.querySelectorAll("button")].find(
-        (button) => button.textContent === "close",
+      const close = container.querySelector<HTMLButtonElement>(
+        '[data-workbench-page-overlay="dialog"] button[aria-label="close"]',
       );
       await act(async () => browse?.click());
       expect(browse?.disabled).toBe(true);

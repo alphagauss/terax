@@ -2,8 +2,11 @@
  * 为每个工作页提供稳定的浮层宿主，统一管理页内模态、层级和焦点。
  * 页面隐藏只暂停交互，显式关闭才卸载浮层；不创建原生窗口或持有业务任务。
  */
-import { Button } from "@/components/controls/button";
+import { closeIconButtonClassName } from "@/components/controls/close-button";
+import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type CSSProperties,
   createContext,
@@ -346,16 +349,23 @@ function OpenPageOverlay({
         )}
         style={style}
       >
-        <header className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
+        <header className="flex h-8 shrink-0 items-center gap-2 border-b border-border/60 bg-card px-2">
           <h2
             id={`${id}-title`}
-            className="min-w-0 flex-1 truncate text-sm font-medium"
+            className="min-w-0 flex-1 truncate text-[12px] font-medium"
           >
             {title}
           </h2>
-          <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-            {t("close")}
-          </Button>
+          <Hint content={t("close")}>
+            <button
+              type="button"
+              className={closeIconButtonClassName}
+              aria-label={t("close")}
+              onClick={() => onOpenChange(false)}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={2} />
+            </button>
+          </Hint>
         </header>
         <PortalContext.Provider value={portalContainer}>
           <div className="app-scrollbar min-h-0 overflow-auto p-4">

@@ -3,9 +3,9 @@
  * 同步最大化与全屏状态，并确保指针焦点不会跨窗口形态残留。
  */
 
+import { closeIconButtonClassName } from "@/components/controls/close-button";
 import { Hint } from "@/components/controls/tooltip";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
-import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
   Copy01Icon,
@@ -152,12 +152,11 @@ function CtlButton({
           // click.detail 为 0，继续保留焦点以维持键盘导航可见性。
           if (event.detail > 0) event.currentTarget.blur();
         }}
-        className={cn(
-          "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors",
+        className={
           danger
-            ? "hover:bg-destructive/15 hover:text-destructive"
-            : "hover:bg-accent hover:text-foreground",
-        )}
+            ? closeIconButtonClassName
+            : "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        }
       >
         {children}
       </button>
