@@ -129,6 +129,7 @@ function AlphaDeskContent({
 }) {
   const { t } = useTranslation("alpha");
   const [taskWindowOpen, setTaskWindowOpen] = useState(false);
+  const [movableTaskWindowOpen, setMovableTaskWindowOpen] = useState(false);
   const state = preferences.data;
   const leftOpen = state?.leftOpen;
   const leftWidth = state?.leftWidth;
@@ -339,18 +340,27 @@ function AlphaDeskContent({
                   : "translate3d(100%, 0, 0)",
               }}
             >
-              <div className="flex h-10 shrink-0 items-center justify-between border-b px-2">
+              <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-1 border-b px-2 py-1">
                 <strong className="text-xs">
                   {state.right && t(`desk.${state.right}`)}
                 </strong>
                 {state.right === "tasks" && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => setTaskWindowOpen(true)}
-                  >
-                    {t("desk.openTaskWindow")}
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setTaskWindowOpen(true)}
+                    >
+                      {t("desk.openTaskWindow")}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setMovableTaskWindowOpen(true)}
+                    >
+                      {t("desk.openMovableTaskWindow")}
+                    </Button>
+                  </div>
                 )}
                 <Button
                   size="xs"
@@ -413,6 +423,15 @@ function AlphaDeskContent({
         className="w-96"
       >
         <TaskMonitorScene visible={visible && taskWindowOpen} />
+      </WorkbenchPageWindow>
+      <WorkbenchPageWindow
+        open={movableTaskWindowOpen}
+        onOpenChange={setMovableTaskWindowOpen}
+        title={t("desk.movableTaskWindow")}
+        draggable
+        className="top-16 right-16 w-96"
+      >
+        <TaskMonitorScene visible={visible && movableTaskWindowOpen} />
       </WorkbenchPageWindow>
     </div>
   );

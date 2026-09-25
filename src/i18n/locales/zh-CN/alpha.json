@@ -387,6 +387,8 @@
     "security": "证券资料",
     "tasks": "任务",
     "openTaskWindow": "打开浮窗",
+    "openMovableTaskWindow": "打开可移动浮窗",
+    "movableTaskWindow": "任务 · 可移动浮窗",
     "settings": "Alpha 设置",
     "views": "分析视图",
     "watchlistTools": "自选工具栏",

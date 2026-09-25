@@ -387,6 +387,8 @@
     "security": "Security details",
     "tasks": "Tasks",
     "openTaskWindow": "Open floating window",
+    "openMovableTaskWindow": "Open movable window",
+    "movableTaskWindow": "Tasks · Movable window",
     "settings": "Alpha settings",
     "views": "Analysis views",
     "watchlistTools": "Watchlist tools",
