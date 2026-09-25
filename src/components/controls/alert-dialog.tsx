@@ -6,6 +6,7 @@ import { Button } from "@/components/controls/button";
 import {
   AlertDialogContent as BaseContent,
   AlertDialogFooter as BaseFooter,
+  AlertDialogHeader as BaseHeader,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { AlertDialog as Primitive } from "radix-ui";
@@ -14,13 +15,25 @@ import type { ComponentProps } from "react";
 export {
   AlertDialog,
   AlertDialogDescription,
-  AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogOverlay,
   AlertDialogPortal,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+
+/** 确认对话框不提供拖动标题栏，标题区以分割线与正文区分。 */
+export function AlertDialogHeader({
+  className,
+  ...props
+}: ComponentProps<typeof BaseHeader>) {
+  return (
+    <BaseHeader
+      {...props}
+      className={cn("gap-1 border-b border-border/60 pb-2", className)}
+    />
+  );
+}
 
 /** 确认与取消在窄桌面窗口中也保持并排，必要时才换行。 */
 export function AlertDialogFooter({
@@ -44,7 +57,7 @@ export function AlertDialogContent({
     <BaseContent
       {...props}
       className={cn(
-        "gap-section rounded-lg p-4 text-xs duration-surface ease-standard [&_[data-slot=alert-dialog-title]]:text-sm [&_[data-slot=alert-dialog-description]]:text-xs",
+        "gap-section rounded-lg p-4 pt-3 text-xs duration-surface ease-standard [&_[data-slot=alert-dialog-title]]:text-sm [&_[data-slot=alert-dialog-description]]:text-xs",
         className,
       )}
     />

@@ -94,6 +94,115 @@ const waitForExit = async () =>
     await new Promise((resolve) => setTimeout(resolve, 120));
   });
 
+it("可移动浮窗限制在所属页内，隐藏保留位置且结束捕获，缩小宿主时收拢", async () => {
+  let resize = () => {};
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  try {
+    const render = (visible: boolean, draggable = true) =>
+      act(async () =>
+        root.render(
+          <WorkbenchPageScope visible={visible} focused={visible}>
+            <WorkbenchPageWindow
+              open
+              draggable={draggable}
+              title="move"
+              onOpenChange={() => {}}
+            >
+              <Draft />
+            </WorkbenchPageWindow>
+          </WorkbenchPageScope>,
+        ),
+      );
+    await render(true);
+    const panel = find("[role=dialog]");
+    const header = find("header");
+    const input = find<HTMLInputElement>("input");
+    input.value = "retained";
+    let width = 800;
+    let height = 600;
+    vi.spyOn(
+      find("[data-workbench-overlay-host]"),
+      "getBoundingClientRect",
+    ).mockImplementation(() => new DOMRect(100, 50, width, height));
+    vi.spyOn(panel, "getBoundingClientRect").mockImplementation(() => {
+      const [x, y] = panel.style.transform
+        .match(/-?\d+(?=px)/g)
+        ?.map(Number) ?? [0, 0];
+      return new DOMRect(500 + x, 100 + y, 200, 150);
+    });
+    let captured = false;
+    header.setPointerCapture = vi.fn(() => {
+      captured = true;
+    });
+    header.hasPointerCapture = () => captured;
+    header.releasePointerCapture = vi.fn(() => {
+      captured = false;
+    });
+    const pointer = (
+      target: HTMLElement,
+      type: string,
+      x: number,
+      y: number,
+      button = 0,
+    ) =>
+      act(async () => {
+        target.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 1,
+            button,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      });
+    await pointer(find("button", header), "pointerdown", 500, 100);
+    await pointer(header, "pointermove", 600, 200);
+    await pointer(header, "pointerdown", 500, 100, 2);
+    expect(header.setPointerCapture).not.toHaveBeenCalled();
+    await pointer(header, "pointerdown", 500, 100);
+    await pointer(header, "pointermove", 2000, 2000);
+    expect(panel.style.transform).toBe("translate3d(200px, 400px, 0)");
+    await render(false);
+    expect(captured).toBe(false);
+    await pointer(header, "pointermove", 0, 0);
+    await render(true);
+    expect(panel.style.transform).toBe("translate3d(200px, 400px, 0)");
+    width = 400;
+    height = 300;
+    await act(async () => resize());
+    expect(panel.style.transform).toBe("translate3d(-200px, 100px, 0)");
+    await pointer(header, "pointerdown", 300, 200);
+    await pointer(header, "pointermove", -1000, -1000);
+    expect(panel.style.transform).toBe("translate3d(-400px, -50px, 0)");
+    await pointer(header, "pointercancel", -1000, -1000);
+    expect(captured).toBe(false);
+    await pointer(header, "pointermove", 300, 200);
+    expect(panel.style.transform).toBe("translate3d(-400px, -50px, 0)");
+    expect(find("input")).toBe(input);
+    expect(input.value).toBe("retained");
+    expect(lifecycle.mount).toHaveBeenCalledTimes(1);
+    expect(lifecycle.unmount).not.toHaveBeenCalled();
+    await render(true, false);
+    await pointer(header, "pointerdown", 300, 200);
+    expect(captured).toBe(false);
+    expect(disconnect).toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("遮罩关闭须显式启用，只响应可见顶层遮罩的主键操作", async () => {
   const close = vi.fn();
   const closeWindow = vi.fn();

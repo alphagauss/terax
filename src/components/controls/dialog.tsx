@@ -6,8 +6,9 @@ import {
   DialogContent as BaseContent,
   DialogClose,
   DialogFooter as BaseFooter,
+  DialogHeader as BaseHeader,
 } from "@/components/ui/dialog";
-import { closeIconButtonClassName } from "@/components/controls/close-button";
+import { dialogCloseIconButtonClassName } from "@/components/controls/close-button";
 import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -19,12 +20,24 @@ export {
   Dialog,
   DialogClose,
   DialogDescription,
-  DialogHeader,
   DialogOverlay,
   DialogPortal,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+
+/** 固定对话框标题与内容共用底色，仅用分割线区分区域。 */
+export function DialogHeader({
+  className,
+  ...props
+}: ComponentProps<typeof BaseHeader>) {
+  return (
+    <BaseHeader
+      {...props}
+      className={cn("border-b border-border/60 pb-2", className)}
+    />
+  );
+}
 
 /** 桌面弹窗操作保持横向排列，空间不足时自然换行。 */
 export function DialogFooter({
@@ -43,16 +56,20 @@ export function DialogFooter({
 export function DialogContent({
   className,
   showCloseButton = true,
+  closeButtonClassName,
   children,
   ...props
-}: ComponentProps<typeof BaseContent>) {
+}: ComponentProps<typeof BaseContent> & {
+  /** 紧凑标题栏可直接调整关闭按钮位置，不依赖组合组件的 data-slot。 */
+  closeButtonClassName?: string;
+}) {
   const { t } = useTranslation("common");
   return (
     <BaseContent
       {...props}
       showCloseButton={false}
       className={cn(
-        "gap-section rounded-lg p-4 text-xs duration-surface ease-standard [&_[data-slot=dialog-header]]:gap-1 [&_[data-slot=dialog-title]]:text-sm [&_[data-slot=dialog-description]]:text-xs",
+        "gap-section rounded-lg p-4 pt-3 text-xs duration-surface ease-standard [&_[data-slot=dialog-header]]:gap-1 [&_[data-slot=dialog-title]]:text-sm [&_[data-slot=dialog-description]]:text-xs",
         showCloseButton && "[&_[data-slot=dialog-header]]:pr-8",
         className,
       )}
@@ -63,8 +80,9 @@ export function DialogContent({
           <DialogClose
             type="button"
             className={cn(
-              closeIconButtonClassName,
-              "absolute top-4 right-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              dialogCloseIconButtonClassName,
+              "absolute top-2 right-3 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              closeButtonClassName,
             )}
             aria-label={t("close")}
           >

@@ -27,19 +27,26 @@ function Example({ showCloseButton = true }: { showCloseButton?: boolean }) {
   const [open, setOpen] = useState(true);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent showCloseButton={showCloseButton}>
+      <DialogContent
+        showCloseButton={showCloseButton}
+        closeButtonClassName="top-0.5 right-1"
+      >
         <DialogTitle>Example</DialogTitle>
       </DialogContent>
     </Dialog>
   );
 }
 
-it("关闭图标保留对话框关闭行为和可访问名称", async () => {
+it("提示组合保留关闭按钮的自定义定位、关闭行为和可访问名称", async () => {
   await act(async () => root.render(<Example />));
   const close = document.querySelector<HTMLButtonElement>(
     '[role="dialog"] button[aria-label="close"]',
   );
   expect(close).not.toBeNull();
+  expect(close?.classList.contains("top-0.5")).toBe(true);
+  expect(close?.classList.contains("right-1")).toBe(true);
+  expect(close?.classList.contains("top-2")).toBe(false);
+  expect(close?.classList.contains("right-3")).toBe(false);
   await act(async () => close?.click());
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
