@@ -27,10 +27,24 @@ vi.mock("@/components/ui/command", () => ({
   CommandDialog: ({
     children,
     open,
+    onOpenChange,
   }: {
     children: ReactNode;
     open: boolean;
-  }) => (open ? createElement("div", null, children) : null),
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open
+      ? createElement(
+          "div",
+          null,
+          createElement(
+            "button",
+            { type: "button", onClick: () => onOpenChange(false) },
+            "close",
+          ),
+          children,
+        )
+      : null,
   CommandEmpty: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
   CommandGroup: ({ children }: { children: ReactNode }) =>
@@ -115,5 +129,49 @@ describe("PythonInterpreterDialog", () => {
     expect(container.textContent).not.toContain("probeFailed");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     act(() => root.unmount());
+  });
+
+  it("文件选择器等待期间阻止重复浏览与关闭，取消后恢复操作", async () => {
+    let finish: (value: null) => void = () => {};
+    mocks.open.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onOpenChange = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(PythonInterpreterDialog, {
+            open: true,
+            onOpenChange,
+            root: null,
+            workspace: { kind: "local" },
+            onSelect: () => {},
+          }),
+        ),
+      );
+      const button = (text: string) =>
+        [...container.querySelectorAll("button")].find(
+          (candidate) => candidate.textContent === text,
+        );
+      const browse = button("browse");
+      await act(async () => browse?.click());
+      expect(browse?.disabled).toBe(true);
+      await act(async () => {
+        browse?.click();
+        button("close")?.click();
+      });
+      expect(mocks.open).toHaveBeenCalledOnce();
+      expect(onOpenChange).not.toHaveBeenCalled();
+      await act(async () => finish(null));
+      expect(browse?.disabled).toBe(false);
+      await act(async () => button("close")?.click());
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      await act(async () => root.unmount());
+    }
   });
 });

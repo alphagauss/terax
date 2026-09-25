@@ -126,27 +126,23 @@ export function PythonInterpreterDialog({
   /** 在 Local Workspace 中通过系统文件选择器探测列表外解释器。 */
   const browse = async () => {
     if (workspace.kind !== "local" || selecting) return;
-    let selected: string | string[] | null;
+    // 原生选择器等待期间仍属于同一次选择，避免重复操作和提前关闭。
+    setSelecting(true);
+    setError(null);
+    let errorKey: "browseFailed" | "probeFailed" = "browseFailed";
     try {
-      selected = await openDialog({
+      const selected = await openDialog({
         directory: false,
         multiple: false,
         title: t("browseTitle"),
       });
-    } catch (reason) {
-      console.warn("[python] interpreter browser failed", reason);
-      setError(t("browseFailed"));
-      return;
-    }
-    if (!selected || Array.isArray(selected)) return;
-    setSelecting(true);
-    setError(null);
-    try {
+      if (!selected || Array.isArray(selected)) return;
+      errorKey = "probeFailed";
       const interpreter = await probePythonInterpreter(selected, workspace);
       await commitSelection(interpreter);
     } catch (reason) {
-      console.warn("[python] interpreter probe failed", reason);
-      setError(t("probeFailed"));
+      console.warn(`[python] interpreter ${errorKey}`, reason);
+      setError(t(errorKey));
     } finally {
       setSelecting(false);
     }
