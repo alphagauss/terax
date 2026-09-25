@@ -1,6 +1,6 @@
 /**
  * 本文件测试侧边栏布局 Hook 的临时隐藏、副侧栏展示模式和窗口初始折叠行为。
- * 重点锁定呈现模式恢复，并确保新建临时窗口默认关闭两侧面板。
+ * 重点锁定呈现模式恢复、共享布局的窗口可用性过滤，并确保新建临时窗口默认关闭两侧面板。
  */
 
 // @vitest-environment happy-dom
@@ -12,6 +12,9 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SIDEBAR_PLACEMENT_STATE } from "./model";
+import { subscribeSidebarPlacementState } from "./persistence";
+import type { SidebarContainerId } from "./types";
 import { useSidebarLayout } from "./useSidebarLayout";
 
 const workspaceStorage = vi.hoisted(() => ({
@@ -37,15 +40,23 @@ type Controls = ReturnType<typeof useSidebarLayout>;
 
 /** 向测试暴露侧边栏控制器。 */
 function Harness({
+  unavailableContainerIds,
   temporarilyHidden,
   collapseOnInitialOpen = false,
   onReady,
 }: {
+  unavailableContainerIds?: readonly SidebarContainerId[];
   temporarilyHidden: boolean;
   collapseOnInitialOpen?: boolean;
   onReady: (controls: Controls) => void;
 }) {
-  onReady(useSidebarLayout([], temporarilyHidden, collapseOnInitialOpen));
+  onReady(
+    useSidebarLayout(
+      unavailableContainerIds,
+      temporarilyHidden,
+      collapseOnInitialOpen,
+    ),
+  );
   return null;
 }
 
@@ -56,6 +67,61 @@ describe("useSidebarLayout temporary hiding", () => {
     for (const root of roots) act(() => root.unmount());
     roots.length = 0;
     vi.clearAllMocks();
+  });
+
+  it("共享布局更新不会激活当前窗口不可用的 Channels", async () => {
+    workspaceStorage.get.mockReturnValue(undefined);
+    workspaceStorage.set.mockResolvedValue();
+    const root = createRoot(document.createElement("div"));
+    roots.push(root);
+    let controls: Controls | undefined;
+    const unavailableContainerIds: SidebarContainerId[] = ["channels"];
+    await act(async () => {
+      root.render(
+        createElement(Harness, {
+          unavailableContainerIds,
+          temporarilyHidden: false,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      );
+    });
+    const current = () => {
+      if (!controls) throw new Error("sidebar controls are unavailable");
+      return controls;
+    };
+    const onPlacementChange = vi.mocked(subscribeSidebarPlacementState).mock
+      .calls[0][0];
+    await act(async () => current().openContainer("ai"));
+    expect(current().runtime.secondary.collapsed).toBe(false);
+
+    await act(async () => {
+      onPlacementChange({
+        ...DEFAULT_SIDEBAR_PLACEMENT_STATE,
+        activityBar: {
+          ...DEFAULT_SIDEBAR_PLACEMENT_STATE.activityBar,
+          hiddenContainerIds: ["ai"],
+        },
+      });
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.secondary).toMatchObject({
+      activeId: null,
+      collapsed: true,
+    });
+    expect(workspaceStorage.set).toHaveBeenLastCalledWith(
+      "sidebar-layout:runtime",
+      expect.objectContaining({
+        secondary: expect.objectContaining({ activeId: null, collapsed: true }),
+      }),
+    );
+
+    await act(async () => {
+      onPlacementChange(DEFAULT_SIDEBAR_PLACEMENT_STATE);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.secondary.activeId).toBe("ai");
   });
 
   it("blocks visibility changes and restores the runtime layout", async () => {

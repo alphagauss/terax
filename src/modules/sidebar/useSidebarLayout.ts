@@ -754,7 +754,7 @@ export function useSidebarLayout(
       const nextRuntime = normalizeSidebarRuntimeState(
         runtimeRef.current,
         next.placements,
-        next.activityBar.hiddenContainerIds,
+        effectiveHiddenIds(next.activityBar.hiddenContainerIds),
       );
       if (
         runtimeRef.current.secondaryMode !== "normal" &&

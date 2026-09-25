@@ -1787,6 +1787,9 @@ export default function App() {
   const sidebarBadges = {
     "source-control": sourceControl.changedCount,
   };
+  const primaryNavigationActiveId = sidebar.runtime.primary.collapsed
+    ? null
+    : sidebar.runtime.primary.activeId;
   const sidebarConfigurationProps = {
     allContainers: sidebar.containers,
     activityBar: sidebar.activityBar,
@@ -1945,7 +1948,7 @@ export default function App() {
               <SidebarActivityBar
                 {...sidebarConfigurationProps}
                 containers={primarySidebarContainers}
-                activeId={sidebar.runtime.primary.activeId}
+                activeId={primaryNavigationActiveId}
                 badges={sidebarBadges}
                 onActivate={sidebar.toggleContainer}
                 onMove={sidebar.moveContainer}
@@ -1997,7 +2000,7 @@ export default function App() {
                     <SidebarActivityBar
                       {...sidebarConfigurationProps}
                       containers={primarySidebarContainers}
-                      activeId={sidebar.runtime.primary.activeId}
+                      activeId={primaryNavigationActiveId}
                       badges={sidebarBadges}
                       onActivate={sidebar.openContainer}
                       onMove={sidebar.moveContainer}
@@ -2012,7 +2015,7 @@ export default function App() {
                     <SidebarActivityBar
                       {...sidebarConfigurationProps}
                       containers={primarySidebarContainers}
-                      activeId={sidebar.runtime.primary.activeId}
+                      activeId={primaryNavigationActiveId}
                       badges={sidebarBadges}
                       onActivate={sidebar.openContainer}
                       onMove={sidebar.moveContainer}
