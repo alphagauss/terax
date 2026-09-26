@@ -80,9 +80,13 @@ impl TargetRegistry {
     }
 
     fn take(&mut self, id: &str) -> Option<NotificationTarget> {
+        self.take_at(id, Instant::now())
+    }
+
+    fn take_at(&mut self, id: &str, now: Instant) -> Option<NotificationTarget> {
         let index = self.targets.iter().position(|(key, _, _)| key == id)?;
         let (_, at, target) = self.targets.remove(index)?;
-        (at.elapsed() < TARGET_LIFETIME).then_some(target)
+        (now.duration_since(at) < TARGET_LIFETIME).then_some(target)
     }
 }
 
@@ -248,14 +252,26 @@ mod tests {
 
     #[test]
     fn expired_targets_cannot_activate_and_auxiliary_protocol_is_reused() {
-        let mut registry = TargetRegistry::default();
         let target: NotificationTarget = serde_json::from_str(
             r#"{"window":"auxiliary","request":{"kind":"settings","tab":"general"}}"#,
         )
         .unwrap();
-        let id = registry.insert(target);
-        registry.targets[0].1 = Instant::now() - TARGET_LIFETIME - Duration::from_secs(1);
-        assert!(registry.take(&id).is_none());
+        // 从创建时刻向前推进，避免系统运行不足一天时回拨 Instant 导致下溢。
+        for (elapsed, valid) in [
+            (TARGET_LIFETIME - Duration::from_nanos(1), true),
+            (TARGET_LIFETIME, false),
+            (TARGET_LIFETIME + Duration::from_secs(1), false),
+        ] {
+            let mut registry = TargetRegistry::default();
+            let id = registry.insert(target.clone());
+            let now = registry.targets[0].1 + elapsed;
+            assert_eq!(
+                registry.take_at(&id, now),
+                valid.then(|| target.clone()),
+                "通知经过 {elapsed:?} 后的有效性不符"
+            );
+            assert!(registry.take_at(&id, now).is_none());
+        }
         assert!(serde_json::from_str::<NotificationTarget>(
             r#"{"window":"auxiliary","request":{"kind":"settings","tab":"unknown"}}"#
         )
