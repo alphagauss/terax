@@ -399,7 +399,7 @@ function OpenPageOverlay({
             "flex h-7 shrink-0 items-center justify-end gap-2 px-2",
             hasTitle && "border-b border-border/60",
             draggable &&
-              "cursor-grab touch-none select-none border-b border-border/60 bg-card",
+              "cursor-default touch-none select-none border-b border-border/60 bg-card",
             !hasTitle && !draggable && "absolute top-0 right-0",
           )}
         >

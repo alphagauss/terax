@@ -305,7 +305,7 @@ export function MarkdownSplitLayout({
             aria-valuetext={`${Math.round(renderedWidth)} pixels`}
             data-markdown-outline-separator
             className={cn(
-              "relative z-20 m-0 h-full w-px shrink-0 cursor-col-resize touch-none border-0 bg-border p-0 transition-[background-color,opacity] duration-pane hover:bg-primary/45",
+              "relative z-20 m-0 h-full w-px shrink-0 cursor-ew-resize touch-none border-0 bg-border p-0 transition-[background-color,opacity] duration-pane hover:bg-primary/45",
               "after:absolute after:inset-y-0 after:-left-1 after:w-3 after:content-['']",
               "focus-visible:bg-ring focus-visible:outline-none",
               "data-[dragging=true]:bg-primary/60",

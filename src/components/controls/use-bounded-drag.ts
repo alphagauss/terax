@@ -26,7 +26,6 @@ export function useBoundedDrag(
     const drag = session.current;
     session.current = null;
     if (!drag) return;
-    drag.handle.style.cursor = "";
     if (drag.handle.hasPointerCapture(drag.pointerId))
       drag.handle.releasePointerCapture(drag.pointerId);
   }, []);
@@ -83,7 +82,6 @@ export function useBoundedDrag(
         return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      event.currentTarget.style.cursor = "grabbing";
       session.current = {
         pointerId: event.pointerId,
         handle: event.currentTarget,
