@@ -149,7 +149,7 @@ export function WatchlistRow({
         <div
           role="group"
           aria-label={item.name}
-          className="alpha-watchlist-row relative flex h-[52px] select-none items-center border-b border-border/40"
+          className="alpha-watchlist-row relative flex h-[52px] select-none items-center"
           data-selected={editing ? checked : active}
           data-watchlist-symbol={item.vt_symbol}
           onPointerDown={onPointerDown}

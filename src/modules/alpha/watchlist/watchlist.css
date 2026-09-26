@@ -1,11 +1,11 @@
 /* 名称宽度有界，剩余空间交给走势；窄面板保留列并允许横向滚动。 */
 .alpha-watchlist-columns {
   display: grid;
-  grid-template-columns: minmax(88px, 112px) minmax(48px, 1fr) 72px;
-  column-gap: 8px;
+  grid-template-columns: minmax(80px, 92px) minmax(48px, 1fr) 72px;
+  column-gap: 4px;
 }
 .alpha-watchlist-columns[data-show-date="true"] {
-  grid-template-columns: minmax(88px, 112px) minmax(48px, 1fr) 72px 86px;
+  grid-template-columns: minmax(80px, 92px) minmax(48px, 1fr) 72px 86px;
 }
 /* 冻结列与整行使用相同的不透明合成底色，横向滚动时不叠加悬停色。 */
 .alpha-watchlist-row {

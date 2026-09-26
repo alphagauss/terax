@@ -64,7 +64,7 @@ export function parseAlphaDeskPreferences(
     view: view === "backtests" || view === "data" ? view : "market",
     leftOpen: read("leftOpen") !== false,
     right: right === "security" || right === "tasks" ? right : null,
-    leftWidth: width("leftWidth", 360),
+    leftWidth: width("leftWidth", 320),
     rightWidth: width("rightWidth", 300),
     chart,
   };

@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -29,7 +30,11 @@ import {
   toggleWatchlistSelection,
   type WatchlistSort,
 } from "@/modules/alpha/watchlist/model";
+import { WatchlistCancelButton } from "@/modules/alpha/watchlist/WatchlistCancelButton";
 import { WatchlistTable } from "@/modules/alpha/watchlist/WatchlistTable";
+import { WorkbenchPageWindow } from "@/modules/workbench/WorkbenchPageOverlays";
+import { Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -57,6 +62,7 @@ export function WatchlistScene({
   const selectionAnchor = useRef<string | null>(null);
   const [frozen, setFrozen] = useState<string[] | null>(null);
   const [showDate, setShowDate] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [keyword, setKeyword] = useState("");
   const [offset, setOffset] = useState(0);
@@ -80,8 +86,8 @@ export function WatchlistScene({
   const quotes = useQuery({
     queryKey: [...quotesKey, group],
     queryFn: () => getWatchlistQuotes(group),
-    enabled: visible && !keyword && Boolean(list.data),
-    refetchInterval: visible && !keyword ? 30000 : false,
+    enabled: visible && Boolean(list.data),
+    refetchInterval: visible ? 30000 : false,
   });
   const quoteMap = useMemo(
     () => new Map(quotes.data?.map((quote) => [quote.vt_symbol, quote])),
@@ -101,7 +107,7 @@ export function WatchlistScene({
   const search = useQuery({
     queryKey: ["alpha", "watchlist-search", keyword, offset],
     queryFn: () => getAlphaSecurities({ q: keyword, limit: PAGE_SIZE, offset }),
-    enabled: visible && Boolean(keyword),
+    enabled: visible && searchOpen && Boolean(keyword),
   });
   const included = new Set(items.map((item) => item.vt_symbol));
   const change = useMutation({
@@ -222,11 +228,10 @@ export function WatchlistScene({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-  const error =
-    change.error ?? list.error ?? (keyword ? search.error : quotes.error);
+  const error = change.error ?? list.error ?? quotes.error;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b p-1">
+      <div className="flex shrink-0 items-center gap-1 p-1">
         <Select
           value={group}
           disabled={editing || locked || !list.data}
@@ -240,7 +245,7 @@ export function WatchlistScene({
         >
           <SelectTrigger
             size="sm"
-            className="flex-1"
+            className="min-w-0 flex-1"
             aria-label={t("watch.group")}
           >
             <SelectValue />
@@ -307,13 +312,9 @@ export function WatchlistScene({
           <Button
             size="xs"
             variant="ghost"
-            disabled={
-              locked ||
-              Boolean(keyword) ||
-              !items.length ||
-              Boolean(groupEditor)
-            }
+            disabled={locked || !items.length || Boolean(groupEditor)}
             onClick={() => {
+              setSearchOpen(false);
               setEditing(true);
               setFrozen(rows.map((row) => row.vt_symbol));
             }}
@@ -321,10 +322,23 @@ export function WatchlistScene({
             {t("watch.multi")}
           </Button>
         )}
+        <Hint content={searchOpen ? undefined : t("watch.searchAdd")}>
+          <Button
+            size="icon-sm"
+            variant={searchOpen ? "secondary" : "ghost"}
+            aria-label={t("watch.searchAdd")}
+            aria-haspopup="dialog"
+            aria-expanded={searchOpen && visible}
+            disabled={editing || locked || !list.data || Boolean(groupEditor)}
+            onClick={() => setSearchOpen((open) => !open)}
+          >
+            <HugeiconsIcon icon={Search01Icon} size={16} />
+          </Button>
+        </Hint>
       </div>
       {groupEditor && (
         <form
-          className="space-y-2 border-b p-2"
+          className="space-y-2 p-2"
           onSubmit={(event) => {
             event.preventDefault();
             command(
@@ -361,19 +375,17 @@ export function WatchlistScene({
             >
               {t(groupEditor === "delete" ? "desk.remove" : "watch.save")}
             </Button>
-            <Button
-              size="xs"
-              variant="ghost"
+            <WatchlistCancelButton
               disabled={locked}
               onClick={() => setGroupEditor(null)}
             >
               {t("watch.cancel")}
-            </Button>
+            </WatchlistCancelButton>
           </div>
         </form>
       )}
       {editing ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1">
+        <div className="flex shrink-0 flex-wrap items-center gap-1 p-1">
           <Checkbox
             disabled={locked || !rows.length}
             aria-label={t("watch.selectAll")}
@@ -409,38 +421,14 @@ export function WatchlistScene({
           >
             {t(group === "all" ? "watch.removeAll" : "watch.removeGroup")}
           </Button>
-          <Button size="xs" variant="ghost" disabled={locked} onClick={finish}>
+          <Button size="xs" disabled={locked} onClick={finish}>
             {t("watch.done")}
           </Button>
-          <Button size="xs" variant="ghost" disabled={locked} onClick={finish}>
+          <WatchlistCancelButton disabled={locked} onClick={finish}>
             {t("watch.cancelMulti")}
-          </Button>
+          </WatchlistCancelButton>
         </div>
-      ) : (
-        <form
-          className="flex shrink-0 gap-1 border-b p-1"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setKeyword(draft.trim());
-            setOffset(0);
-          }}
-        >
-          <Input
-            focusTone="accent"
-            aria-label={t("desk.search")}
-            placeholder={t("desk.search")}
-            value={draft}
-            disabled={locked}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              if (!event.target.value.trim()) setKeyword("");
-            }}
-          />
-          <Button size="xs" type="submit" variant="ghost" disabled={locked}>
-            {t("desk.find")}
-          </Button>
-        </form>
-      )}
+      ) : null}
       {error && (
         <p role="alert" className="shrink-0 p-2 text-xs text-destructive">
           {t(`watch.errors.${error.message}`, {
@@ -456,108 +444,151 @@ export function WatchlistScene({
           {notice}
         </p>
       )}
-      {keyword ? (
-        <>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              setKeyword("");
-              setDraft("");
+      <WorkbenchPageWindow
+        open={searchOpen && visible}
+        onOpenChange={setSearchOpen}
+        title={t("watch.searchAdd")}
+        draggable
+        className="left-12 right-auto top-12 w-96"
+      >
+        <div className="flex max-h-[min(28rem,60vh)] flex-col gap-2">
+          <p className="truncate text-xs text-muted-foreground">
+            {t("watch.addTarget", {
+              group:
+                group === "all"
+                  ? t("watch.all")
+                  : groups.find((entry) => entry.id === group)?.name,
+            })}
+          </p>
+          <form
+            className="flex shrink-0 gap-1 p-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setKeyword(draft.trim());
+              setOffset(0);
             }}
           >
-            {t("desk.backToWatchlist")}
-          </Button>
-          <div className="app-scrollbar min-h-0 flex-1 overflow-auto">
-            {search.isPending && (
-              <p className="p-2 text-xs">{t("common.loading")}</p>
-            )}
-            {search.data?.items.map((row) => (
-              <div
-                key={row.vt_symbol}
-                className="flex items-center border-b p-1"
-              >
+            <Input
+              focusTone="accent"
+              aria-label={t("desk.search")}
+              placeholder={t("desk.search")}
+              value={draft}
+              disabled={locked}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                if (!event.target.value.trim()) setKeyword("");
+              }}
+            />
+            <Button size="xs" type="submit" variant="ghost" disabled={locked}>
+              {t("desk.find")}
+            </Button>
+          </form>
+          {search.error && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("watch.failed")}
+            </p>
+          )}
+          {keyword ? (
+            <>
+              <div className="app-scrollbar min-h-0 flex-1 overflow-auto">
+                {search.isPending && (
+                  <p className="p-2 text-xs">{t("common.loading")}</p>
+                )}
+                {search.data?.items.map((row) => (
+                  <div key={row.vt_symbol} className="flex items-center p-1">
+                    <Button
+                      variant="ghost"
+                      className="h-auto min-w-0 flex-1 flex-col items-start"
+                      onClick={() => onSelect(row.vt_symbol)}
+                    >
+                      <span className="max-w-full truncate">{row.name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {row.vt_symbol}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      disabled={
+                        locked || !list.data || included.has(row.vt_symbol)
+                      }
+                      onClick={() =>
+                        command({
+                          action: "add",
+                          group_id: group,
+                          symbols: [row.vt_symbol],
+                        })
+                      }
+                    >
+                      {t(
+                        included.has(row.vt_symbol)
+                          ? "watch.added"
+                          : "desk.add",
+                      )}
+                    </Button>
+                  </div>
+                ))}
+                {!search.isPending && search.data?.items.length === 0 && (
+                  <p className="p-2 text-xs text-muted-foreground">
+                    {t("desk.noResults")}
+                  </p>
+                )}
+              </div>
+              <div className="flex justify-between p-1">
                 <Button
-                  variant="ghost"
-                  className="h-auto min-w-0 flex-1 flex-col items-start"
-                  onClick={() => onSelect(row.vt_symbol)}
-                >
-                  <span className="max-w-full truncate">{row.name}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {row.vt_symbol}
-                  </span>
-                </Button>
-                <Button
-                  variant="ghost"
                   size="xs"
-                  disabled={locked || !list.data || included.has(row.vt_symbol)}
-                  onClick={() =>
-                    command({
-                      action: "add",
-                      group_id: group,
-                      symbols: [row.vt_symbol],
-                    })
-                  }
+                  variant="ghost"
+                  disabled={offset === 0 || search.isFetching}
+                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
                 >
-                  {t(included.has(row.vt_symbol) ? "watch.added" : "desk.add")}
+                  {t("desk.previous")}
+                </Button>
+                <span className="text-xs">
+                  {t("desk.resultCount", { count: search.data?.total ?? 0 })}
+                </span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={
+                    search.isFetching ||
+                    offset + PAGE_SIZE >= (search.data?.total ?? 0)
+                  }
+                  onClick={() => setOffset(offset + PAGE_SIZE)}
+                >
+                  {t("desk.next")}
                 </Button>
               </div>
-            ))}
-            {!search.isPending && search.data?.items.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">
-                {t("desk.noResults")}
-              </p>
-            )}
-          </div>
-          <div className="flex justify-between border-t p-1">
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={offset === 0 || search.isFetching}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            >
-              {t("desk.previous")}
-            </Button>
-            <span className="text-xs">
-              {t("desk.resultCount", { count: search.data?.total ?? 0 })}
-            </span>
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={
-                search.isFetching ||
-                offset + PAGE_SIZE >= (search.data?.total ?? 0)
-              }
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-            >
-              {t("desk.next")}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <WatchlistTable
-          key={group}
-          rows={rows}
-          quoteMap={quoteMap}
-          groups={groups}
-          symbol={symbol}
-          editing={editing}
-          selected={selected}
-          locked={locked}
-          sort={sort}
-          showDate={showDate}
-          visible={visible}
-          pending={list.isPending}
-          onSelect={onSelect}
-          onToggle={toggle}
-          onCommand={command}
-          onFreeze={setFrozen}
-          onSort={toggleSort}
-          onCancelSort={() =>
-            setSorts((previous) => ({ ...previous, [group]: null }))
-          }
-        />
-      )}
+            </>
+          ) : (
+            <p className="py-4 text-xs text-muted-foreground">
+              {t("desk.search")}
+            </p>
+          )}
+        </div>
+      </WorkbenchPageWindow>
+
+      <WatchlistTable
+        key={group}
+        rows={rows}
+        quoteMap={quoteMap}
+        groups={groups}
+        symbol={symbol}
+        editing={editing}
+        selected={selected}
+        locked={locked}
+        sort={sort}
+        showDate={showDate}
+        visible={visible}
+        pending={list.isPending}
+        onSelect={onSelect}
+        onToggle={toggle}
+        onCommand={command}
+        onFreeze={setFrozen}
+        onSort={toggleSort}
+        onCancelSort={() =>
+          setSorts((previous) => ({ ...previous, [group]: null }))
+        }
+      />
     </div>
   );
 }

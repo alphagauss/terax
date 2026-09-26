@@ -1,5 +1,6 @@
 /** 自选表负责虚拟滚动、固定表头与拖动反馈，业务命令交给场景提交。 */
 import { Button } from "@/components/controls/button";
+import { WatchlistCancelButton } from "@/modules/alpha/watchlist/WatchlistCancelButton";
 import type {
   WatchlistCommand,
   WatchlistItem,
@@ -86,21 +87,19 @@ export function WatchlistTable({
       >
         <div
           data-show-date={showDate}
-          className="alpha-watchlist-columns sticky top-0 z-10 h-10 items-center border-b bg-background pr-2 text-xs text-muted-foreground"
+          className="alpha-watchlist-columns sticky top-0 z-10 h-10 items-center bg-background pr-2 text-xs font-semibold text-foreground"
           style={{ paddingLeft: editing ? 36 : 8 }}
         >
           <div
             className={`sticky z-[1] min-w-0 flex-1 bg-background ${editing ? "left-9" : "left-2"}`}
           >
             {sort ? (
-              <Button
-                size="xs"
-                variant="ghost"
+              <WatchlistCancelButton
                 disabled={editing || locked}
                 onClick={onCancelSort}
               >
                 {t("watch.cancelSort")}
-              </Button>
+              </WatchlistCancelButton>
             ) : (
               t("watch.security")
             )}
@@ -113,6 +112,7 @@ export function WatchlistTable({
               size="xs"
               variant="ghost"
               disabled={editing || locked}
+              className="font-semibold"
               onClick={() => onSort("change")}
             >
               {t("watch.change")}

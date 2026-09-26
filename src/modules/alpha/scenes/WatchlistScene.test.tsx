@@ -60,9 +60,24 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
 }));
 
+import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
 
-it("搜索能访问首批之后的证券，重新搜索会回到第一页", async () => {
+it("搜索浮窗保留自选列表，支持分页、重新搜索及添加证券", async () => {
+  mocks.change.mockImplementation(async (command) => {
+    mocks.items = [
+      {
+        group_id: command.group_id,
+        vt_symbol: command.symbols[0],
+        name: "证券 0",
+        position: 0,
+        pinned: false,
+        pin_position: 0,
+        price_tick: 0.01,
+      },
+    ];
+    return { groups: [], items: mocks.items };
+  });
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -76,11 +91,22 @@ it("搜索能访问首批之后的证券，重新搜索会回到第一页", asyn
     await act(async () =>
       root.render(
         <QueryClientProvider client={client}>
-          <WatchlistScene visible symbol="000001.SZSE" onSelect={() => {}} />
+          <WorkbenchPageScope visible focused>
+            <WatchlistScene visible symbol="000001.SZSE" onSelect={() => {}} />
+          </WorkbenchPageScope>
         </QueryClientProvider>,
       ),
     );
     await settle();
+    expect(container.querySelector("input")).toBeNull();
+    const table = container.querySelector(".alpha-watchlist-columns");
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="watch.searchAdd"]',
+        )
+        ?.click(),
+    );
     const input = container.querySelector("input");
     const form = container.querySelector("form");
     if (!input || !form) throw new Error("missing search form");
@@ -100,6 +126,10 @@ it("搜索能访问首批之后的证券，重新搜索会回到第一页", asyn
       await settle();
     };
     await search("银行");
+    expect(container.querySelector(".alpha-watchlist-columns")).toBe(table);
+    expect(container.querySelector('[role="dialog"]')?.contains(input)).toBe(
+      true,
+    );
     await act(async () => {
       [...container.querySelectorAll("button")]
         .find((button) => button.textContent === "desk.next")
@@ -123,9 +153,48 @@ it("搜索能访问首批之后的证券，重新搜索会回到第一页", asyn
       limit: 30,
       offset: 0,
     });
+    await act(async () =>
+      [
+        ...container.querySelectorAll<HTMLButtonElement>(
+          '[role="dialog"] button',
+        ),
+      ]
+        .find((button) => button.textContent === "desk.add")
+        ?.click(),
+    );
+    await settle();
+    expect(mocks.change).toHaveBeenCalledWith(
+      { action: "add", group_id: "all", symbols: ["0.SSE"] },
+      expect.anything(),
+    );
+    expect(
+      container.querySelector('[data-watchlist-symbol="0.SSE"]'),
+    ).not.toBeNull();
+    expect(
+      [
+        ...container.querySelectorAll<HTMLButtonElement>(
+          '[role="dialog"] button',
+        ),
+      ].find((button) => button.textContent === "watch.added")?.disabled,
+    ).toBe(true);
+    await act(async () =>
+      container
+        .querySelector('[role="dialog"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+    );
+    expect(
+      container
+        .querySelector('button[aria-label="watch.searchAdd"]')
+        ?.getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(container.querySelector(".alpha-watchlist-columns")).toBe(table);
   } finally {
     act(() => root.unmount());
     client.clear();
+    mocks.items = [];
+    mocks.change.mockReset();
   }
 });
 
@@ -185,7 +254,9 @@ it("多选隔离主图与排序操作，逐项及范围勾选只提交批量成�
     await act(async () =>
       root.render(
         <QueryClientProvider client={client}>
-          <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+          <WorkbenchPageScope visible focused>
+            <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+          </WorkbenchPageScope>
         </QueryClientProvider>,
       ),
     );
@@ -293,7 +364,9 @@ it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", a
     await act(async () =>
       root.render(
         <QueryClientProvider client={client}>
-          <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+          <WorkbenchPageScope visible focused>
+            <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+          </WorkbenchPageScope>
         </QueryClientProvider>,
       ),
     );

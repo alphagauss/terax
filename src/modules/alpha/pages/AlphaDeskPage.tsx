@@ -243,16 +243,6 @@ function AlphaDeskContent({
                   : "translate3d(-100%, 0, 0)",
               }}
             >
-              <div className="flex h-10 shrink-0 items-center justify-between border-b px-2">
-                <strong className="text-xs">{t("desk.watchlist")}</strong>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => set("leftOpen", false)}
-                >
-                  {t("desk.collapse")}
-                </Button>
-              </div>
               <div className="min-h-0 flex-1">
                 <WatchlistScene
                   visible={visible && state.leftOpen}
