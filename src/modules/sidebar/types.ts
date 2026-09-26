@@ -4,6 +4,7 @@
  */
 
 import type { HugeiconsIcon } from "@hugeicons/react";
+import type { Tab } from "@/modules/workbench/types";
 
 export type SidebarLocation = "primary" | "secondary";
 
@@ -35,8 +36,8 @@ export type SidebarContainerDefinition = {
   defaultOrder: number;
   allowedLocations: readonly SidebarLocation[];
   minimumWidth: number;
-  /** 直接打开工作页的导航项不参与侧边栏内容激活。 */
-  opensPage?: boolean;
+  /** 应用入口对应的工作页类型，用于导航高亮；此类入口不参与侧边栏内容激活。 */
+  opensPage?: Tab["kind"];
 };
 
 export type SidebarPlacements = Record<SidebarLocation, SidebarContainerId[]>;

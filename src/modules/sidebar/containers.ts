@@ -47,7 +47,7 @@ export const SIDEBAR_CONTAINERS = [
     icon: ChartCandlestickIcon,
     defaultLocation: "primary",
     defaultOrder: 3,
-    opensPage: true,
+    opensPage: "alpha-desk",
     allowedLocations: ["primary"],
     minimumWidth: 180,
   },

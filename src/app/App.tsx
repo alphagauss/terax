@@ -3,6 +3,7 @@
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
 import { ChannelsPanel } from "@/modules/channels/components/lazy";
+import { getPrimaryNavigationActiveId } from "@/app/lib/primaryNavigation";
 
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import {
@@ -1810,12 +1811,11 @@ export default function App() {
     if (sidebar.activityBar.position === "default") sidebar.toggleContainer(id);
     else sidebar.openContainer(id);
   };
-  const primaryNavigationActiveId =
-    activeTab?.kind === "alpha-desk"
-      ? "alpha"
-      : sidebar.runtime.primary.collapsed
-        ? null
-        : sidebar.runtime.primary.activeId;
+  const primaryNavigationActiveId = getPrimaryNavigationActiveId(
+    sidebar.runtime.primary,
+    activeTab?.kind,
+    primarySidebarContainers,
+  );
   const sidebarBadges = {
     "source-control": sourceControl.changedCount,
   };
