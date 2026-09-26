@@ -105,13 +105,13 @@ vi.mock("@/modules/alpha/scenes/WatchlistScene", () => ({
 vi.mock("@/modules/alpha/scenes/SecurityDetailsScene", () => ({
   SecurityDetailsScene: ({ visible }: { visible: boolean }) => {
     mocks.visible.security = visible;
-    return null;
+    return <div data-security />;
   },
 }));
 vi.mock("@/modules/alpha/scenes/TaskMonitorScene", () => ({
   TaskMonitorScene: ({ visible }: { visible: boolean }) => {
     mocks.visible.tasks = visible;
-    return null;
+    return <div data-tasks />;
   },
 }));
 
@@ -297,7 +297,32 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(watchlist?.hasAttribute("inert")).toBe(false);
   await click("desk.security");
   expect(details?.hasAttribute("inert")).toBe(true);
+  expect(details?.getAttribute("aria-hidden")).toBe("true");
+  expect(mocks.visible.security).toBe(false);
+  // 业务可见性立即关闭，但退场期间仍保留原内容与标题。
+  const securityContent = details?.querySelector("[data-security]");
+  const taskContent = details?.querySelector("[data-tasks]");
+  expect(securityContent?.parentElement?.hidden).toBe(false);
+  expect(taskContent?.parentElement?.hidden).toBe(true);
+  expect(details?.querySelector("strong")?.textContent).toBe("desk.security");
   await click("desk.tasks");
+  expect(details?.hasAttribute("inert")).toBe(false);
+  expect(securityContent?.parentElement?.hidden).toBe(true);
+  expect(taskContent?.parentElement?.hidden).toBe(false);
+  const collapse = [...(details?.querySelectorAll("button") ?? [])].find(
+    (button) => button.textContent === "desk.collapse",
+  );
+  expect(collapse).toBeDefined();
+  await act(async () => collapse?.click());
+  expect(details?.hasAttribute("inert")).toBe(true);
+  expect(mocks.visible.tasks).toBe(false);
+  expect(taskContent?.parentElement?.hidden).toBe(false);
+  expect(details?.querySelector("strong")?.textContent).toBe("desk.tasks");
+  expect(details?.textContent).toContain("desk.openTaskWindow");
+  expect(details?.textContent).toContain("desk.openMovableTaskWindow");
+  await click("desk.tasks");
+  expect(details?.querySelector("[data-security]")).toBe(securityContent);
+  expect(details?.querySelector("[data-tasks]")).toBe(taskContent);
   await click("desk.openTaskWindow");
   const taskWindow = container.querySelector(
     '[data-workbench-page-overlay="window"]',

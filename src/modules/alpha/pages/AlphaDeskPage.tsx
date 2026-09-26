@@ -131,6 +131,11 @@ function AlphaDeskContent({
   const [taskWindowOpen, setTaskWindowOpen] = useState(false);
   const [movableTaskWindowOpen, setMovableTaskWindowOpen] = useState(false);
   const state = preferences.data;
+  const [displayedRight, setDisplayedRight] = useState(state?.right ?? null);
+  // 收起只关闭业务可见性，保留最近的内容和标题随外壳退场。
+  if (state?.right && state.right !== displayedRight) {
+    setDisplayedRight(state.right);
+  }
   const leftOpen = state?.leftOpen;
   const leftWidth = state?.leftWidth;
   const mainRef = useRef<HTMLElement>(null);
@@ -328,13 +333,14 @@ function AlphaDeskContent({
               aria-hidden={!state.right}
               inert={!state.right}
               className={cn(
-                "z-20 flex h-full shrink-0 flex-col overflow-hidden bg-background transition-[opacity,transform] duration-pane ease-emphasized motion-reduce:transition-none",
+                // 右侧主区直接扩宽，退场保持实色并缓起，避免滑出与淡出叠加成瞬间消失。
+                "z-20 flex h-full shrink-0 flex-col overflow-hidden bg-background transition-transform duration-pane motion-reduce:transition-none",
+                state.right ? "ease-emphasized" : "ease-standard",
                 !state.right &&
                   "pointer-events-none absolute inset-y-0 right-0",
               )}
               style={{
                 width: state.rightWidth,
-                opacity: state.right ? 1 : 0,
                 transform: state.right
                   ? "translate3d(0, 0, 0)"
                   : "translate3d(100%, 0, 0)",
@@ -342,9 +348,9 @@ function AlphaDeskContent({
             >
               <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-1 border-b px-2 py-1">
                 <strong className="text-xs">
-                  {state.right && t(`desk.${state.right}`)}
+                  {displayedRight && t(`desk.${displayedRight}`)}
                 </strong>
-                {state.right === "tasks" && (
+                {displayedRight === "tasks" && (
                   <div className="flex flex-wrap items-center gap-1">
                     <Button
                       size="xs"
@@ -371,7 +377,7 @@ function AlphaDeskContent({
                 </Button>
               </div>
               <div
-                hidden={state.right !== "security"}
+                hidden={displayedRight !== "security"}
                 className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
               >
                 <SecurityDetailsScene
@@ -380,7 +386,7 @@ function AlphaDeskContent({
                 />
               </div>
               <div
-                hidden={state.right !== "tasks"}
+                hidden={displayedRight !== "tasks"}
                 className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
               >
                 <TaskMonitorScene
