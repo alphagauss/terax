@@ -131,6 +131,30 @@ class SecurityCatalogDetail(SecurityCatalogItem):
     share_capital: list[dict[str, object]] = Field(default_factory=list)
 
 
+class SecurityDailySnapshot(BaseModel):
+    """最近一条未复权日线的原始字段，不含派生指标。"""
+
+    trade_date: str
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: float | None = None
+    turnover: float | None = None
+    upper_limit: float | None = None
+    lower_limit: float | None = None
+
+
+class SecuritySnapshot(SecurityCatalogItem):
+    """标的概览将资料和最近日线组织为只读快照。"""
+
+    timezone: str
+    price_color_convention: Literal["up-red", "up-green"]
+    volume_unit: str | None = None
+    price_tick: float | None = None
+    latest_daily: SecurityDailySnapshot | None = None
+
+
 class StrategyInfo(BaseModel):
     """策略信息响应。"""
 

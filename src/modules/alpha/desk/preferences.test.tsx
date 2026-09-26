@@ -126,3 +126,22 @@ it("慢写入期间连续切换即时生效，外部快照不覆盖待保存修�
     client.clear();
   }
 });
+
+it("资料面板独立恢复尺寸，异常尺寸不会污染其他分区", () => {
+  expect(
+    parseAlphaDeskPreferences({
+      "desk.marketInfoWidth": 420,
+      "desk.rightWidth": 280,
+    }),
+  ).toMatchObject({
+    marketInfoWidth: 420,
+    rightWidth: 280,
+  });
+  expect(
+    parseAlphaDeskPreferences({ "desk.marketInfoWidth": Number.NaN })
+      .marketInfoWidth,
+  ).toBe(350);
+  expect(
+    parseAlphaDeskPreferences({ "desk.marketInfoWidth": 900 }).marketInfoWidth,
+  ).toBe(560);
+});

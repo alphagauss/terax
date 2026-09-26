@@ -9,10 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from alpha.api.container import AlphaServiceContainer
 from alpha.api.deps import get_alpha_services
-from alpha.api.models import SecurityCatalogDetail, SecurityCatalogPage
-from alpha.api.routes._utils import clamp_limit, clamp_offset
+from alpha.api.models import (
+    SecurityCatalogDetail,
+    SecurityCatalogPage,
+    SecuritySnapshot,
+)
+from alpha.api.routes._utils import clamp_limit, clamp_offset, date_text, first_number
 from alpha.common.market_metadata import get_market_metadata
-from alpha.common.schema_market import SecurityCatalogQuery
+from alpha.common.schema_market import BarHistoryQuery, SecurityCatalogQuery
 
 router = APIRouter()
 
@@ -72,4 +76,40 @@ async def get_security(
         "volume_unit": market_metadata.volume_unit,
         "latest_daily_info": latest_daily_info or {},
         "share_capital": list(share_capital)[-50:],
+    }
+
+
+@router.get("/securities/{vt_symbol}/snapshot", response_model=SecuritySnapshot)
+async def get_security_snapshot(
+    vt_symbol: str,
+    services: Annotated[AlphaServiceContainer, Depends(get_alpha_services)],
+) -> dict[str, object]:
+    """仅从数据库读取最近一条原始日线，不拉取外部行情或计算指标。"""
+    detail = await services.database.get_security_catalog_item(vt_symbol)
+    if detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "证券不存在")
+    metadata = get_market_metadata(vt_symbol)
+    page = await services.database.load_bar_history(
+        BarHistoryQuery(vt_symbol=vt_symbol, interval="d", adjust="non", limit=1)
+    )
+    daily = None
+    if page["items"]:
+        row = page["items"][-1]
+        daily = {
+            "trade_date": (date_text(row.get("datetime")) or "")[:10],
+            **{
+                field: first_number(row, (field,))
+                for field in ("open", "high", "low", "close", "volume", "turnover")
+            },
+        }
+        # 存储中的零限价是未提供的占位值，不能展示为真实价格。
+        for field in ("upper_limit", "lower_limit"):
+            value = first_number(row, (field,))
+            daily[field] = value if value is not None and value > 0 else None
+    return {
+        **detail,
+        "timezone": metadata.timezone.key,
+        "price_color_convention": metadata.price_color_convention,
+        "volume_unit": metadata.volume_unit,
+        "latest_daily": daily,
     }

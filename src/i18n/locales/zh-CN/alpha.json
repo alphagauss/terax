@@ -390,7 +390,7 @@
     "market": "行情",
     "backtests": "回测",
     "data": "数据管理",
-    "security": "证券资料",
+    "security": "标的资料",
     "tasks": "任务",
     "openTaskWindow": "打开浮窗",
     "openMovableTaskWindow": "打开可移动浮窗",
@@ -417,7 +417,18 @@
       "timezone": "市场时区",
       "intervals": "可用周期",
       "coverage": "行情覆盖范围",
-      "updated": "数据更新时间"
+      "updated": "数据更新时间",
+      "open": "开盘",
+      "high": "最高",
+      "low": "最低",
+      "close": "最近收盘",
+      "volume": "成交量",
+      "turnover": "成交额",
+      "upperLimit": "涨停价",
+      "lowerLimit": "跌停价",
+      "listedDate": "上市日期",
+      "shares": "股",
+      "profile": "基本资料与数据覆盖"
     },
     "taskStatus": {
       "running": "运行中",
@@ -425,7 +436,11 @@
       "failed": "失败",
       "cancelled": "已取消",
       "timeout": "超时"
-    }
+    },
+    "resizeSecurity": "调整标的资料宽度",
+    "dailyAsOf": "日线 · {{date}} · 未复权",
+    "noDaily": "暂无已存储的日线数据",
+    "snapshotFailed": "无法读取标的资料"
   },
   "watch": {
     "all": "全部自选",

@@ -235,7 +235,13 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   ).toBeNull();
   expect(
     rightTools?.querySelector('button[aria-label="desk.security"]'),
-  ).not.toBeNull();
+  ).toBeNull();
+  const market = container.querySelector('section[aria-label="desk.market"]');
+  expect(
+    market?.querySelector('button[aria-label="desk.security"]'),
+  ).toBeNull();
+  expect(market?.querySelector("[data-chart]")).toBe(chart);
+  expect(market?.querySelector("[data-security]")).not.toBeNull();
   expect(
     container.querySelectorAll('button[aria-label="desk.watchlist"]'),
   ).toHaveLength(1);
@@ -255,7 +261,9 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
   };
+  expect(mocks.visible.security).toBe(true);
   await click("desk.backtests");
+  expect(mocks.visible.security).toBe(false);
   expect(mocks.visible.chart).toBe(false);
   expect(mocks.visible.backtests).toBe(true);
   await click("desk.data");
@@ -275,9 +283,29 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(mocks.visible.tasks).toBe(true);
   expect(container.querySelector('aside[id$="-details"]')).toBe(details);
   expect(details?.hasAttribute("inert")).toBe(false);
-  await click("desk.security");
-  expect(mocks.visible.tasks).toBe(false);
+  const securityPanel =
+    container.querySelector<HTMLElement>('[id$="-security"]');
+  const securityContent = container.querySelector("[data-security]");
   expect(mocks.visible.security).toBe(true);
+  expect(securityPanel?.hidden).toBe(false);
+  expect(securityPanel?.querySelector("button")).toBeNull();
+  const resize = container.querySelector<HTMLElement>(
+    '[aria-label="desk.resizeSecurity"]',
+  );
+  await act(async () =>
+    resize?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+    ),
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  expect(mocks.write).toHaveBeenCalledWith(
+    "alpha",
+    "desk.marketInfoWidth",
+    366,
+  );
+  expect(container.querySelector("[data-chart]")).toBe(chart);
   await click("select-symbol");
   expect(mocks.write).toHaveBeenCalledWith(
     "alpha",
@@ -295,20 +323,9 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(mocks.mounts).toEqual({ chart: 1, backtests: 1, data: 1 });
   await click("desk.watchlist");
   expect(watchlist?.hasAttribute("inert")).toBe(false);
-  await click("desk.security");
-  expect(details?.hasAttribute("inert")).toBe(true);
-  expect(details?.getAttribute("aria-hidden")).toBe("true");
-  expect(mocks.visible.security).toBe(false);
-  // 业务可见性立即关闭，但退场期间仍保留原内容与标题。
-  const securityContent = details?.querySelector("[data-security]");
+  expect(mocks.visible.security).toBe(true);
+  expect(securityPanel?.hidden).toBe(false);
   const taskContent = details?.querySelector("[data-tasks]");
-  expect(securityContent?.parentElement?.hidden).toBe(false);
-  expect(taskContent?.parentElement?.hidden).toBe(true);
-  expect(details?.querySelector("strong")?.textContent).toBe("desk.security");
-  await click("desk.tasks");
-  expect(details?.hasAttribute("inert")).toBe(false);
-  expect(securityContent?.parentElement?.hidden).toBe(true);
-  expect(taskContent?.parentElement?.hidden).toBe(false);
   const collapse = [...(details?.querySelectorAll("button") ?? [])].find(
     (button) => button.textContent === "desk.collapse",
   );
@@ -321,7 +338,7 @@ it("切换视图和收起分区保留实例，隐藏页面暂停全部场景，�
   expect(details?.textContent).toContain("desk.openTaskWindow");
   expect(details?.textContent).toContain("desk.openMovableTaskWindow");
   await click("desk.tasks");
-  expect(details?.querySelector("[data-security]")).toBe(securityContent);
+  expect(container.querySelector("[data-security]")).toBe(securityContent);
   expect(details?.querySelector("[data-tasks]")).toBe(taskContent);
   await click("desk.openTaskWindow");
   const taskWindow = container.querySelector(

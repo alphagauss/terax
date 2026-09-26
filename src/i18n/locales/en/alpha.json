@@ -390,7 +390,7 @@
     "market": "Market",
     "backtests": "Backtests",
     "data": "Data",
-    "security": "Security details",
+    "security": "Security overview",
     "tasks": "Tasks",
     "openTaskWindow": "Open floating window",
     "openMovableTaskWindow": "Open movable window",
@@ -417,7 +417,18 @@
       "timezone": "Market timezone",
       "intervals": "Available intervals",
       "coverage": "Market data coverage",
-      "updated": "Data updated"
+      "updated": "Data updated",
+      "open": "Open",
+      "high": "High",
+      "low": "Low",
+      "close": "Latest close",
+      "volume": "Volume",
+      "turnover": "Turnover",
+      "upperLimit": "Upper limit",
+      "lowerLimit": "Lower limit",
+      "listedDate": "Listed date",
+      "shares": "shares",
+      "profile": "Profile and data coverage"
     },
     "taskStatus": {
       "running": "Running",
@@ -425,7 +436,11 @@
       "failed": "Failed",
       "cancelled": "Cancelled",
       "timeout": "Timed out"
-    }
+    },
+    "resizeSecurity": "Resize security overview",
+    "dailyAsOf": "Daily · {{date}} · Unadjusted",
+    "noDaily": "No stored daily data",
+    "snapshotFailed": "Could not load security overview"
   },
   "watch": {
     "all": "All symbols",

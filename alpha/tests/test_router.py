@@ -1144,3 +1144,56 @@ def test_alpha_router_rejects_settings_update_while_task_is_running(
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize("has_daily", [True, False])
+def test_security_snapshot_reads_only_latest_raw_daily(has_daily: bool) -> None:
+    """概览只读一条未复权日线，缺失行情不妨碍证券资料，零限价不伪装价格。"""
+    client = _client()
+
+    async def load_history(query: object) -> dict[str, object]:
+        assert query.vt_symbol == "000001.SZSE"
+        assert query.interval == "d"
+        assert query.adjust == "non"
+        assert query.limit == 1
+        return {
+            "items": (
+                [
+                    {
+                        "datetime": "2025-01-02 00:00:00",
+                        "open": 10,
+                        "high": 11,
+                        "low": 9,
+                        "close": 10.5,
+                        "volume": 0,
+                        "turnover": None,
+                        "upper_limit": 12,
+                        "lower_limit": 0,
+                    }
+                ]
+                if has_daily
+                else []
+            )
+        }
+
+    client.app.state.alpha_services.database.load_bar_history = load_history
+    response = client.get("/api/alpha/securities/000001.SZSE/snapshot")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "平安银行"
+    assert body["latest_daily"] == (
+        {
+            "trade_date": "2025-01-02",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10.5,
+            "volume": 0,
+            "turnover": None,
+            "upper_limit": 12,
+            "lower_limit": None,
+        }
+        if has_daily
+        else None
+    )
+    assert client.get("/api/alpha/securities/missing/snapshot").status_code == 404

@@ -109,6 +109,30 @@ const securityDetailSchema = securitySchema.extend({
   price_tick: z.number().nullable(),
 });
 
+const securitySnapshotSchema = securityDetailSchema.extend({
+  latest_daily: z
+    .object({
+      trade_date: z.string(),
+      open: z.number().nullable(),
+      high: z.number().nullable(),
+      low: z.number().nullable(),
+      close: z.number().nullable(),
+      volume: z.number().nullable(),
+      turnover: z.number().nullable(),
+      upper_limit: z.number().nullable(),
+      lower_limit: z.number().nullable(),
+    })
+    .nullable(),
+});
+
+/** 读取现有数据库字段，不受图表周期、复权或十字线影响。 */
+export function getAlphaSecuritySnapshot(symbol: string) {
+  return alphaGet(
+    `/api/alpha/securities/${encodeURIComponent(symbol)}/snapshot`,
+    securitySnapshotSchema,
+  );
+}
+
 const barSchema = z.object({
   time: z.string().regex(/^\d{4}-\d{2}-\d{2}/),
   open: z.number(),

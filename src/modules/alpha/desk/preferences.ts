@@ -23,7 +23,8 @@ export type AlphaDeskPreferences = {
   symbol: string;
   view: "market" | "backtests" | "data";
   leftOpen: boolean;
-  right: "security" | "tasks" | null;
+  right: "tasks" | null;
+  marketInfoWidth: number;
   leftWidth: number;
   rightWidth: number;
   chart: AlphaChartPanelConfig;
@@ -41,10 +42,10 @@ export function parseAlphaDeskPreferences(
   values: Record<string, unknown>,
 ): AlphaDeskPreferences {
   const read = (field: string) => values[`desk.${field}`];
-  const width = (field: string, fallback: number) => {
+  const width = (field: string, fallback: number, min = 200, max = 480) => {
     const value = read(field);
     return typeof value === "number" && Number.isFinite(value)
-      ? Math.max(200, Math.min(480, value))
+      ? Math.max(min, Math.min(max, value))
       : fallback;
   };
   let chart = createDefaultAlphaChartPanelConfig();
@@ -63,7 +64,8 @@ export function parseAlphaDeskPreferences(
         : "000001.SZSE",
     view: view === "backtests" || view === "data" ? view : "market",
     leftOpen: read("leftOpen") !== false,
-    right: right === "security" || right === "tasks" ? right : null,
+    right: right === "tasks" ? right : null,
+    marketInfoWidth: width("marketInfoWidth", 350, 260, 560),
     leftWidth: width("leftWidth", 320),
     rightWidth: width("rightWidth", 300),
     chart,

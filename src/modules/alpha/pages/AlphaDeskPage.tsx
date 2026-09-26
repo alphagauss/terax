@@ -9,7 +9,11 @@ import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import { ConfiguredMarketChartScene } from "@/modules/alpha/chart/scenes/ConfiguredMarketChartScene";
 import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
-import { AlphaDeskDivider } from "@/modules/alpha/desk/AlphaDeskDivider";
+import {
+  ResizeHandle,
+  SplitLayout,
+  SplitPanel,
+} from "@/components/layout/SplitLayout";
 import { useAlphaDeskPreferences } from "@/modules/alpha/desk/preferences";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
 import { BacktestResultsScene } from "@/modules/alpha/scenes/BacktestResultsScene";
@@ -20,7 +24,6 @@ import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
 import { WorkbenchPageWindow } from "@/modules/workbench/WorkbenchPageOverlays";
 import {
   ChartAnalysisIcon,
-  Database01Icon,
   GridIcon,
   Settings01Icon,
 } from "@hugeicons/core-free-icons";
@@ -131,11 +134,6 @@ function AlphaDeskContent({
   const [taskWindowOpen, setTaskWindowOpen] = useState(false);
   const [movableTaskWindowOpen, setMovableTaskWindowOpen] = useState(false);
   const state = preferences.data;
-  const [displayedRight, setDisplayedRight] = useState(state?.right ?? null);
-  // 收起只关闭业务可见性，保留最近的内容和标题随外壳退场。
-  if (state?.right && state.right !== displayedRight) {
-    setDisplayedRight(state.right);
-  }
   const leftOpen = state?.leftOpen;
   const leftWidth = state?.leftWidth;
   const mainRef = useRef<HTMLElement>(null);
@@ -221,6 +219,7 @@ function AlphaDeskContent({
             style={{
               minWidth:
                 360 +
+                (state.view === "market" ? state.marketInfoWidth + 1 : 0) +
                 (state.leftOpen ? state.leftWidth + 1 : 0) +
                 (state.right ? state.rightWidth + 1 : 0),
             }}
@@ -252,9 +251,11 @@ function AlphaDeskContent({
               </div>
             </aside>
             {state.leftOpen && (
-              <AlphaDeskDivider
+              <ResizeHandle
                 label={t("desk.resizeWatchlist")}
-                width={state.leftWidth}
+                size={state.leftWidth}
+                defaultSize={320}
+                panelId={`${id}-watchlist`}
                 onCommit={(width) => set("leftWidth", width)}
               />
             )}
@@ -286,14 +287,48 @@ function AlphaDeskContent({
                 <div className="shrink-0 border-b px-3 py-2 font-mono text-xs">
                   {state.symbol}
                 </div>
-                <div className="min-h-0 flex-1">
-                  <ConfiguredMarketChartScene
-                    vtSymbol={state.symbol}
-                    visible={marketVisible}
-                    config={state.chart}
-                    onConfigChange={(chart) => set("chart", chart)}
+                <SplitLayout
+                  className="min-h-0 flex-1"
+                  style={{
+                    minWidth: 360 + state.marketInfoWidth + 1,
+                  }}
+                >
+                  <SplitPanel id={`${id}-chart`}>
+                    <ConfiguredMarketChartScene
+                      vtSymbol={state.symbol}
+                      visible={marketVisible}
+                      config={state.chart}
+                      onConfigChange={(chart) => set("chart", chart)}
+                    />
+                  </SplitPanel>
+                  <ResizeHandle
+                    label={t("desk.resizeSecurity")}
+                    panelId={`${id}-security`}
+                    size={state.marketInfoWidth}
+                    minSize={260}
+                    maxSize={560}
+                    defaultSize={350}
+                    reverse
+                    onCommit={(size) => set("marketInfoWidth", size)}
                   />
-                </div>
+                  <SplitPanel
+                    id={`${id}-security`}
+                    size={state.marketInfoWidth}
+                    className="h-full"
+                  >
+                    <div className="flex h-full min-h-0 flex-col">
+                      <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
+                        <strong className="text-xs">
+                          {t("desk.security")}
+                        </strong>
+                      </div>
+                      <SecurityDetailsScene
+                        symbol={state.symbol}
+                        visible={marketVisible}
+                      />
+                    </div>
+                  </SplitPanel>
+                </SplitLayout>
               </section>
               <section
                 aria-label={t("desk.backtests")}
@@ -311,9 +346,11 @@ function AlphaDeskContent({
               </section>
             </main>
             {state.right && (
-              <AlphaDeskDivider
+              <ResizeHandle
                 label={t("desk.resizeDetails")}
-                width={state.rightWidth}
+                size={state.rightWidth}
+                defaultSize={300}
+                panelId={`${id}-details`}
                 reverse
                 onCommit={(width) => set("rightWidth", width)}
               />
@@ -337,27 +374,23 @@ function AlphaDeskContent({
               }}
             >
               <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-1 border-b px-2 py-1">
-                <strong className="text-xs">
-                  {displayedRight && t(`desk.${displayedRight}`)}
-                </strong>
-                {displayedRight === "tasks" && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => setTaskWindowOpen(true)}
-                    >
-                      {t("desk.openTaskWindow")}
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => setMovableTaskWindowOpen(true)}
-                    >
-                      {t("desk.openMovableTaskWindow")}
-                    </Button>
-                  </div>
-                )}
+                <strong className="text-xs">{t("desk.tasks")}</strong>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setTaskWindowOpen(true)}
+                  >
+                    {t("desk.openTaskWindow")}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setMovableTaskWindowOpen(true)}
+                  >
+                    {t("desk.openMovableTaskWindow")}
+                  </Button>
+                </div>
                 <Button
                   size="xs"
                   variant="ghost"
@@ -366,19 +399,7 @@ function AlphaDeskContent({
                   {t("desk.collapse")}
                 </Button>
               </div>
-              <div
-                hidden={displayedRight !== "security"}
-                className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
-              >
-                <SecurityDetailsScene
-                  symbol={state.symbol}
-                  visible={visible && state.right === "security"}
-                />
-              </div>
-              <div
-                hidden={displayedRight !== "tasks"}
-                className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
-              >
+              <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
                 <TaskMonitorScene
                   visible={visible && state.right === "tasks"}
                 />
@@ -390,26 +411,21 @@ function AlphaDeskContent({
           aria-label={t("desk.tools")}
           className="flex w-8 shrink-0 flex-col items-center gap-2 border-l py-2"
         >
-          {(
-            [
-              { key: "security", icon: Database01Icon },
-              { key: "tasks", icon: ChartAnalysisIcon },
-            ] as const
-          ).map(({ key, icon }) => (
-            <Hint key={key} content={t(`desk.${key}`)}>
-              <Button
-                size="icon-sm"
-                variant={state.right === key ? "secondary" : "ghost"}
-                className="transition-none"
-                aria-label={t(`desk.${key}`)}
-                aria-expanded={state.right === key}
-                aria-controls={`${id}-details`}
-                onClick={() => set("right", state.right === key ? null : key)}
-              >
-                <HugeiconsIcon icon={icon} size={16} />
-              </Button>
-            </Hint>
-          ))}
+          <Hint content={t("desk.tasks")}>
+            <Button
+              size="icon-sm"
+              variant={state.right === "tasks" ? "secondary" : "ghost"}
+              className="transition-none"
+              aria-label={t("desk.tasks")}
+              aria-expanded={state.right === "tasks"}
+              aria-controls={`${id}-details`}
+              onClick={() =>
+                set("right", state.right === "tasks" ? null : "tasks")
+              }
+            >
+              <HugeiconsIcon icon={ChartAnalysisIcon} size={16} />
+            </Button>
+          </Hint>
         </nav>
       </div>
       <WorkbenchPageWindow
