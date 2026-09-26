@@ -1,0 +1,41 @@
+/* 名称宽度有界，剩余空间交给走势；窄面板保留列并允许横向滚动。 */
+.alpha-watchlist-columns {
+  display: grid;
+  grid-template-columns: minmax(88px, 112px) minmax(48px, 1fr) 72px;
+  column-gap: 8px;
+}
+.alpha-watchlist-columns[data-show-date="true"] {
+  grid-template-columns: minmax(88px, 112px) minmax(48px, 1fr) 72px 86px;
+}
+/* 冻结列与整行使用相同的不透明合成底色，横向滚动时不叠加悬停色。 */
+.alpha-watchlist-row {
+  --watchlist-row-overlay: transparent;
+}
+.alpha-watchlist-row,
+.alpha-watchlist-row [data-watchlist-frozen] {
+  background: linear-gradient(
+      var(--watchlist-row-overlay),
+      var(--watchlist-row-overlay)
+    ),
+    var(--background);
+}
+.alpha-watchlist-row:hover {
+  --watchlist-row-overlay: var(--interactive-hover);
+}
+.alpha-watchlist-row[data-selected="true"] {
+  --watchlist-row-overlay: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+/* 与文件树选中项一致；描边在冻结列上方，保持整行边界完整。 */
+.alpha-watchlist-row[data-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
+}
+
+[data-watchlist-dragging="true"] button {
+  cursor: grabbing;
+}

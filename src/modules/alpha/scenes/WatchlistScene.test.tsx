@@ -1,10 +1,23 @@
 // @vitest-environment happy-dom
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
 const mocks = vi.hoisted(() => ({
+  items: [] as Array<{
+    group_id: string;
+    vt_symbol: string;
+    name: string;
+    position: number;
+    pinned: boolean;
+    pin_position: number;
+    price_tick: number | null;
+  }>,
+  change: vi.fn(),
   search: vi.fn(async ({ offset }: { offset: number }) => ({
     items: [{ vt_symbol: `${offset}.SSE`, name: `证券 ${offset}` }],
     total: 31,
@@ -12,15 +25,41 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/modules/alpha/api", () => ({
   getAlphaSecurities: mocks.search,
-  getAlphaWatchlist: async () => [],
-  setAlphaWatchlistSymbol: vi.fn(),
 }));
-vi.mock("@/modules/alpha/query", () => ({
-  alphaQueryKeys: { securities: ["alpha", "securities"] },
+vi.mock("@/modules/alpha/watchlist/api", () => ({
+  getWatchlist: async () => ({ groups: [], items: mocks.items }),
+  getWatchlistQuotes: async () =>
+    mocks.items.map((item, index) => ({
+      vt_symbol: item.vt_symbol,
+      close: index + 10,
+      change: index,
+      date: "2026-09-22",
+      closes: [9, 10],
+      price_tick: 0.01,
+      price_color_convention: "up-red",
+      status: "daily",
+    })),
+  changeWatchlist: mocks.change,
+}));
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getTotalSize: () => count * 52,
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 52,
+        size: 52,
+      })),
+  }),
+}));
+vi.mock("@/components/controls/tooltip", () => ({
+  Hint: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
 }));
+
 import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
 
 it("搜索能访问首批之后的证券，重新搜索会回到第一页", async () => {
@@ -87,5 +126,257 @@ it("搜索能访问首批之后的证券，重新搜索会回到第一页", asyn
   } finally {
     act(() => root.unmount());
     client.clear();
+  }
+});
+
+it("多选隔离主图与排序操作，逐项及范围勾选只提交批量成员命令", async () => {
+  mocks.items = ["A", "B", "C"].map((name, position) => ({
+    name,
+    vt_symbol: `${name}.SSE`,
+    group_id: "all",
+    position,
+    pinned: name === "A",
+    pin_position: 0,
+    price_tick: 0.01,
+  }));
+  mocks.change.mockImplementation(async (command) => {
+    mocks.items = mocks.items.filter(
+      (item) => !command.symbols.includes(item.vt_symbol),
+    );
+    const committed = { groups: [], items: [...mocks.items] };
+    // 模拟其他窗口在本次提交后新增证券，延迟返回的写入快照不包含该成员。
+    mocks.items.push({
+      name: "D",
+      vt_symbol: "D.SSE",
+      group_id: "all",
+      position: 3,
+      pinned: false,
+      pin_position: 0,
+      price_tick: 0.01,
+    });
+    return committed;
+  });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onSelect = vi.fn();
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  const button = (text: string) => {
+    const element = [...container.querySelectorAll("button")].find(
+      (node) => node.textContent?.trim() === text,
+    );
+    if (!element) throw new Error(`Missing button ${text}`);
+    return element;
+  };
+  const row = (name: string) => {
+    const element = container.querySelector<HTMLElement>(
+      `[role="group"][aria-label="${name}"]`,
+    );
+    if (!element) throw new Error(`Missing row ${name}`);
+    return element;
+  };
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    await settle();
+    await act(async () => button("watch.change").click());
+    expect(
+      [...container.querySelectorAll('[role="group"]')].map((node) =>
+        node.getAttribute("aria-label"),
+      ),
+    ).toEqual(["C", "B", "A"]);
+    expect(mocks.change).not.toHaveBeenCalled();
+    await act(async () => button("watch.multi").click());
+    expect(button("watch.cancelSort").disabled).toBe(true);
+    expect(button("watch.change ↓").disabled).toBe(true);
+    expect(row("A").hasAttribute("draggable")).toBe(false);
+    await act(async () =>
+      row("C")
+        .querySelector<HTMLButtonElement>("button[aria-pressed]")
+        ?.click(),
+    );
+    await act(async () =>
+      row("A")
+        .querySelector<HTMLButtonElement>("button[aria-pressed]")
+        ?.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, shiftKey: true }),
+        ),
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(
+      container.querySelectorAll('[role="checkbox"][aria-checked="true"]'),
+    ).toHaveLength(4);
+    await act(async () => button("watch.removeAll").click());
+    await settle();
+    expect(mocks.change).toHaveBeenLastCalledWith(
+      {
+        action: "remove",
+        group_id: "all",
+        symbols: ["C.SSE", "B.SSE", "A.SSE"],
+      },
+      expect.anything(),
+    );
+    expect(button("watch.removeAll").disabled).toBe(true);
+    expect(row("D")).toBeTruthy();
+    expect(
+      client.getQueryData<{ items: unknown[] }>(["alpha", "watchlist"])?.items,
+    ).toHaveLength(1);
+    await act(async () => button("watch.done").click());
+    expect(button("watch.cancelSort").disabled).toBe(false);
+  } finally {
+    act(() => root.unmount());
+    client.clear();
+    container.remove();
+    mocks.items = [];
+    mocks.change.mockReset();
+  }
+});
+
+it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", async () => {
+  mocks.items = ["A", "B", "C"].map((name, position) => ({
+    name,
+    vt_symbol: `${name}.SSE`,
+    group_id: "all",
+    position,
+    pinned: name === "A",
+    pin_position: 0,
+    price_tick: 0.01,
+  }));
+  mocks.change.mockImplementation(async () => ({
+    groups: [],
+    items: mocks.items,
+  }));
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const onSelect = vi.fn();
+  const row = (name: string) =>
+    container.querySelector<HTMLElement>(
+      `[role="group"][aria-label="${name}"]`,
+    );
+  const capture = new Set<number>();
+  const fire = async (name: string, type: string, y = 110) => {
+    await act(async () => {
+      row(name)?.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+          clientX: 30,
+          clientY: y,
+        }),
+      );
+    });
+  };
+  let hit: HTMLElement | null = null;
+  const hitTest = vi
+    .spyOn(document, "elementFromPoint")
+    .mockImplementation(() => hit);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <WatchlistScene visible symbol="A.SSE" onSelect={onSelect} />
+        </QueryClientProvider>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const host = row("B")?.closest<HTMLDivElement>(".app-scrollbar");
+    if (!host) throw new Error("missing viewport");
+    host.setPointerCapture = (id) => {
+      capture.add(id);
+    };
+    host.hasPointerCapture = (id) => capture.has(id);
+    host.releasePointerCapture = (id) => {
+      capture.delete(id);
+    };
+    host.getBoundingClientRect = () => ({
+      top: 0,
+      bottom: 300,
+      left: 0,
+      right: 360,
+      width: 360,
+      height: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    for (const name of ["A", "B", "C"]) {
+      const element = row(name);
+      if (element)
+        element.getBoundingClientRect = () => ({
+          top: 140,
+          bottom: 192,
+          left: 0,
+          right: 360,
+          width: 360,
+          height: 52,
+          x: 0,
+          y: 140,
+          toJSON: () => ({}),
+        });
+    }
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 112);
+    expect(capture.size).toBe(0);
+    await fire("B", "pointerup", 112);
+    hit = row("A");
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 145);
+    await fire("B", "pointerup", 145);
+    expect(mocks.change).not.toHaveBeenCalled();
+    hit = row("C");
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 145);
+    expect(capture.has(1)).toBe(true);
+    await act(async () =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
+    );
+    expect(capture.size).toBe(0);
+    expect(mocks.change).not.toHaveBeenCalled();
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 145);
+    await fire("B", "pointerup", 145);
+    await act(async () =>
+      row("B")
+        ?.querySelector<HTMLButtonElement>("button[aria-pressed]")
+        ?.click(),
+    );
+    expect(mocks.change).toHaveBeenCalledWith(
+      {
+        action: "reorder",
+        group_id: "all",
+        symbols: ["B.SSE"],
+        anchor: "C.SSE",
+        side: "before",
+      },
+      expect.anything(),
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+  } finally {
+    hitTest.mockRestore();
+    act(() => root.unmount());
+    client.clear();
+    mocks.items = [];
+    mocks.change.mockReset();
   }
 });

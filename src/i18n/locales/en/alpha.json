@@ -159,14 +159,20 @@
           "signal": "Signal period"
         },
         "outputs": {
-          "sma": { "line": "SMA" },
-          "ema": { "line": "EMA" },
+          "sma": {
+            "line": "SMA"
+          },
+          "ema": {
+            "line": "EMA"
+          },
           "boll": {
             "mid": "Middle band",
             "upper": "Upper band",
             "lower": "Lower band"
           },
-          "rsi": { "line": "RSI" },
+          "rsi": {
+            "line": "RSI"
+          },
           "macd": {
             "macd": "MACD",
             "signal": "Signal",
@@ -399,8 +405,6 @@
     "backToWatchlist": "Back to watchlist",
     "add": "Add",
     "remove": "Remove",
-    "addSymbol": "Add {{symbol}} to watchlist",
-    "removeSymbol": "Remove {{symbol}} from watchlist",
     "noResults": "No matching securities",
     "emptyWatchlist": "Search for securities to add to your watchlist.",
     "resizeWatchlist": "Resize watchlist",
@@ -422,5 +426,56 @@
       "cancelled": "Cancelled",
       "timeout": "Timed out"
     }
+  },
+  "watch": {
+    "all": "All symbols",
+    "group": "Watchlist group",
+    "manage": "Manage",
+    "createGroup": "New group",
+    "renameGroup": "Rename group",
+    "deleteGroup": "Delete group",
+    "groupName": "Group name",
+    "deleteGroupHint": "Delete this group and its memberships. Symbols remain in All symbols and other groups.",
+    "save": "Save",
+    "cancel": "Cancel",
+    "multi": "Select",
+    "done": "Done",
+    "cancelMulti": "Cancel selection",
+    "selectAll": "Select entire group",
+    "selected": "{{count}} selected",
+    "selectSymbol": "Select {{name}}",
+    "copy": "Copy to group",
+    "move": "Move to group",
+    "addToGroup": "Add to group",
+    "removeAll": "Remove from all watchlists",
+    "removeGroup": "Remove from this group",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinned": "Pinned",
+    "first": "Move to first",
+    "last": "Move to last",
+    "cancelToReorder": "Clear sorting to drag or change manual order.",
+    "cancelSort": "Clear sort",
+    "security": "Symbol",
+    "trend": "20-day close",
+    "change": "Change",
+    "close": "Latest close",
+    "dataDate": "Quote date",
+    "dailyHint": "Quote date: {{date}}. Daily close and change from the previous available daily close, not live quotes. Change is unavailable without a reference or when an adjustment discontinuity is detected.",
+    "added": "Added",
+    "saved": "Saved",
+    "transferred": "Processed {{count}} symbols; {{existing}} already existed in the target group.",
+    "failed": "Watchlist operation failed. Please retry.",
+    "errors": {
+      "group_missing": "This group no longer exists. The list has been refreshed.",
+      "member_missing": "Some symbols were removed. Select them again.",
+      "anchor_missing": "The target position changed. Please retry.",
+      "duplicate_group": "A group with this name already exists.",
+      "invalid_target": "Choose another custom group.",
+      "reserved_group": "All symbols cannot be modified as a group.",
+      "security_missing": "This symbol no longer exists."
+    },
+    "quoteError": "Some quote data could not be loaded. Retrying automatically.",
+    "noQuote": "No daily price data is available yet."
   }
 }

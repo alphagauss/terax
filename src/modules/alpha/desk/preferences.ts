@@ -5,12 +5,12 @@ import {
   setSharedStoreKey,
 } from "@/lib/sharedStore";
 import {
+  type AlphaChartPanelConfig,
   createDefaultAlphaChartPanelConfig,
   parseAlphaChartPanelConfig,
-  type AlphaChartPanelConfig,
 } from "@/modules/alpha/chart/chartPanelConfig";
-import { normalizeAlphaVtSymbol } from "@/modules/alpha/market/symbol";
 import { trackAlphaDeskWrite } from "@/modules/alpha/desk/writes";
+import { normalizeAlphaVtSymbol } from "@/modules/alpha/market/symbol";
 import {
   useMutation,
   useMutationState,
@@ -64,7 +64,7 @@ export function parseAlphaDeskPreferences(
     view: view === "backtests" || view === "data" ? view : "market",
     leftOpen: read("leftOpen") !== false,
     right: right === "security" || right === "tasks" ? right : null,
-    leftWidth: width("leftWidth", 240),
+    leftWidth: width("leftWidth", 360),
     rightWidth: width("rightWidth", 300),
     chart,
   };

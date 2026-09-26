@@ -159,14 +159,20 @@
           "signal": "信号周期"
         },
         "outputs": {
-          "sma": { "line": "均线" },
-          "ema": { "line": "指数均线" },
+          "sma": {
+            "line": "均线"
+          },
+          "ema": {
+            "line": "指数均线"
+          },
           "boll": {
             "mid": "中轨",
             "upper": "上轨",
             "lower": "下轨"
           },
-          "rsi": { "line": "RSI" },
+          "rsi": {
+            "line": "RSI"
+          },
           "macd": {
             "macd": "快线",
             "signal": "信号线",
@@ -399,8 +405,6 @@
     "backToWatchlist": "返回自选",
     "add": "添加",
     "remove": "移除",
-    "addSymbol": "添加 {{symbol}} 到自选",
-    "removeSymbol": "从自选移除 {{symbol}}",
     "noResults": "没有匹配的证券",
     "emptyWatchlist": "搜索证券并添加到自选。",
     "resizeWatchlist": "调整自选宽度",
@@ -422,5 +426,56 @@
       "cancelled": "已取消",
       "timeout": "超时"
     }
+  },
+  "watch": {
+    "all": "全部自选",
+    "group": "自选分组",
+    "manage": "管理",
+    "createGroup": "新建分组",
+    "renameGroup": "重命名分组",
+    "deleteGroup": "删除分组",
+    "groupName": "分组名称",
+    "deleteGroupHint": "删除当前分组及其成员关系，证券仍保留在全部自选和其他分组中。",
+    "save": "保存",
+    "cancel": "取消",
+    "multi": "多选",
+    "done": "完成",
+    "cancelMulti": "取消多选",
+    "selectAll": "全选当前分组",
+    "selected": "已选 {{count}} 项",
+    "selectSymbol": "勾选 {{name}}",
+    "copy": "复制到分组",
+    "move": "移动到分组",
+    "addToGroup": "添加到分组",
+    "removeAll": "从全部自选删除",
+    "removeGroup": "从当前分组移除",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "pinned": "已置顶",
+    "first": "移到最前",
+    "last": "移到最后",
+    "cancelToReorder": "取消排序后可拖动或调整手动位置。",
+    "cancelSort": "取消排序",
+    "security": "证券",
+    "trend": "20日收盘",
+    "change": "涨幅",
+    "close": "最近收盘价",
+    "dataDate": "行情日期",
+    "dailyHint": "行情日期：{{date}}。显示日线收盘价及相对上一根日线收盘价的涨幅，非实时行情。缺失参考价或检测到复权跳变时涨幅为空。",
+    "added": "已添加",
+    "saved": "已保存",
+    "transferred": "已处理 {{count}} 项，其中 {{existing}} 项已在目标分组。",
+    "failed": "自选操作失败，请重试。",
+    "errors": {
+      "group_missing": "分组已不存在，列表已刷新。",
+      "member_missing": "部分证券已被移除，请重新选择。",
+      "anchor_missing": "目标位置已改变，请重试。",
+      "duplicate_group": "分组名称已存在。",
+      "invalid_target": "请选择其他自定义分组。",
+      "reserved_group": "不能修改全部自选分组。",
+      "security_missing": "证券已不存在。"
+    },
+    "quoteError": "部分行情读取失败，稍后自动重试。",
+    "noQuote": "尚无日线行情数据。"
   }
 }

@@ -35,7 +35,7 @@ export function AlphaDeskDivider({
       aria-valuemin={200}
       aria-valuemax={480}
       aria-valuenow={width}
-      className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 focus-visible:bg-primary"
+      className="relative z-30 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 focus-visible:bg-primary"
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();

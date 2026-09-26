@@ -51,13 +51,13 @@ class DataBase:
         """返回数据库目录。"""
         return self._storage.data_dir
 
-    async def list_watchlist(self) -> list[dict[str, str]]:
-        """返回所有客户端共用的自选证券摘要。"""
-        return await self._watchlist.list_items()
+    async def get_watchlist(self) -> dict:
+        """读取所有客户端共用的分组与成员权威快照。"""
+        return await self._watchlist.snapshot()
 
-    async def set_watchlist_symbol(self, vt_symbol: str, included: bool) -> None:
-        """精确修改自选成员，其他成员不受影响。"""
-        await self._watchlist.set_symbol(vt_symbol, included)
+    async def change_watchlist(self, command: dict) -> dict:
+        """事务内精确修改分组、顺序或批量成员。"""
+        return await self._watchlist.execute(command)
 
     async def close(self) -> None:
         """关闭底层存储对象。"""

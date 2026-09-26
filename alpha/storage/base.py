@@ -123,9 +123,20 @@ CREATE TABLE IF NOT EXISTS index_constituent_meta (
 """
 
 MAIN_DB_SCHEMA = [
-    """CREATE TABLE IF NOT EXISTS watchlist (
-        vt_symbol TEXT NOT NULL PRIMARY KEY
+    """CREATE TABLE IF NOT EXISTS watchlist_group (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE
     );""",
+    """CREATE TABLE IF NOT EXISTS watchlist_member (
+        group_id TEXT NOT NULL,
+        vt_symbol TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        pin_position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (group_id, vt_symbol)
+    );""",
+    "CREATE INDEX IF NOT EXISTS watchlist_member_position ON watchlist_member (group_id, position);",
+    "CREATE INDEX IF NOT EXISTS watchlist_member_symbol ON watchlist_member (vt_symbol);",
     ADJUST_FACTOR_CREATE,
     ADJUST_FACTOR_META_CREATE,
     BAR_OVERVIEW_CREATE,
