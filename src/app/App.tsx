@@ -3,6 +3,7 @@
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
 import { ChannelsPanel } from "@/modules/channels/components/lazy";
+import { getPrimaryNavigationActiveId } from "@/app/lib/primaryNavigation";
 
 import {
   ResizableHandle,
@@ -1787,9 +1788,11 @@ export default function App() {
   const sidebarBadges = {
     "source-control": sourceControl.changedCount,
   };
-  const primaryNavigationActiveId = sidebar.runtime.primary.collapsed
-    ? null
-    : sidebar.runtime.primary.activeId;
+  const primaryNavigationActiveId = getPrimaryNavigationActiveId(
+    sidebar.runtime.primary,
+    activeTab?.kind,
+    primarySidebarContainers,
+  );
   const sidebarConfigurationProps = {
     allContainers: sidebar.containers,
     activityBar: sidebar.activityBar,
