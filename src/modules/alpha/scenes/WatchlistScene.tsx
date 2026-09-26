@@ -70,7 +70,6 @@ export function WatchlistScene({
     "create" | "rename" | "delete" | null
   >(null);
   const [name, setName] = useState("");
-  const [notice, setNotice] = useState("");
   const list = useQuery({
     queryKey: listKey,
     queryFn: getWatchlist,
@@ -136,16 +135,6 @@ export function WatchlistScene({
       )
         setGroupEditor(null);
       if (command.action === "delete_group") setGroup("all");
-      if ("symbols" in command) {
-        if (snapshot.transfer) {
-          setNotice(
-            t("watch.transferred", {
-              count: snapshot.transfer.total,
-              existing: snapshot.transfer.existing,
-            }),
-          );
-        } else setNotice(t("watch.saved"));
-      }
       setSelected(new Set());
       selectionAnchor.current = null;
     },
@@ -154,9 +143,11 @@ export function WatchlistScene({
     },
   });
   const locked = change.isPending;
+  const reordering = locked && change.variables?.action === "reorder";
+  // 排序期间通过 inert 锁定工具栏，避免短暂禁用样式造成整排按钮闪烁。
+  const toolbarLocked = locked && !reordering;
   const command = (value: WatchlistCommand) => {
     if (!locked) {
-      setNotice("");
       change.mutate(value);
     }
   };
@@ -230,17 +221,20 @@ export function WatchlistScene({
   );
   const error = change.error ?? list.error ?? quotes.error;
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1 p-1">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div
+        className="flex shrink-0 items-center gap-1 p-1"
+        inert={reordering}
+        aria-busy={reordering}
+      >
         <Select
           value={group}
-          disabled={editing || locked || !list.data}
+          disabled={editing || toolbarLocked || !list.data}
           onValueChange={(value) => {
             setGroup(value);
             setFrozen(null);
             setSelected(new Set());
             setGroupEditor(null);
-            setNotice("");
           }}
         >
           <SelectTrigger
@@ -264,7 +258,7 @@ export function WatchlistScene({
             <Button
               variant="ghost"
               size="xs"
-              disabled={editing || locked || !list.data}
+              disabled={editing || toolbarLocked || !list.data}
             >
               {t("watch.manage")}
             </Button>
@@ -312,7 +306,7 @@ export function WatchlistScene({
           <Button
             size="xs"
             variant="ghost"
-            disabled={locked || !items.length || Boolean(groupEditor)}
+            disabled={toolbarLocked || !items.length || Boolean(groupEditor)}
             onClick={() => {
               setSearchOpen(false);
               setEditing(true);
@@ -329,7 +323,9 @@ export function WatchlistScene({
             aria-label={t("watch.searchAdd")}
             aria-haspopup="dialog"
             aria-expanded={searchOpen && visible}
-            disabled={editing || locked || !list.data || Boolean(groupEditor)}
+            disabled={
+              editing || toolbarLocked || !list.data || Boolean(groupEditor)
+            }
             onClick={() => setSearchOpen((open) => !open)}
           >
             <HugeiconsIcon icon={Search01Icon} size={16} />
@@ -429,19 +425,15 @@ export function WatchlistScene({
           </WatchlistCancelButton>
         </div>
       ) : null}
+      {/* 仅失败时显示浮层，不挤动表头与滚动视口。 */}
       {error && (
-        <p role="alert" className="shrink-0 p-2 text-xs text-destructive">
+        <p
+          role="alert"
+          className="absolute inset-x-2 bottom-2 z-30 rounded-md border bg-popover px-2 py-1 text-xs text-destructive shadow-sm"
+        >
           {t(`watch.errors.${error.message}`, {
             defaultValue: t("watch.failed"),
           })}
-        </p>
-      )}
-      {notice && (
-        <p
-          role="status"
-          className="shrink-0 px-2 py-1 text-xs text-muted-foreground"
-        >
-          {notice}
         </p>
       )}
       <WorkbenchPageWindow
@@ -576,6 +568,7 @@ export function WatchlistScene({
         editing={editing}
         selected={selected}
         locked={locked}
+        reordering={reordering}
         sort={sort}
         showDate={showDate}
         visible={visible}

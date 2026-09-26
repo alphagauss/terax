@@ -465,8 +465,6 @@
     "dataDate": "行情日期",
     "dailyHint": "行情日期：{{date}}。显示日线收盘价及相对上一根日线收盘价的涨幅，非实时行情。缺失参考价或检测到复权跳变时涨幅为空。",
     "added": "已添加",
-    "saved": "已保存",
-    "transferred": "已处理 {{count}} 项，其中 {{existing}} 项已在目标分组。",
     "failed": "自选操作失败，请重试。",
     "errors": {
       "group_missing": "分组已不存在，列表已刷新。",

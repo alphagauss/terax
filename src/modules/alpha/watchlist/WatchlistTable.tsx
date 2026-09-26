@@ -1,6 +1,5 @@
 /** 自选表负责虚拟滚动、固定表头与拖动反馈，业务命令交给场景提交。 */
 import { Button } from "@/components/controls/button";
-import { WatchlistCancelButton } from "@/modules/alpha/watchlist/WatchlistCancelButton";
 import type {
   WatchlistCommand,
   WatchlistItem,
@@ -9,6 +8,8 @@ import type {
 } from "@/modules/alpha/watchlist/api";
 import type { WatchlistSort } from "@/modules/alpha/watchlist/model";
 import { useWatchlistDrag } from "@/modules/alpha/watchlist/useWatchlistDrag";
+import { useWatchlistReorderMotion } from "@/modules/alpha/watchlist/useWatchlistReorderMotion";
+import { WatchlistCancelButton } from "@/modules/alpha/watchlist/WatchlistCancelButton";
 import { WatchlistRow } from "@/modules/alpha/watchlist/WatchlistRow";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import "@/modules/alpha/watchlist/watchlist.css";
@@ -23,6 +24,7 @@ export function WatchlistTable({
   editing,
   selected,
   locked,
+  reordering,
   sort,
   showDate,
   visible,
@@ -41,6 +43,7 @@ export function WatchlistTable({
   editing: boolean;
   selected: Set<string>;
   locked: boolean;
+  reordering: boolean;
   sort: WatchlistSort;
   showDate: boolean;
   visible: boolean;
@@ -57,7 +60,16 @@ export function WatchlistTable({
     enabled: visible && !editing && !sort && !locked,
     rows,
     onFreeze,
-    onCommand,
+    onCommand: (command) => {
+      if (command.action === "reorder") motion.prepare(command.symbols[0]);
+      onCommand(command);
+    },
+  });
+  const motion = useWatchlistReorderMotion({
+    viewport: drag.viewport,
+    rows,
+    enabled: visible && !editing && !sort,
+    locked,
   });
   const virtual = useVirtualizer({
     count: rows.length,
@@ -87,6 +99,8 @@ export function WatchlistTable({
       >
         <div
           data-show-date={showDate}
+          inert={reordering}
+          aria-busy={reordering}
           className="alpha-watchlist-columns sticky top-0 z-10 h-10 items-center bg-background pr-2 text-xs font-semibold text-foreground"
           style={{ paddingLeft: editing ? 36 : 8 }}
         >
@@ -95,7 +109,7 @@ export function WatchlistTable({
           >
             {sort ? (
               <WatchlistCancelButton
-                disabled={editing || locked}
+                disabled={editing || (locked && !reordering)}
                 onClick={onCancelSort}
               >
                 {t("watch.cancelSort")}
@@ -111,7 +125,7 @@ export function WatchlistTable({
             <Button
               size="xs"
               variant="ghost"
-              disabled={editing || locked}
+              disabled={editing || (locked && !reordering)}
               className="font-semibold"
               onClick={() => onSort("change")}
             >
@@ -125,7 +139,7 @@ export function WatchlistTable({
               size="xs"
               className="w-[86px] shrink-0"
               variant="ghost"
-              disabled={editing || locked}
+              disabled={editing || (locked && !reordering)}
               onClick={() => onSort("date")}
             >
               {t("watch.dataDate")}
@@ -149,6 +163,8 @@ export function WatchlistTable({
             return (
               <div
                 key={entry.key}
+                data-watchlist-position={row.vt_symbol}
+                data-offset={entry.start}
                 className="absolute left-0 top-0 w-full"
                 style={{
                   height: entry.size,
@@ -174,7 +190,10 @@ export function WatchlistTable({
                         open ? rows.map((item) => item.vt_symbol) : null,
                       );
                   }}
-                  onPointerDown={(event) => drag.start(event, row)}
+                  onPointerDown={(event) => {
+                    motion.cancel();
+                    drag.start(event, row);
+                  }}
                 />
               </div>
             );

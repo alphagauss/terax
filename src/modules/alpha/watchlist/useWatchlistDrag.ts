@@ -4,6 +4,8 @@ import type {
   WatchlistCommand,
   WatchlistItem,
 } from "@/modules/alpha/watchlist/api";
+import { createWatchlistDragPreview } from "@/modules/alpha/watchlist/dragPreview";
+import { useWorkbenchOverlayContainer } from "@/modules/workbench/WorkbenchPageOverlays";
 import { type PointerEvent, useCallback, useEffect, useRef } from "react";
 
 export function useWatchlistDrag({
@@ -17,6 +19,7 @@ export function useWatchlistDrag({
   onFreeze: (symbols: string[] | null) => void;
   onCommand: (command: WatchlistCommand) => void;
 }) {
+  const overlayContainer = useWorkbenchOverlayContainer();
   const viewport = useRef<HTMLDivElement>(null);
   const options = useRef({ enabled, rows, onFreeze, onCommand });
   options.current = { enabled, rows, onFreeze, onCommand };
@@ -31,6 +34,9 @@ export function useWatchlistDrag({
     target: { anchor: string; side: "before" | "after" } | null;
   } | null>(null);
   const marker = useRef<HTMLDivElement | null>(null);
+  const preview = useRef<ReturnType<typeof createWatchlistDragPreview> | null>(
+    null,
+  );
   const frame = useRef<number | null>(null);
   const suppressClick = useRef(false);
 
@@ -58,15 +64,19 @@ export function useWatchlistDrag({
       drag.x > bounds.right
     ) {
       marker.current?.remove();
+      preview.current?.move(drag.x, drag.y, false);
       return;
     }
     const rect = element.getBoundingClientRect();
     const side = drag.y < rect.top + rect.height / 2 ? "before" : "after";
     drag.target = { anchor: row.vt_symbol, side };
     const line = marker.current ?? host.ownerDocument.createElement("div");
-    line.className = `pointer-events-none absolute inset-x-0 z-20 h-px bg-primary ${side === "before" ? "top-0" : "bottom-0"}`;
+    line.className = "alpha-watchlist-drop-marker";
+    line.dataset.side = side;
+    line.setAttribute("aria-hidden", "true");
     if (line.parentElement !== element) element.appendChild(line);
     marker.current = line;
+    preview.current?.move(drag.x, drag.y, true);
   }, []);
 
   const scroll = useCallback(
@@ -98,6 +108,8 @@ export function useWatchlistDrag({
     frame.current = null;
     marker.current?.remove();
     marker.current = null;
+    preview.current?.remove();
+    preview.current = null;
     const host = viewport.current;
     if (host) {
       host.style.cursor = "";
@@ -173,6 +185,11 @@ export function useWatchlistDrag({
         host.setPointerCapture(event.pointerId);
         host.style.cursor = "grabbing";
         host.dataset.watchlistDragging = "true";
+        if (overlayContainer)
+          preview.current = createWatchlistDragPreview(
+            overlayContainer,
+            drag.item,
+          );
         options.current.onFreeze(
           options.current.rows.map((item) => item.vt_symbol),
         );

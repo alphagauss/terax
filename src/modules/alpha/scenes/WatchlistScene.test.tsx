@@ -60,8 +60,8 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
 }));
 
-import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 import { WatchlistScene } from "@/modules/alpha/scenes/WatchlistScene";
+import { WorkbenchPageScope } from "@/modules/workbench/WorkbenchPageOverlays";
 
 it("搜索浮窗保留自选列表，支持分页、重新搜索及添加证券", async () => {
   mocks.change.mockImplementation(async (command) => {
@@ -301,6 +301,7 @@ it("多选隔离主图与排序操作，逐项及范围勾选只提交批量成�
     );
     expect(button("watch.removeAll").disabled).toBe(true);
     expect(row("D")).toBeTruthy();
+    expect(container.querySelector('[role="status"]')).toBeNull();
     expect(
       client.getQueryData<{ items: unknown[] }>(["alpha", "watchlist"])?.items,
     ).toHaveLength(1);
@@ -325,10 +326,13 @@ it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", a
     pin_position: 0,
     price_tick: 0.01,
   }));
-  mocks.change.mockImplementation(async () => ({
-    groups: [],
-    items: mocks.items,
-  }));
+  let finishSave: (() => void) | undefined;
+  mocks.change.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishSave = () => resolve({ groups: [], items: mocks.items });
+      }),
+  );
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -393,6 +397,13 @@ it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", a
       y: 0,
       toJSON: () => ({}),
     });
+    const overlay = container.querySelector<HTMLElement>(
+      "[data-workbench-overlay-host]",
+    );
+    if (!overlay) throw new Error("missing overlay host");
+    overlay.getBoundingClientRect = host.getBoundingClientRect;
+    const preview = () =>
+      overlay.querySelector<HTMLElement>(".alpha-watchlist-drag-preview");
     for (const name of ["A", "B", "C"]) {
       const element = row(name);
       if (element)
@@ -411,24 +422,43 @@ it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", a
     await fire("B", "pointerdown");
     await fire("B", "pointermove", 112);
     expect(capture.size).toBe(0);
+    expect(preview()).toBeNull();
     await fire("B", "pointerup", 112);
     hit = row("A");
     await fire("B", "pointerdown");
     await fire("B", "pointermove", 145);
+    expect(preview()?.textContent).toContain("B.SSE");
+    expect(preview()?.getAttribute("aria-hidden")).toBe("true");
+    expect(preview()?.dataset.allowed).toBe("false");
     await fire("B", "pointerup", 145);
+    expect(preview()).toBeNull();
     expect(mocks.change).not.toHaveBeenCalled();
     hit = row("C");
     await fire("B", "pointerdown");
     await fire("B", "pointermove", 145);
     expect(capture.has(1)).toBe(true);
+    const card = preview();
+    expect(card?.dataset.allowed).toBe("true");
+    const position = card?.style.transform;
+    await fire("B", "pointermove", 150);
+    expect(preview()).toBe(card);
+    expect(card?.style.transform).not.toBe(position);
     await act(async () =>
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
     );
+    expect(capture.size).toBe(0);
+    expect(preview()).toBeNull();
+    expect(mocks.change).not.toHaveBeenCalled();
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 145);
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(preview()).toBeNull();
     expect(capture.size).toBe(0);
     expect(mocks.change).not.toHaveBeenCalled();
     await fire("B", "pointerdown");
     await fire("B", "pointermove", 145);
     await fire("B", "pointerup", 145);
+    expect(preview()).toBeNull();
     await act(async () =>
       row("B")
         ?.querySelector<HTMLButtonElement>("button[aria-pressed]")
@@ -445,6 +475,41 @@ it("拖动使用同区域相邻锚点，不跨越置顶边界或切换主图", a
       expect.anything(),
     );
     expect(onSelect).not.toHaveBeenCalled();
+    const toolbar = container.querySelector<HTMLElement>('[aria-busy="true"]');
+    expect(toolbar?.hasAttribute("inert")).toBe(true);
+    const controls = [
+      ...(toolbar?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+    ];
+    expect(controls.length).toBeGreaterThanOrEqual(4);
+    expect(controls.every((button) => !button.disabled)).toBe(true);
+    const header = container.querySelector<HTMLElement>(
+      ".alpha-watchlist-columns.sticky",
+    );
+    expect(header?.hasAttribute("inert")).toBe(true);
+    const sortButton = [
+      ...(header?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+    ].find((button) => button.textContent === "watch.change");
+    expect(sortButton?.disabled).toBe(false);
+    if (!finishSave) throw new Error("missing pending save");
+    await act(async () => finishSave?.());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(toolbar?.hasAttribute("inert")).toBe(false);
+    expect(header?.hasAttribute("inert")).toBe(false);
+    expect(sortButton?.disabled).toBe(false);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    mocks.change.mockRejectedValueOnce(new Error("save_failed"));
+    await fire("B", "pointerdown");
+    await fire("B", "pointermove", 145);
+    await fire("B", "pointerup", 145);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "watch.errors.save_failed",
+    );
+    expect(toolbar?.hasAttribute("inert")).toBe(false);
   } finally {
     hitTest.mockRestore();
     act(() => root.unmount());

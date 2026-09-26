@@ -465,8 +465,6 @@
     "dataDate": "Quote date",
     "dailyHint": "Quote date: {{date}}. Daily close and change from the previous available daily close, not live quotes. Change is unavailable without a reference or when an adjustment discontinuity is detected.",
     "added": "Added",
-    "saved": "Saved",
-    "transferred": "Processed {{count}} symbols; {{existing}} already existed in the target group.",
     "failed": "Watchlist operation failed. Please retry.",
     "errors": {
       "group_missing": "This group no longer exists. The list has been refreshed.",

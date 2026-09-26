@@ -39,3 +39,83 @@
 [data-watchlist-dragging="true"] button {
   cursor: grabbing;
 }
+
+/* 拖动时保留选中底色，让描边暂时让位于落点标记，结束后自动恢复。 */
+[data-watchlist-dragging="true"] .alpha-watchlist-row[data-selected="true"]::after {
+  visibility: hidden;
+}
+
+/* 标记收在行边缘内，避免箭头被相邻虚拟行或滚动视口裁切。 */
+.alpha-watchlist-drop-marker {
+  position: absolute;
+  left: 8px;
+  right: 4px;
+  z-index: 20;
+  height: 2px;
+  pointer-events: none;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px var(--background);
+}
+
+.alpha-watchlist-drop-marker[data-side="before"] {
+  top: 3px;
+}
+
+.alpha-watchlist-drop-marker[data-side="after"] {
+  bottom: 3px;
+}
+
+.alpha-watchlist-drop-marker::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -6px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--primary);
+}
+
+/* 预览限制在所属工作页内，位置直接跟随指针，不添加延迟位移动画。 */
+.alpha-watchlist-drag-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 184px;
+  max-width: 100%;
+  height: 52px;
+  padding: 8px 10px;
+  pointer-events: none;
+  user-select: none;
+  border: 1px solid color-mix(in oklab, var(--primary) 50%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.alpha-watchlist-drag-forbidden {
+  position: relative;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--muted-foreground);
+  border-radius: 50%;
+}
+
+.alpha-watchlist-drag-forbidden::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  background: var(--muted-foreground);
+  transform: translateY(-50%) rotate(-45deg);
+}
+
+.alpha-watchlist-drag-preview[data-allowed="true"] .alpha-watchlist-drag-forbidden {
+  visibility: hidden;
+}
