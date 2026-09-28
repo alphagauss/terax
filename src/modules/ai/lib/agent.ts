@@ -138,6 +138,21 @@ export type SubagentModelConfiguration = Pick<
 >;
 
 const SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT = `The Subagent has reached its tool-step limit. Do not call any more tools. Based only on the task, conversation, and tool results already available, provide a concise partial report with: completed work, confirmed findings or evidence, unresolved items, and recommended next steps. Clearly state that the task is incomplete and do not claim full completion.`;
+const EMPTY_RESPONSE_RECOVERY_PROMPT = `The previous response did not include a valid tool call or a user-visible final answer. Continue the current task. Use the provided structured tools if more work is needed; otherwise provide the final answer to the user.`;
+const EMPTY_RESPONSE_ERROR =
+  "The model returned neither a valid tool call nor a final response after retrying.";
+const MAX_EMPTY_RESPONSE_RETRIES = 1;
+
+function hasVisibleAssistantText(messages: readonly ModelMessage[]): boolean {
+  return messages.some((message) => {
+    if (message.role !== "assistant") return false;
+    if (typeof message.content === "string")
+      return message.content.trim().length > 0;
+    return message.content.some(
+      (part) => part.type === "text" && part.text.trim().length > 0,
+    );
+  });
+}
 
 /**
  * 使用冻结配置启动一次可跨多个 provider 请求的 Agent turn。
@@ -227,6 +242,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             writer.write(part as UIMessageChunk);
           }
           let stepsSeen = 0;
+          let emptyResponseRetries = 0;
           let streamStarted = false;
           let finishReason: FinishReason = "stop";
           let approvalPending = false;
@@ -607,9 +623,36 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
               if (approvalPending) break;
               if (completed) {
+                emptyResponseRetries = 0;
                 continue;
               }
-              if (resultFinishReason === "tool-calls") continue;
+              if (resultFinishReason === "tool-calls") {
+                emptyResponseRetries = 0;
+                continue;
+              }
+              if (!hasVisibleAssistantText(response)) {
+                if (
+                  resultFinishReason === "stop" &&
+                  emptyResponseRetries < MAX_EMPTY_RESPONSE_RETRIES
+                ) {
+                  emptyResponseRetries++;
+                  // 仅在既有模型事实尾部追加恢复指令，保持 system、工具和历史前缀不变。
+                  const recoveryMessage: ModelMessage = {
+                    role: "user",
+                    content: EMPTY_RESPONSE_RECOVERY_PROMPT,
+                  };
+                  const recoveryPart = modelHistoryPart([recoveryMessage]);
+                  modelHistory.push(recoveryMessage);
+                  completedMessage = {
+                    id: completedMessage?.id ?? "turn",
+                    role: "assistant",
+                    parts: [...(completedMessage?.parts ?? []), recoveryPart],
+                  };
+                  writer.write(recoveryPart as UIMessageChunk);
+                  continue;
+                }
+                throw new Error(EMPTY_RESPONSE_ERROR);
+              }
               break;
             }
 
