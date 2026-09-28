@@ -195,6 +195,8 @@ function modelDisplayParts(
   parts: UIMessage["parts"],
 ): void {
   for (const message of messages) {
+    // 运行时追加的内部 user/system 消息属于模型事实，不作为 Assistant 正文展示。
+    if (message.role === "user" || message.role === "system") continue;
     if (typeof message.content === "string") {
       parts.push({ type: "text", text: message.content, state: "done" });
       continue;

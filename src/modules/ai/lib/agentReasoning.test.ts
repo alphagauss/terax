@@ -11,11 +11,11 @@ import {
   reasoningDurationFromPart,
 } from "@/modules/ai/lib/conversation";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 
 let activeModel: MockLanguageModelV4;
 
@@ -89,6 +89,115 @@ function activityStream(options: {
 }
 
 describe("Agent reasoning duration", () => {
+  it("空白终态仅追加恢复消息且保持请求前缀和工具定义稳定", async () => {
+    activeModel = new MockLanguageModelV4({
+      doStream: () =>
+        activeModel.doStreamCalls.length === 1
+          ? activityStream({ reasoning: true })
+          : activityStream({ reasoning: false, text: "最终答复。" }),
+    });
+    const messages: UIMessage[] = [
+      {
+        id: "user-recovery",
+        role: "user",
+        parts: [{ type: "text", text: "继续检查" }],
+      },
+    ];
+    const onFinishMeta = vi.fn();
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "empty-response-recovery"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["get_terminal_output"],
+      maxConcurrentSubagents: 3,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "empty-response-recovery",
+        getPermissionMode: () => "ask",
+      } as never,
+      uiMessages: messages,
+      onCheckpoint: vi.fn(),
+      onFinishMeta,
+    });
+
+    let finalMessage: UIMessage | undefined;
+    const errors = vi.fn();
+    for await (const message of readUIMessageStream({
+      stream: result.toUIMessageStream({ originalMessages: messages }),
+      onError: errors,
+    })) {
+      finalMessage = message;
+    }
+
+    expect(errors).not.toHaveBeenCalled();
+    expect(onFinishMeta).toHaveBeenCalledWith({
+      hitStepCap: false,
+      finishReason: "stop",
+    });
+    expect(activeModel.doStreamCalls).toHaveLength(2);
+    const first = activeModel.doStreamCalls[0];
+    const second = activeModel.doStreamCalls[1];
+    expect(second.prompt.slice(0, first.prompt.length)).toEqual(first.prompt);
+    expect(second.tools).toEqual(first.tools);
+    expect(JSON.stringify(second.prompt.slice(first.prompt.length))).toContain(
+      "did not include a valid tool call",
+    );
+    const visibleText = finalMessage?.parts
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("");
+    expect(visibleText).toBe("最终答复。");
+    expect(visibleText).not.toContain("did not include a valid tool call");
+  });
+
+  it("恢复后仍无工具调用或最终正文时报告失败", async () => {
+    activeModel = new MockLanguageModelV4({
+      doStream: () => activityStream({ reasoning: true }),
+    });
+    const messages: UIMessage[] = [
+      {
+        id: "user-empty-failure",
+        role: "user",
+        parts: [{ type: "text", text: "继续检查" }],
+      },
+    ];
+    const onFinishMeta = vi.fn();
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "empty-response-failure"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["get_terminal_output"],
+      maxConcurrentSubagents: 3,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "empty-response-failure",
+        getPermissionMode: () => "ask",
+      } as never,
+      uiMessages: messages,
+      onCheckpoint: vi.fn(),
+      onFinishMeta,
+    });
+
+    const errors = vi.fn();
+    for await (const _message of readUIMessageStream({
+      stream: result.toUIMessageStream({ originalMessages: messages }),
+      onError: errors,
+    })) {
+      // 消费完整流，确保终态错误已经发布。
+    }
+
+    expect(activeModel.doStreamCalls).toHaveLength(2);
+    expect(String(errors.mock.calls[0]?.[0])).toContain(
+      "The model returned neither a valid tool call nor a final response after retrying.",
+    );
+    expect(onFinishMeta).not.toHaveBeenCalled();
+  });
+
   it("模型中途报错时保留已收到的正文，取消本轮且不报告正常完成", async () => {
     activeModel = new MockLanguageModelV4({
       doStream: async () =>

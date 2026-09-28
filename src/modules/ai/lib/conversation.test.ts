@@ -37,6 +37,33 @@ function jsonlRoundTrip(records: SessionMessage[]): SessionMessage[] {
 }
 
 describe("AI session message conversion", () => {
+  it("保留内部恢复消息的模型前缀但不把它显示为 Assistant 正文", async () => {
+    const canonical: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "reasoning", text: "继续检查。" }],
+      },
+      {
+        role: "user",
+        content: "Internal recovery instruction",
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "最终答复。" }],
+      },
+    ];
+    const restored = projectSessionMessages("session", [
+      { role: "model", content: canonical, timestamp, turn_id: "turn" },
+    ]);
+
+    expect(
+      restored[0].parts.flatMap((part) =>
+        part.type === "text" ? [part.text] : [],
+      ),
+    ).toEqual(["最终答复。"]);
+    expect(await convertToAgentModelMessages(restored)).toEqual(canonical);
+  });
+
   it("appends approval decisions without rewriting the signed model prefix", async () => {
     const canonical: ModelMessage[] = [
       {
