@@ -2,41 +2,38 @@
  * 本文件实现 AI 侧边栏的会话外壳、上下文指标和空状态入口。
  * 流式消息更新在此合并提交，避免头部统计和聊天正文按每个 delta 重渲染。
  */
-import { useDeliveryHistory } from "@/modules/channels/history";
-
-import { useCommandStore } from "@/modules/ai/commands/store";
+import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/controls/button";
-import { cn } from "@/lib/utils";
-import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
-  ArrowDown01Icon,
-  Delete02Icon,
-  FilterIcon,
-  PencilEdit02Icon,
-  Wrench01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useLayoutEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
+import { useCommandStore } from "@/modules/ai/commands/store";
+import {
+  AGENT_ICONS,
+  AgentPicker,
+  SessionAgentIdentity,
+} from "@/modules/ai/components/AgentSwitcher";
+import { AiChatView } from "@/modules/ai/components/AiChat";
+import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
+import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
+import { ContextIndicator } from "@/modules/ai/components/ContextIndicator";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { agentDisplayName, MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
 import { STREAM_RENDER_INTERVAL_MS } from "@/modules/ai/lib/chatRendering";
 import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
-import type { SessionMeta } from "@/modules/ai/lib/sessions";
+import {
+  type SessionMeta,
+  searchSessionContents,
+} from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
@@ -48,15 +45,28 @@ import {
   type SessionAttention,
   useSessionAttentionStore,
 } from "@/modules/ai/store/sessionAttentionStore";
+import { useDeliveryHistory } from "@/modules/channels/history";
 import {
-  AGENT_ICONS,
-  AgentPicker,
-  SessionAgentIdentity,
-} from "@/modules/ai/components/AgentSwitcher";
-import { AiChatView } from "@/modules/ai/components/AiChat";
-import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
-import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
-import { ContextIndicator } from "@/modules/ai/components/ContextIndicator";
+  FindControlButton,
+  FindPatternField,
+  type FindPatternFieldHandle,
+} from "@/modules/find";
+import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
+import {
+  ArrowDown01Icon,
+  Delete02Icon,
+  FilterIcon,
+  MessageSearch01Icon,
+  PencilEdit02Icon,
+  Tick02Icon,
+  Wrench01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+const SESSION_SEARCH_DEBOUNCE_MS = 220;
 
 /**
  * AI 侧边栏主面板。
@@ -77,7 +87,10 @@ export function AiSidebarPanel({
     return () => useChatStore.getState().setChatViewVisible(false);
   }, [visible]);
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-[12px] dark:bg-sidebar">
+    <div
+      data-ai-sidebar-panel
+      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-[12px] dark:bg-sidebar"
+    >
       {visible &&
         (sessionId ? (
           <SessionBody
@@ -249,6 +262,19 @@ function Header({
 
 function SessionPicker() {
   const { t } = useTranslation("ai");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<FindPatternFieldHandle>(null);
+  const searchRequestRef = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [includeContent, setIncludeContent] = useState(false);
+  const [contentMatches, setContentMatches] = useState<Record<string, string>>(
+    {},
+  );
+  const [contentSearchLoading, setContentSearchLoading] = useState(false);
+  const [contentSearchError, setContentSearchError] = useState(false);
+  const [panelSize, setPanelSize] = useState({ width: 280, height: 800 });
   const sessions = useChatStore((s) => s.sessions);
   const activeId = useChatStore((s) => s.activeSessionId);
   const runLocks = useChatStore((s) => s.runLockSessionIds);
@@ -261,6 +287,21 @@ function SessionPicker() {
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const isDraft = activeId != null && !active;
+  const selectedAgent = agents.find((agent) => agent.id === agentFilter);
+  useLayoutEffect(() => {
+    const panel = triggerRef.current?.closest<HTMLElement>(
+      "[data-ai-sidebar-panel]",
+    );
+    if (!panel) return;
+    const updateSize = () => {
+      const { width, height } = panel.getBoundingClientRect();
+      if (width > 0 && height > 0) setPanelSize({ width, height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (
       agentFilter !== null &&
@@ -269,18 +310,104 @@ function SessionPicker() {
       setAgentFilter(null);
     }
   }, [agentFilter, agents, setAgentFilter]);
-  const sorted = sessions
+  const agentSessions = sessions
     .filter(
       (session) => agentFilter === null || session.agentId === agentFilter,
     )
     .sort((a, b) => b.updatedAt - a.updatedAt);
+  const normalizedQuery = query.trim().replace(/\s+/g, " ").toLowerCase();
+  const contentSearchScope = agentSessions
+    .map((session) => `${session.id}:${session.fingerprint ?? ""}`)
+    .join("|");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 轮询会重建列表，仅在搜索范围或会话指纹变化时重跑。
+  useEffect(() => {
+    const requestId = ++searchRequestRef.current;
+    if (!open || !includeContent || !normalizedQuery) {
+      setContentMatches({});
+      setContentSearchLoading(false);
+      setContentSearchError(false);
+      return;
+    }
+    setContentMatches({});
+    setContentSearchLoading(true);
+    setContentSearchError(false);
+    const timer = window.setTimeout(() => {
+      const sessionIds = useChatStore
+        .getState()
+        .sessions
+        .filter(
+          (session) => agentFilter === null || session.agentId === agentFilter,
+        )
+        .map((session) => session.id);
+      void searchSessionContents(normalizedQuery, sessionIds)
+        .then((matches) => {
+          if (requestId !== searchRequestRef.current) return;
+          setContentMatches(
+            Object.fromEntries(
+              matches.map((match) => [match.id, match.preview]),
+            ),
+          );
+        })
+        .catch(() => {
+          if (requestId !== searchRequestRef.current) return;
+          setContentSearchError(true);
+        })
+        .finally(() => {
+          if (requestId === searchRequestRef.current)
+            setContentSearchLoading(false);
+        });
+    }, SESSION_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [agentFilter, contentSearchScope, includeContent, normalizedQuery, open]);
+  const titleMatchIds = new Set(
+    normalizedQuery
+      ? agentSessions
+          .filter((session) =>
+            session.title.toLowerCase().includes(normalizedQuery),
+          )
+          .map((session) => session.id)
+      : agentSessions.map((session) => session.id),
+  );
+  const sorted = normalizedQuery
+    ? agentSessions.filter(
+        (session) =>
+          titleMatchIds.has(session.id) ||
+          (includeContent && contentMatches[session.id] !== undefined),
+      )
+    : agentSessions;
+  const sessionCountByAgent = new Map<string, number>();
+  for (const session of sessions) {
+    sessionCountByAgent.set(
+      session.agentId,
+      (sessionCountByAgent.get(session.agentId) ?? 0) + 1,
+    );
+  }
   if (!active && !isDraft) return null;
 
+  const popoverWidth = Math.min(
+    360,
+    Math.max(240, Math.floor(panelSize.width * 0.9)),
+  );
+  const popoverMaxHeight = Math.min(640, Math.floor(panelSize.height * 0.7));
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) return;
+    searchRequestRef.current += 1;
+    setFilterOpen(false);
+    setQuery("");
+    setIncludeContent(false);
+    setContentMatches({});
+    setContentSearchLoading(false);
+    setContentSearchError(false);
+  };
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
         <Hint content={t("miniWindow.switchSession")}>
           <button
+            ref={triggerRef}
             aria-label={t("miniWindow.switchSession")}
             type="button"
             className={cn(
@@ -301,77 +428,175 @@ function SessionPicker() {
             />
           </button>
         </Hint>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56">
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2">
-            <HugeiconsIcon icon={FilterIcon} size={12} strokeWidth={1.75} />
-            <span className="flex-1">{t("miniWindow.agentFilter.label")}</span>
-            <span className="max-w-24 truncate text-[10px] text-muted-foreground">
-              {agentFilter === null
-                ? t("miniWindow.agentFilter.all")
-                : agents.find((agent) => agent.id === agentFilter)?.name}
-            </span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="min-w-52">
-            <DropdownMenuRadioGroup
-              value={agentFilter ?? "all"}
-              onValueChange={(value) =>
-                setAgentFilter(value === "all" ? null : value)
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        className="gap-0 overflow-hidden rounded-2xl p-1"
+        style={{
+          width: popoverWidth,
+          maxHeight: `min(${popoverMaxHeight}px, var(--radix-popover-content-available-height))`,
+        }}
+      >
+        <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
+          <div className="flex items-center gap-1 pb-1">
+            <FindPatternField
+              ref={searchRef}
+              query={query}
+              onQueryChange={setQuery}
+              placeholder={t("miniWindow.sessionSearch.placeholder")}
+              trailingContent={
+                <FindControlButton
+                  label={t("miniWindow.sessionSearch.includeContent")}
+                  active={includeContent}
+                  onClick={() => {
+                    setIncludeContent((current) => !current);
+                    requestAnimationFrame(() => searchRef.current?.focus());
+                  }}
+                >
+                  {contentSearchLoading ? (
+                    <Spinner className="size-3" />
+                  ) : (
+                    <HugeiconsIcon
+                      icon={MessageSearch01Icon}
+                      size={13}
+                      strokeWidth={1.9}
+                    />
+                  )}
+                </FindControlButton>
               }
-            >
-              <DropdownMenuRadioItem value="all">
-                <span className="flex flex-1 justify-between gap-4">
-                  <span>{t("miniWindow.agentFilter.all")}</span>
-                  <span className="text-muted-foreground">
-                    {sessions.length}
-                  </span>
+            />
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="max-w-32 shrink-0 px-1.5"
+                aria-label={t("miniWindow.agentFilter.label")}
+              >
+                <HugeiconsIcon icon={FilterIcon} size={12} strokeWidth={1.75} />
+                <span className="min-w-0 truncate">
+                  {agentFilter === null
+                    ? t("miniWindow.agentFilter.all")
+                    : selectedAgent
+                      ? agentDisplayName(selectedAgent)
+                      : t("miniWindow.agentFilter.all")}
                 </span>
-              </DropdownMenuRadioItem>
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={10}
+                  strokeWidth={2}
+                  className={cn(
+                    "shrink-0 transition-transform duration-control",
+                    filterOpen && "rotate-180",
+                  )}
+                />
+              </Button>
+            </CollapsibleTrigger>
+          </div>
+          <CollapsibleContent className="terax-collapsible-content">
+            <div
+              role="radiogroup"
+              aria-label={t("miniWindow.agentFilter.label")}
+              className="pb-1"
+            >
+              <AgentFilterRow
+                label={t("miniWindow.agentFilter.all")}
+                count={sessions.length}
+                selected={agentFilter === null}
+                onSelect={() => setAgentFilter(null)}
+              />
               {agents.map((agent) => (
-                <DropdownMenuRadioItem key={agent.id} value={agent.id}>
-                  <span className="flex flex-1 justify-between gap-4">
-                    <span className="truncate">{agentDisplayName(agent)}</span>
-                    <span className="text-muted-foreground">
-                      {
-                        sessions.filter(
-                          (session) => session.agentId === agent.id,
-                        ).length
-                      }
-                    </span>
-                  </span>
-                </DropdownMenuRadioItem>
+                <AgentFilterRow
+                  key={agent.id}
+                  label={agentDisplayName(agent)}
+                  count={sessionCountByAgent.get(agent.id) ?? 0}
+                  selected={agentFilter === agent.id}
+                  onSelect={() => setAgentFilter(agent.id)}
+                />
               ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        {sorted.map((s) => (
-          <SessionRow
-            key={s.id}
-            session={s}
-            agentName={
-              agents.find((agent) => agent.id === s.agentId)?.name ??
-              s.agentName
-            }
-            agentIcon={
-              agents.find((agent) => agent.id === s.agentId)?.icon ??
-              s.agentIcon
-            }
-            active={s.id === activeId}
-            attention={attentionBySession[s.id]}
-            deleteDisabled={Boolean(runLocks[s.id])}
-            onSelect={() => switchSession(s.id)}
-            onDelete={() => deleteSession(s.id)}
-          />
-        ))}
-        {sorted.length === 0 ? (
-          <DropdownMenuItem disabled>
-            {t("miniWindow.agentFilter.empty")}
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+        <div className="mx-1 h-px shrink-0 bg-border" />
+        <div className="min-h-0 flex-1 overflow-y-auto pt-1">
+          {sorted.map((s) => (
+            <SessionRow
+              key={s.id}
+              session={s}
+              agentName={
+                agents.find((agent) => agent.id === s.agentId)?.name ??
+                s.agentName
+              }
+              agentIcon={
+                agents.find((agent) => agent.id === s.agentId)?.icon ??
+                s.agentIcon
+              }
+              active={s.id === activeId}
+              attention={attentionBySession[s.id]}
+              preview={
+                titleMatchIds.has(s.id) ? undefined : contentMatches[s.id]
+              }
+              deleteDisabled={Boolean(runLocks[s.id])}
+              onSelect={() => {
+                switchSession(s.id);
+                handleOpenChange(false);
+              }}
+              onDelete={() => deleteSession(s.id)}
+            />
+          ))}
+          {contentSearchError ? (
+            <div className="px-2.5 py-1.5 text-xs text-destructive">
+              {t("miniWindow.sessionSearch.failed")}
+            </div>
+          ) : sorted.length === 0 && !contentSearchLoading ? (
+            <div className="px-2.5 py-1.5 text-xs text-muted-foreground">
+              {normalizedQuery
+                ? t("miniWindow.sessionSearch.empty")
+                : t("miniWindow.agentFilter.empty")}
+            </div>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function AgentFilterRow({
+  label,
+  count,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  count: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={cn(
+        "relative flex w-full cursor-default items-center gap-2 rounded-xl py-1.5 pr-2.5 pl-7 text-left text-xs",
+        "hover:bg-accent focus-within:bg-accent",
+        selected && "bg-interactive-active",
+      )}
+    >
+      <input
+        type="radio"
+        name="session-agent-filter"
+        checked={selected}
+        onChange={onSelect}
+        className="peer sr-only"
+      />
+      <HugeiconsIcon
+        icon={Tick02Icon}
+        size={11}
+        strokeWidth={2}
+        className="absolute left-2.5 opacity-0 peer-checked:opacity-100"
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="shrink-0 text-muted-foreground">{count}</span>
+    </label>
   );
 }
 
@@ -381,6 +606,7 @@ function SessionRow({
   agentIcon,
   active,
   attention,
+  preview,
   deleteDisabled,
   onSelect,
   onDelete,
@@ -390,6 +616,7 @@ function SessionRow({
   agentIcon: SessionMeta["agentIcon"];
   active: boolean;
   attention?: SessionAttention;
+  preview?: string;
   deleteDisabled: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -398,44 +625,49 @@ function SessionRow({
   const updatedAt = formatMessageTimestamp(session.updatedAt, i18n.language);
 
   return (
-    <DropdownMenuItem
-      onSelect={(e) => {
-        // 删除按钮由下方逻辑单独处理，此处不能提前关闭菜单。
-        const target = e.target as HTMLElement | null;
-        if (target?.closest("[data-session-delete]")) {
-          e.preventDefault();
-          return;
-        }
-        onSelect();
-      }}
+    <div
       className={cn(
-        "group flex items-center justify-between gap-2 text-xs",
+        "group flex items-center rounded-xl text-xs hover:bg-accent focus-within:bg-accent",
         active && "bg-interactive-active",
       )}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-1">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="relative flex min-w-0 flex-1 items-start gap-1 py-1.5 pl-2.5 text-left outline-none"
+      >
         <SessionAttentionIndicator attention={attention} />
         {session.agentId !== MAIN_AGENT_ID ? (
           <HugeiconsIcon
             icon={AGENT_ICONS[agentIcon]}
             size={11}
             strokeWidth={1.75}
-            className="shrink-0 text-muted-foreground"
+            className={cn(
+              "shrink-0 text-muted-foreground",
+              preview && "mt-0.5",
+            )}
             aria-label={agentName}
           />
         ) : null}
-        <span className="min-w-0 flex-1 truncate">
-          {session.title || t("miniWindow.newChat")}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">
+            {session.title || t("miniWindow.newChat")}
+          </span>
+          {preview ? (
+            <span className="truncate text-[10px] text-muted-foreground">
+              {preview}
+            </span>
+          ) : null}
         </span>
-      </span>
-      {updatedAt ? (
-        <time
-          dateTime={new Date(session.updatedAt).toISOString()}
-          className="shrink-0 text-[10px] text-muted-foreground"
-        >
-          {updatedAt}
-        </time>
-      ) : null}
+        {updatedAt ? (
+          <time
+            dateTime={new Date(session.updatedAt).toISOString()}
+            className="ml-1 shrink-0 text-[10px] text-muted-foreground"
+          >
+            {updatedAt}
+          </time>
+        ) : null}
+      </button>
       <Hint content={t("miniWindow.deleteSession")}>
         <button
           aria-label={t("miniWindow.deleteSession")}
@@ -446,12 +678,12 @@ function SessionRow({
             e.stopPropagation();
             onDelete();
           }}
-          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+          className="mr-2 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
         >
           <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
         </button>
       </Hint>
-    </DropdownMenuItem>
+    </div>
   );
 }
 
@@ -461,24 +693,21 @@ function SessionAttentionIndicator({
   attention?: SessionAttention;
 }) {
   const { t } = useTranslation("ai");
-  const label = attention ? t(`miniWindow.sessionStatus.${attention}`) : null;
+  if (!attention) return null;
+  const label = t(`miniWindow.sessionStatus.${attention}`);
   return (
-    <span className="flex w-2 shrink-0 items-center justify-center">
-      {attention ? (
-        <Hint content={label ?? undefined}>
-          <span
-            role="img"
-            aria-label={label ?? undefined}
-            className={cn(
-              "size-1.5 rounded-full",
-              attention === "background-running" && "bg-warning",
-              attention === "completed-unread" && "bg-success",
-              attention === "error-unread" && "bg-destructive",
-            )}
-          />
-        </Hint>
-      ) : null}
-    </span>
+    <Hint content={label}>
+      <span
+        role="img"
+        aria-label={label}
+        className={cn(
+          "absolute top-2.5 left-0.5 size-1.5 rounded-full",
+          attention === "background-running" && "bg-warning",
+          attention === "completed-unread" && "bg-success",
+          attention === "error-unread" && "bg-destructive",
+        )}
+      />
+    </Hint>
   );
 }
 

@@ -84,6 +84,14 @@ pub struct SessionMetadata {
     pub fingerprint: String,
 }
 
+/// 会话正文搜索结果，只返回首个可见文本命中，避免把完整历史加载到 WebView。
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionContentMatch {
+    pub id: String,
+    pub preview: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct SessionFileHeader {
     #[serde(rename = "_type")]
@@ -500,9 +508,119 @@ fn list_sessions(root: &Path) -> Result<Vec<SessionMetadata>, String> {
     Ok(sessions)
 }
 
+fn normalized_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn case_insensitive_match(value: &str, query: &str) -> Option<usize> {
+    if value.is_ascii() && query.is_ascii() {
+        return value.to_ascii_lowercase().find(&query.to_ascii_lowercase());
+    }
+    let match_index = value.to_lowercase().find(&query.to_lowercase())?;
+    let mut lowered_offset = 0;
+    for (original_index, character) in value.char_indices() {
+        let lowered_len = character.to_lowercase().map(char::len_utf8).sum::<usize>();
+        if lowered_offset + lowered_len > match_index {
+            return Some(original_index);
+        }
+        lowered_offset += lowered_len;
+    }
+    Some(value.len())
+}
+
+fn match_preview(value: &str, query: &str) -> Option<String> {
+    let value = normalized_text(value);
+    let index = case_insensitive_match(&value, query)?;
+    let match_char = value[..index].chars().count();
+    let chars = value.chars().collect::<Vec<_>>();
+    let start = match_char.saturating_sub(40);
+    let end = (start + 120).min(chars.len());
+    let preview = chars[start..end].iter().collect::<String>();
+    Some(format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        preview,
+        if end < chars.len() { "…" } else { "" }
+    ))
+}
+
+fn visible_message_texts(record: &Value) -> Vec<&str> {
+    match record.get("role").and_then(Value::as_str) {
+        Some("user" | "assistant") => record
+            .get("content")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect(),
+        Some("model") => record
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+            .flat_map(|message| match message.get("content") {
+                Some(Value::String(text)) => vec![text.as_str()],
+                Some(Value::Array(parts)) => parts
+                    .iter()
+                    .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|part| part.get("text").and_then(Value::as_str))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn search_session_content(root: &Path, id: Uuid, query: &str) -> Result<Option<String>, String> {
+    let file = match File::open(session_path(root, id)) {
+        Ok(file) => file,
+        // 列表刷新或其他窗口可能在搜索请求到达前删除会话。
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    for line in BufReader::new(file).lines().skip(1) {
+        let record = serde_json::from_str::<Value>(&line.map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+        for text in visible_message_texts(&record) {
+            if let Some(preview) = match_preview(text, query) {
+                return Ok(Some(preview));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn search_sessions(
+    root: &Path,
+    query: &str,
+    session_ids: Vec<String>,
+) -> Result<Vec<SessionContentMatch>, String> {
+    let query = normalized_text(query);
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    session_ids
+        .into_iter()
+        .map(|id| {
+            let parsed = strict_uuid(&id)?;
+            Ok(search_session_content(root, parsed, &query)?
+                .map(|preview| SessionContentMatch { id, preview }))
+        })
+        .filter_map(|result| result.transpose())
+        .collect()
+}
+
 /// 列出当前用户的全部有效 AI 会话。
 pub fn ai_sessions_list() -> Result<Vec<SessionMetadata>, String> {
     list_sessions(&sessions_dir()?)
+}
+
+/// 在指定会话中搜索用户与助手可见文本，并返回每个会话的首个命中。
+pub fn ai_sessions_search(
+    query: String,
+    session_ids: Vec<String>,
+) -> Result<Vec<SessionContentMatch>, String> {
+    search_sessions(&sessions_dir()?, &query, session_ids)
 }
 
 /// 读取指定 AI 会话的 metadata 和全部消息记录。
@@ -861,6 +979,110 @@ mod tests {
         assert_eq!(main.agent_id, "builtin:main");
         assert_eq!(main.agent_name, "Terax");
         assert_eq!(main.agent_icon, "coder");
+    }
+
+    #[test]
+    fn content_search_matches_visible_text_and_only_requested_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let included = Uuid::new_v4();
+        let excluded = Uuid::new_v4();
+        let mut first = session(included, "included");
+        first.messages = vec![
+            json!({
+                "role": "system",
+                "content": "hidden system secret",
+                "timestamp": "2026-07-26T10:00:00.000Z"
+            }),
+            json!({
+                "role": "assistant",
+                "content": "The Release Checklist is ready for review",
+                "reasoning_content": "hidden reasoning phrase",
+                "timestamp": "2026-07-26T10:00:01.000Z"
+            }),
+            json!({
+                "role": "tool",
+                "name": "read_file",
+                "content": "hidden tool phrase",
+                "tool_call_id": "call-1",
+                "timestamp": "2026-07-26T10:00:01.000Z"
+            }),
+        ];
+        let mut second = session(excluded, "excluded");
+        second.messages[0]["content"] = json!("release checklist elsewhere");
+        commit_session(dir.path(), &first, "local").unwrap();
+        commit_session(dir.path(), &second, "local").unwrap();
+
+        let matches = search_sessions(
+            dir.path(),
+            "release checklist",
+            vec![Uuid::new_v4().to_string(), included.to_string()],
+        )
+        .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, included.to_string());
+        assert!(matches[0].preview.contains("Release Checklist"));
+        assert!(
+            search_sessions(dir.path(), "system secret", vec![included.to_string()])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            search_sessions(dir.path(), "reasoning phrase", vec![included.to_string()])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            search_sessions(dir.path(), "tool phrase", vec![included.to_string()])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn content_search_positions_unicode_case_insensitive_preview_at_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut value = session(id, "unicode");
+        value.messages[0]["content"] = json!(format!("{} ÜBER das Ziel", "前".repeat(70)));
+        commit_session(dir.path(), &value, "local").unwrap();
+
+        let preview = search_sessions(dir.path(), "über", vec![id.to_string()]).unwrap()[0]
+            .preview
+            .clone();
+        assert!(preview.starts_with('…'));
+        assert!(preview.contains("ÜBER das Ziel"));
+    }
+
+    #[test]
+    fn content_search_reads_assistant_text_from_model_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut value = session(id, "model");
+        value.messages = vec![json!({
+            "role": "model",
+            "content": [
+                { "role": "user", "content": "ignore user model input" },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "reasoning", "text": "ignore model reasoning" },
+                        { "type": "text", "text": "Visible model answer" }
+                    ]
+                }
+            ],
+            "timestamp": "2026-07-26T10:00:01.000Z"
+        })];
+        commit_session(dir.path(), &value, "local").unwrap();
+
+        assert_eq!(
+            search_sessions(dir.path(), "VISIBLE MODEL", vec![id.to_string()]).unwrap()[0].preview,
+            "Visible model answer"
+        );
+        assert!(
+            search_sessions(dir.path(), "model reasoning", vec![id.to_string()])
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

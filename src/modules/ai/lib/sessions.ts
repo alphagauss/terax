@@ -3,13 +3,13 @@
  * 外层环境与 Agent 归属由 Rust 投影，内层业务 metadata 由前端解释，消息记录不直接依赖 AI SDK。
  */
 
-import type { SessionMessage } from "@/modules/ai/lib/conversation";
-import type { UIMessage } from "@ai-sdk/react";
 import { invokeNative as invoke } from "@/lib/nativeHost";
 import {
   type AgentIconId,
   normalizeAgentIcon,
 } from "@/modules/ai/lib/agentDefinition";
+import type { SessionMessage } from "@/modules/ai/lib/conversation";
+import type { UIMessage } from "@ai-sdk/react";
 
 /** Rust 不解释的会话业务 metadata，由前端按需扩展。 */
 export type SessionData = Record<string, unknown>;
@@ -29,6 +29,11 @@ export type SessionMeta = {
   modifiedAt?: number;
   size?: number;
   fingerprint?: string;
+};
+
+export type SessionContentMatch = {
+  id: string;
+  preview: string;
 };
 
 /** IPC 封装对外提供的 SDK 无关会话文件。 */
@@ -56,6 +61,14 @@ type IpcSessionFile = Omit<SessionFile, "createdAt" | "updatedAt"> & {
 export async function listSessions(): Promise<SessionMeta[]> {
   const sessions = await invoke<IpcSessionMeta[]>("ai_sessions_list");
   return sessions.map(fromIpcMeta);
+}
+
+/** 搜索指定会话中的用户与助手可见文本。 */
+export function searchSessionContents(
+  query: string,
+  sessionIds: string[],
+): Promise<SessionContentMatch[]> {
+  return invoke("ai_sessions_search", { query, sessionIds });
 }
 
 /** 读取完整会话文件，消息仍保持 SDK 无关的持久化记录。 */

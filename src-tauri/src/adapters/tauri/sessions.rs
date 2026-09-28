@@ -18,6 +18,17 @@ pub fn ai_session_read(id: String) -> Result<SessionFile, String> {
     service::ai_session_read(id)
 }
 
+/// 将桌面参数交给共享服务。
+#[tauri::command]
+pub async fn ai_sessions_search(
+    query: String,
+    session_ids: Vec<String>,
+) -> Result<Vec<SessionContentMatch>, String> {
+    tauri::async_runtime::spawn_blocking(move || service::ai_sessions_search(query, session_ids))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 /// 将新增记录提交到 AI 会话并返回最新摘要。
 ///
 /// 新会话 cwd 来自已授权的 Explorer 根目录；历史会话仍由不可变校验防止换根。
