@@ -1,4 +1,4 @@
-/** 随主 Agent 调用完成更新上下文用量；压缩请求不覆盖主请求的统计。 */
+/** 随主 Agent 调用完成更新上下文用量与缓存复用状态；压缩请求不覆盖主请求统计。 */
 
 import {
   Context,
@@ -7,6 +7,7 @@ import {
   ContextContentHeader,
   ContextTrigger,
 } from "@/components/ai-elements/context";
+import { cn } from "@/lib/utils";
 import {
   formatTokens,
   SessionUsageDetails,
@@ -17,6 +18,7 @@ import { getModelContextWindow } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { estimateUiMessageTokens } from "@/modules/ai/lib/chatRendering";
 import { estimateTokens } from "@/modules/ai/lib/usage";
+import { analyzeCacheUsage } from "@/modules/ai/lib/usageAnalysis";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
@@ -37,6 +39,15 @@ export function ContextIndicator({
   const draftSessionId = useChatStore((state) => state.draftSessionId);
   const providerModels = usePreferencesStore((state) => state.providerModels);
   const records = useUsageRecords(sessionId ?? "");
+  const cacheAnalysis = useMemo(() => analyzeCacheUsage(records), [records]);
+  const cacheIncident =
+    cacheAnalysis.incidents[cacheAnalysis.incidents.length - 1];
+  const cacheNoticeKey =
+    cacheAnalysis.status === "suspected"
+      ? "miniWindow.context.cacheAnomaly"
+      : cacheAnalysis.status === "recovered"
+        ? "miniWindow.context.cacheRecovered"
+        : "miniWindow.context.cacheAnomalyHistory";
   const latest = [...records]
     .reverse()
     .find((record) => !record.taskId && !record.purpose);
@@ -73,8 +84,12 @@ export function ContextIndicator({
   return (
     <Context usedTokens={used} maxTokens={max}>
       <ContextTrigger
-        className="h-6 shrink-0 gap-1 px-0 text-[10.5px]"
-        aria-label={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}`}
+        className={cn(
+          "h-6 shrink-0 gap-1 px-0 text-[10.5px]",
+          cacheIncident &&
+            "relative after:absolute after:right-0 after:top-0.5 after:size-1.5 after:rounded-full after:bg-warning",
+        )}
+        aria-label={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}${cacheIncident ? ` · ${t(cacheNoticeKey)}` : ""}`}
       />
       <ContextContent className="w-80 max-h-[70vh] overflow-y-auto text-[11px]">
         <ContextContentHeader />
@@ -86,6 +101,23 @@ export function ContextIndicator({
               t("statusBar.noModels")
             )}
           </div>
+          {cacheIncident && (
+            <div className="rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-muted-foreground">
+              <p className="font-medium text-warning">{t(cacheNoticeKey)}</p>
+              <p className="mt-1">
+                {t("miniWindow.context.cacheAnomalyDetails", {
+                  actual: formatTokens(cacheIncident.cacheReadTokens),
+                  expected: formatTokens(cacheIncident.expectedTokens),
+                  coverage: `${(cacheIncident.prefixReuseCoverage * 100).toFixed(0)}%`,
+                })}
+              </p>
+              <p>
+                {t("miniWindow.context.cacheAnomalyCount", {
+                  count: cacheAnalysis.incidents.length,
+                })}
+              </p>
+            </div>
+          )}
           {approximate && (
             <p className="text-muted-foreground">
               {t("miniWindow.context.footerApprox")}
