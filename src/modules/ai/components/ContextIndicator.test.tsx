@@ -207,3 +207,72 @@ it("uses the Chinese character estimate for a session without usage records", as
     container.querySelector("button")?.getAttribute("aria-label"),
   ).toContain("≈16");
 });
+
+it("shows a cache regression beside the context indicator and keeps its history after recovery", async () => {
+  restoreUsage(
+    id,
+    [
+      record({
+        id: "baseline-start",
+        values: {
+          inputTokens: 10000,
+          cacheReadTokens: 9000,
+          outputTokens: 100,
+        },
+      }),
+      record({
+        id: "baseline",
+        values: {
+          inputTokens: 12000,
+          cacheReadTokens: 9000,
+          outputTokens: 100,
+        },
+      }),
+      record({
+        id: "regressed",
+        values: {
+          inputTokens: 13000,
+          cacheReadTokens: 4000,
+          outputTokens: 100,
+        },
+      }),
+    ].map((content) => ({ role: "usage", content, timestamp: "now" })),
+  );
+
+  await act(async () =>
+    root.render(
+      <ContextIndicator sessionId={id} isBusy={false} messages={[]} />,
+    ),
+  );
+
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("miniWindow.context.cacheAnomaly");
+  expect(document.body.textContent).toContain(
+    "miniWindow.context.cacheAnomaly",
+  );
+  expect(document.body.textContent).toContain(
+    "miniWindow.context.cacheAnomalyDetails",
+  );
+
+  await act(async () =>
+    recordUsage(
+      id,
+      record({
+        id: "recovered",
+        values: {
+          inputTokens: 14000,
+          cacheReadTokens: 12500,
+          outputTokens: 100,
+        },
+      }),
+    ),
+  );
+
+  expect(document.body.textContent).toContain(
+    "miniWindow.context.cacheRecovered",
+  );
+  expect(document.body.textContent).toContain(
+    "miniWindow.context.cacheAnomalyCount",
+  );
+});

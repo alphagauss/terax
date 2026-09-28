@@ -1,0 +1,156 @@
+import { expect, it } from "vitest";
+import type { UsageRecord } from "./usage";
+import { analyzeCacheUsage } from "./usageAnalysis";
+
+function record(
+  id: string,
+  inputTokens: number,
+  cacheReadTokens: number | undefined,
+  patch: Partial<UsageRecord> = {},
+): UsageRecord {
+  return {
+    id,
+    turnId: "turn",
+    model: { providerId: "provider", modelId: "model" },
+    contextWindow: 128000,
+    values: { inputTokens, cacheReadTokens, outputTokens: 100 },
+    estimated: [],
+    toolCalls: 0,
+    ...patch,
+  };
+}
+
+it("uses the previous input as the reusable prefix despite a large new tool result", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("tool-result", 30000, 10000),
+    record("after-tool", 31000, 30000),
+  ]);
+
+  expect(analysis.status).toBe("healthy");
+  expect(analysis.incidents).toHaveLength(0);
+  expect(analysis.latest).toMatchObject({
+    requestHitRate: 30000 / 31000,
+    prefixReuseCoverage: 1,
+  });
+});
+
+it("detects a sharp cache regression from the learned healthy baseline", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("regressed", 13000, 4000),
+  ]);
+
+  expect(analysis.status).toBe("suspected");
+  expect(analysis.incidents).toHaveLength(1);
+  expect(analysis.incidents[0]).toMatchObject({
+    previousUsageId: "healthy",
+    currentUsageId: "regressed",
+    baselineCoverage: 0.9,
+    expectedTokens: 10800,
+    prefixReuseCoverage: 1 / 3,
+  });
+});
+
+it("detects a sharp absolute cache drop before a baseline exists", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 100000, 90000),
+    record("regressed", 110000, 30000),
+  ]);
+
+  expect(analysis.status).toBe("suspected");
+  expect(analysis.incidents[0]).toMatchObject({
+    previousUsageId: "first",
+    currentUsageId: "regressed",
+    expectedTokens: 90000,
+    cacheReadTokens: 30000,
+  });
+});
+
+it("does not report a small cache fluctuation as an incident", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 100000, 90000),
+    record("second", 110000, 80000),
+  ]);
+
+  expect(analysis.status).toBe("healthy");
+  expect(analysis.incidents).toHaveLength(0);
+});
+
+it("does not treat a consistently low cache share as a regression without a healthy baseline", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 3000),
+    record("second", 11000, 3000),
+    record("third", 12000, 3300),
+  ]);
+
+  expect(analysis.status).toBe("insufficient");
+  expect(analysis.incidents).toHaveLength(0);
+});
+
+it("keeps an incident after the cache recovers", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("regressed", 13000, 4000),
+    record("recovered", 14000, 12500),
+  ]);
+
+  expect(analysis.status).toBe("recovered");
+  expect(analysis.incidents).toHaveLength(1);
+});
+
+it("keeps an incident as history when a later compaction resets the baseline", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("regressed", 13000, 4000),
+    record("compaction", 13000, 4000, { purpose: "compaction" }),
+    record("after", 8000, 0),
+  ]);
+
+  expect(analysis.status).toBe("historical");
+  expect(analysis.incidents).toHaveLength(1);
+});
+
+it("resets comparison across compaction and model changes", () => {
+  const compacted = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("compaction", 12000, 9000, { purpose: "compaction" }),
+    record("after", 13000, 1000),
+  ]);
+  const switched = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("after", 13000, 1000, {
+      model: { providerId: "provider", modelId: "other" },
+    }),
+  ]);
+
+  expect(compacted.incidents).toHaveLength(0);
+  expect(switched.incidents).toHaveLength(0);
+});
+
+it("ignores subagents, missing cache data, estimated input and shrinking context", () => {
+  const analysis = analyzeCacheUsage([
+    record("first", 10000, 9000),
+    record("healthy", 12000, 9000),
+    record("child", 50000, 0, { taskId: "child" }),
+    record("missing", 13000, undefined),
+    record("estimated", 14000, 0, { estimated: ["inputTokens"] }),
+    record("shrunk", 5000, 0),
+  ]);
+
+  expect(analysis.incidents).toHaveLength(0);
+});
+
+it("reports unavailable when the provider never reports cache usage", () => {
+  expect(
+    analyzeCacheUsage([
+      record("first", 10000, undefined),
+      record("second", 11000, undefined),
+    ]).status,
+  ).toBe("unavailable");
+});

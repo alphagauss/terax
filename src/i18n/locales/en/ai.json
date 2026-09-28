@@ -15,7 +15,12 @@
       "cacheReadTokens": "Cache hit",
       "cacheInputTokens": "Cached input",
       "uncachedInputTokens": "Uncached input",
-      "outputTokens": "Output"
+      "outputTokens": "Output",
+      "cacheAnomaly": "Cache reuse may be abnormal",
+      "cacheRecovered": "Cache reuse has recovered",
+      "cacheAnomalyHistory": "Cache reuse dropped earlier in this session",
+      "cacheAnomalyDetails": "Cache read {{actual}}; expected about {{expected}} from recent behavior; prefix coverage {{coverage}}.",
+      "cacheAnomalyCount": "Regressions detected in this session: {{count}}."
     },
     "switchSession": "Switch session",
     "aiSettings": "AI settings",
