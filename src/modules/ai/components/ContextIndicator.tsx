@@ -34,9 +34,6 @@ export function ContextIndicator({
 }) {
   const { t } = useTranslation("ai");
   const selectedModel = useChatStore((state) => state.selectedModel);
-  const draftExternalAgentId = useChatStore(
-    (state) => state.draftExternalAgentId,
-  );
   const draftSessionId = useChatStore((state) => state.draftSessionId);
   const providerModels = usePreferencesStore((state) => state.providerModels);
   const records = useUsageRecords(sessionId ?? "");
@@ -67,10 +64,10 @@ export function ContextIndicator({
     latest?.contextWindow ?? getModelContextWindow(model, providerModels);
   const approximate = !latest || latest.estimated.includes("inputTokens");
   if (
+    sessionId === draftSessionId ||
     parseExternalAgentBinding(
       sessionId ? sessionMetadata.get(sessionId) : undefined,
-    ) ||
-    (sessionId === draftSessionId && draftExternalAgentId)
+    )
   )
     return null;
   return (
