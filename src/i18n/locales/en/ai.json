@@ -33,6 +33,12 @@
       "all": "All agents",
       "empty": "No conversations for this agent"
     },
+    "sessionSearch": {
+      "placeholder": "Search sessions…",
+      "includeContent": "Also search conversation content",
+      "empty": "No matching conversations",
+      "failed": "Could not search conversation content"
+    },
     "sessionStatus": {
       "background-running": "Running in the background",
       "completed-unread": "Completed, not viewed",

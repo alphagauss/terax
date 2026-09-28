@@ -315,6 +315,7 @@ pub fn run() {
             workspace_runtime::workspace_runtime_take_messages,
             commands::sessions::ai_sessions_list,
             commands::sessions::ai_session_read,
+            commands::sessions::ai_sessions_search,
             commands::sessions::ai_session_commit,
             commands::sessions::ai_session_delete,
             commands::sessions::ai_agent_delete,

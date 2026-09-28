@@ -183,6 +183,10 @@ impl Host {
             }
             "ai_sessions_list" => value(ai_sessions::ai_sessions_list()),
             "ai_session_read" => value(ai_sessions::ai_session_read(arg(a, "id")?)),
+            "ai_sessions_search" => value(ai_sessions::ai_sessions_search(
+                arg(a, "query")?,
+                arg(a, "sessionIds")?,
+            )),
             "ai_session_commit" => value(ai_sessions::commit(
                 &self.sessions,
                 "local",

@@ -33,6 +33,12 @@
       "all": "全部智能体",
       "empty": "该智能体还没有会话"
     },
+    "sessionSearch": {
+      "placeholder": "搜索会话…",
+      "includeContent": "同时搜索会话内容",
+      "empty": "没有匹配的会话",
+      "failed": "无法搜索会话内容"
+    },
     "sessionStatus": {
       "background-running": "正在后台运行",
       "completed-unread": "已完成，尚未查看",
