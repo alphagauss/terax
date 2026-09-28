@@ -77,7 +77,13 @@ export function LocalAgentNotificationsBridge({
         attention.markBackgroundRunning(sessionId);
       }
     }
-    if (visible && activeSessionId) attention.markViewed(activeSessionId);
+    if (visible && activeSessionId) {
+      attention.markViewed(activeSessionId);
+      useAgentStore.getState().dismissNotificationsForTarget({
+        source: "local",
+        sessionId: activeSessionId,
+      });
+    }
   }, [activeSessionId, runLockSessionIds, visible]);
 
   useEffect(() => {
