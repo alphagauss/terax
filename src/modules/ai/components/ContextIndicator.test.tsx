@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
-import { act, type ReactNode, type ComponentProps } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { ContextIndicator } from "./ContextIndicator";
-import { recordUsage, releaseUsage, restoreUsage } from "../lib/usageRuntime";
 import type { UsageRecord } from "../lib/usage";
+import { recordUsage, releaseUsage, restoreUsage } from "../lib/usageRuntime";
+import { ContextIndicator } from "./ContextIndicator";
+
+const chatStoreState = vi.hoisted(() => ({
+  selectedModel: { providerId: "test", modelId: "new" },
+  draftSessionId: null as string | null,
+}));
 
 vi.mock("@/components/ai-elements/context", async (importOriginal) => {
   const actual =
@@ -19,12 +24,7 @@ vi.mock("@/components/ai-elements/context", async (importOriginal) => {
 
 vi.mock("@/modules/ai/store/chatStore", () => ({
   sessionMetadata: new Map(),
-  useChatStore: (select: (state: unknown) => unknown) =>
-    select({
-      selectedModel: { providerId: "test", modelId: "new" },
-      draftSessionId: null,
-      draftExternalAgentId: null,
-    }),
+  useChatStore: (select: (state: unknown) => unknown) => select(chatStoreState),
 }));
 vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: (select: (state: unknown) => unknown) =>
@@ -63,7 +63,23 @@ const record = (patch: Partial<UsageRecord> = {}): UsageRecord => ({
 afterEach(async () => {
   await act(async () => root.unmount());
   releaseUsage(id);
+  chatStoreState.draftSessionId = null;
   root = createRoot(container);
+});
+
+it("hides context usage for a draft session", async () => {
+  chatStoreState.draftSessionId = id;
+
+  await act(async () =>
+    root.render(
+      <ContextIndicator sessionId={id} isBusy={false} messages={[]} />,
+    ),
+  );
+
+  expect(container.childElementCount).toBe(0);
+  expect(
+    document.body.querySelector('[data-slot="hover-card-content"]'),
+  ).toBeNull();
 });
 
 it("updates main context during a turn and preserves it across remounts without including subagents", async () => {
