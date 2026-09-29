@@ -5,6 +5,15 @@
   "rename": "重命名",
   "delete": "删除",
   "copy": "复制",
+  "pageMenu": {
+    "saveImage": "图片另存为…",
+    "imageFilter": "图片",
+    "saved": "已保存",
+    "saveFailed": "保存图片失败，请重试。",
+    "copyImage": "复制图片",
+    "copyLink": "复制链接地址",
+    "copyFailed": "复制失败，请重试。"
+  },
   "copied": "已复制",
   "loading": "加载中…",
   "back": "返回",

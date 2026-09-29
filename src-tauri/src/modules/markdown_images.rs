@@ -1,7 +1,8 @@
-//! Markdown 图片资源的准备、复用与保存。
+//! 图片资源的准备、复用与保存。
 //!
 //! Local 与 WSL 复用已授权原文件，SSH 与网络图片只读取一次并保存到临时文件。
 //! 所有资源按引用计数释放，网络下载同时执行 SSRF、格式和体积校验。
+//! 普通页面图片也可将已读取的原始字节交给原生保存对话框，不接收前端指定的写入路径。
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -42,6 +43,8 @@ pub enum MarkdownImageSource {
         #[serde(rename = "userAgent")]
         user_agent: String,
     },
+    /// 页面已读取的原始图片字节，沿用现有格式校验、临时资源和另存为流程。
+    Bytes { bytes: Vec<u8> },
 }
 
 /// 可交给 asset protocol 显示并由后续命令复用的图片资源。
@@ -227,6 +230,9 @@ pub async fn markdown_image_prepare(
         MarkdownImageSource::Network { url, user_agent } => {
             load_network_image(&app, key, url, &user_agent).await?
         }
+        MarkdownImageSource::Bytes { bytes } => {
+            run_blocking(move || load_bytes_image(key, bytes)).await?
+        }
     };
     state.insert_or_retain(loaded)
 }
@@ -402,7 +408,24 @@ async fn load_network_image(
     })
 }
 
-/// 生成进程内资源去重键，不在持久化边界使用。
+/// 将内存图片纳入现有引用计数资源，保存结束即可释放临时文件。
+fn load_bytes_image(key: String, bytes: Vec<u8>) -> Result<LoadedImage, String> {
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err("image exceeds the 20 MB limit".into());
+    }
+    let format = detect_image_format(&bytes)
+        .ok_or_else(|| "unsupported or invalid image format".to_string())?;
+    let temporary = write_temporary_image(&bytes, format)?;
+    Ok(LoadedImage {
+        key,
+        path: temporary.path().to_path_buf(),
+        name: format!("image.{}", format.extension()),
+        size: bytes.len() as u64,
+        temporary: Some(temporary),
+    })
+}
+
+/// 生成进程内资源去重键；一次性的内存来源随操作独立释放。
 fn source_key(source: &MarkdownImageSource) -> String {
     match source {
         MarkdownImageSource::Workspace { path, workspace } => match workspace {
@@ -413,6 +436,7 @@ fn source_key(source: &MarkdownImageSource) -> String {
             WorkspaceEnv::Local => format!("workspace:local\0{path}"),
         },
         MarkdownImageSource::Network { url, .. } => format!("network:{url}"),
+        MarkdownImageSource::Bytes { .. } => format!("bytes:{}", Uuid::new_v4()),
     }
 }
 
@@ -584,6 +608,26 @@ fn detect_image_format(bytes: &[u8]) -> Option<ImageFormat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_image_preserves_bytes_and_releases_temporary_file() {
+        let bytes = b"GIF89aoriginal-bytes".to_vec();
+        let loaded = load_bytes_image("bytes:test".into(), bytes.clone()).unwrap();
+        let path = loaded.path.clone();
+        assert_eq!(loaded.name, "image.gif");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let state = MarkdownImageState::default();
+        let resource = state.insert_or_retain(loaded).unwrap();
+        assert!(path.exists());
+        state.release(&resource.token).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn memory_image_rejects_invalid_or_oversized_data() {
+        assert!(load_bytes_image("invalid".into(), b"not an image".to_vec()).is_err());
+        assert!(load_bytes_image("large".into(), vec![0; MAX_IMAGE_BYTES as usize + 1]).is_err());
+    }
 
     #[test]
     fn detects_supported_image_signatures() {

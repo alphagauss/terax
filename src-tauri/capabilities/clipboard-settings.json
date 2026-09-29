@@ -1,8 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "clipboard-settings",
-  "description": "Windows 设置窗口的输入框复制使用原生文本写入。",
-  "platforms": ["windows"],
-  "windows": ["auxiliary-settings"],
-  "permissions": ["clipboard-manager:allow-write-text"]
-}

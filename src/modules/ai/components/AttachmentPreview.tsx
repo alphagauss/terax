@@ -1,4 +1,5 @@
 /** 按需预览用户消息中的图片媒体。 */
+import { writeClipboardImage } from "@/lib/imageActions";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -11,7 +12,6 @@ import {
   DialogDescription,
 } from "@/components/controls/dialog";
 import type { ImageAttachmentItem } from "@/modules/ai/components/MessageAttachments";
-import { copyMarkdownImage } from "@/modules/markdown/lib/imageActions";
 
 export default function AttachmentPreview({
   item,
@@ -61,7 +61,7 @@ export default function AttachmentPreview({
             size="sm"
             onClick={() => {
               if (imageRef.current)
-                void copyMarkdownImage(imageRef.current)
+                void writeClipboardImage(imageRef.current)
                   .then(() => toast.success(t("attachments.copied")))
                   .catch(() => toast.error(t("attachments.failed")));
             }}

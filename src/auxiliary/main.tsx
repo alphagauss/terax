@@ -3,6 +3,7 @@
  * 它在窗口显示前加载主题、读取原生能力并按受控 label 懒加载业务页面。
  */
 
+import { PageContextMenu } from "@/components/menu/PageContextMenu";
 import "@/lib/developmentPerformance";
 import { installEditableClipboard } from "@/lib/editableClipboard";
 import { TooltipProvider } from "@/components/controls/tooltip";
@@ -63,6 +64,7 @@ async function mountAuxiliaryWindow(): Promise<void> {
   ).render(
     <ThemeProvider>
       <TooltipProvider>
+        <PageContextMenu />
         <AuxiliaryWindowProvider capabilities={capabilities}>
           <AuxiliaryWindowErrorBoundary>
             {Page ? <Page /> : <AuxiliaryWindowUnavailablePage />}
