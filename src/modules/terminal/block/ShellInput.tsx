@@ -170,7 +170,7 @@ export default function ShellInput({
   // 输入框持有焦点时，终端网格选区仍走原生复制；编辑器自身选区由编辑器处理。
   const onCopyCapture = (e: React.ClipboardEvent) => {
     const view = handleRef.current?.view;
-    if (view && !view.state.selection.main.empty) return;
+    if (view?.state.selection.ranges.some((range) => !range.empty)) return;
     const sel = terminalGridSelection(terminalId);
     if (!sel) return;
     e.preventDefault();
