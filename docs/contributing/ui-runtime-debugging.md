@@ -49,6 +49,27 @@ Get-Content "$env:USERPROFILE\.terax\logs\Terax.log" -Tail 100 -Wait
 
 优先记录第一条异常的完整堆栈、资源文件名及行列号，再检查后续连带错误。如果错误只存在于压缩产物，可临时启用 Vite 的 `build.sourcemap` 后重新构建定位，结束后撤销。手动分块的循环引用可能改变依赖初始化顺序；非递归分组需配合 `output.strictExecutionOrder`，修复后仍应使用 `pnpm tauri build` 的实际产物复验。
 
+## 插件命令缺失与构建缓存
+
+若插件调用报 `Command ... not found`，先核对命令注册和 capabilities，区分命令未编入产物与运行时权限被拒绝。曾出现 capabilities 已允许 `write_html`，但 release 产物缺少该命令、普通文本和图片复制仍正常的情况。定向清理剪贴板插件缓存后，在 `removeUnusedCommands: true` 下重新构建已验证恢复，因此保留命令裁剪，不把永久关闭裁剪作为此类缓存问题的修复。
+
+裁剪宏读取生成的命令表，涉及 [sccache 对过程宏读取文件的缓存限制](https://github.com/mozilla/sccache/blob/v0.16.0/docs/Rust.md)。仅清理 Cargo 产物仍可能从 sccache 取回旧插件；应同时定向清理对应缓存条目，或强制刷新它们。以下命令从仓库根目录执行，仅清理剪贴板插件的 release 产物，并在本次构建后恢复缓存环境变量：
+
+```powershell
+cargo clean --manifest-path src-tauri/Cargo.toml --release -p tauri-plugin-clipboard-manager
+$previousRecache = $env:SCCACHE_RECACHE
+try {
+  $env:SCCACHE_RECACHE = "1"
+  pnpm tauri build --no-bundle
+} finally {
+  $env:SCCACHE_RECACHE = $previousRecache
+}
+```
+
+若只清缓存、稍后自行构建，应先确认没有编译任务运行，停止 sccache 服务后，按缓存归档内的 crate 产物名识别并删除对应条目，不清空全局缓存；下次编译会自动启动服务。dev 问题清理对应的 debug 产物，不带 `--release`。
+
+复验使用实际构建产物，分别检查选中文字后的右键复制、剪贴板中的 HTML／纯文本格式与图片复制。单元测试中的插件 mock 不能证明原生命令已编入产物，图片复制成功也不能替代文字选区验证。
+
 ## 证据与收尾
 
 React 开发组件轨道会把变化前后的完整 props 复制到浏览器 Performance 时间线，长流可能在 JS 堆之外累积大量内存。桌面入口默认及时清理这些组件记录，业务埋点、断点、热更新和源码映射不受影响。需要直接查询最近的组件记录时设置 `VITE_REACT_PROFILE=true`，保留窗口为一秒；浏览器性能录制仍可消费轨道事件。不要通过关闭整个 Performance API 或要求用户清空会话处理内存问题。
