@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{GitRepoFixture, git_available};
+use common::{git_available, GitRepoFixture};
 use std::process::Command;
 use tempfile::TempDir;
 use terax_lib::modules::fs::to_canon;
@@ -313,12 +313,10 @@ fn stage_then_commit_produces_log_entry() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sha, commit.commit_sha);
     assert_eq!(entries[0].subject, "add a");
-    assert!(
-        entries[0]
-            .refs
-            .iter()
-            .any(|reference| reference.label.contains("main"))
-    );
+    assert!(entries[0]
+        .refs
+        .iter()
+        .any(|reference| reference.label.contains("main")));
 
     let snap = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
     assert_eq!(snap.head_sha.as_deref(), Some(commit.commit_sha.as_str()));
@@ -720,18 +718,10 @@ fn log_includes_current_upstream_and_excludes_unrelated_refs() {
     fx.run_git(&["add", "other.txt"]);
     fx.run_git(&["commit", "-q", "-m", "other"]);
     let unrelated_head = git_stdout(&fx, &["rev-parse", "HEAD"]);
-    fx.run_git(&[
-        "update-ref",
-        "refs/remotes/origin/other",
-        &unrelated_head,
-    ]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/other", &unrelated_head]);
     fx.run_git(&["update-ref", "refs/heads/feature", &unrelated_head]);
     fx.run_git(&["update-ref", "refs/heads/nightly", &local_head]);
-    fx.run_git(&[
-        "update-ref",
-        "refs/remotes/origin/nightly",
-        &local_head,
-    ]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/nightly", &local_head]);
     fx.run_git(&["checkout", "-q", "main"]);
 
     let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
@@ -751,9 +741,10 @@ fn log_includes_current_upstream_and_excludes_unrelated_refs() {
         .find(|entry| entry.sha == local_head)
         .expect("local HEAD present");
     assert!(local.refs.iter().any(|reference| reference.label == "main"));
-    assert!(local.refs.iter().all(|reference| {
-        reference.label != "nightly" && reference.label != "origin/nightly"
-    }));
+    assert!(local
+        .refs
+        .iter()
+        .all(|reference| { reference.label != "nightly" && reference.label != "origin/nightly" }));
     assert!(entries.iter().all(|entry| entry.sha != unrelated_head));
 }
 
@@ -1111,10 +1102,7 @@ fn list_branches_includes_remote_refs_and_commit_times() {
         .expect("remote branch present");
     assert_eq!(remote.kind, "remote");
     assert!(remote.timestamp_secs.is_some());
-    assert!(!result
-        .branches
-        .iter()
-        .any(|branch| branch.name == "origin"));
+    assert!(!result.branches.iter().any(|branch| branch.name == "origin"));
     assert!(!result
         .branches
         .iter()
