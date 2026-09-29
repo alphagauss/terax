@@ -4,9 +4,13 @@
   "description": "项目主动复制文本、图片和 HTML，Windows 保留系统剪贴板历史，Linux 避开 WebKit 限制。",
   "platforms": ["linux", "windows"],
   "windows": [
-    "main"
+    "main",
+    "auxiliary-settings",
+    "auxiliary-file-properties"
   ],
   "permissions": [
+    "core:image:allow-new",
+    "core:resources:allow-close",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-write-image",
     "clipboard-manager:allow-write-html"

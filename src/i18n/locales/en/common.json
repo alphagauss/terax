@@ -5,6 +5,15 @@
   "rename": "Rename",
   "delete": "Delete",
   "copy": "Copy",
+  "pageMenu": {
+    "saveImage": "Save image as…",
+    "imageFilter": "Images",
+    "saved": "Saved",
+    "saveFailed": "Unable to save image. Please try again.",
+    "copyImage": "Copy image",
+    "copyLink": "Copy link address",
+    "copyFailed": "Copy failed. Please try again."
+  },
   "copied": "Copied",
   "loading": "Loading…",
   "back": "Back",

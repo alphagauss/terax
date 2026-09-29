@@ -4,16 +4,13 @@
  * 图片接近预览滚动区域后才准备资源；同一文档只订阅一次工作区环境。
  */
 
+import { writeClipboardImage, savePreparedImage } from "@/lib/imageActions";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/menu/context-menu";
-import {
-  copyMarkdownImage,
-  saveMarkdownImage,
-} from "@/modules/markdown/lib/imageActions";
 import {
   isNetworkMarkdownImageSource,
   type MarkdownImageSource,
@@ -222,7 +219,7 @@ export function MarkdownPreviewImage({
           onSelect={() => {
             const element = imageRef.current;
             if (!element) return;
-            void copyMarkdownImage(element)
+            void writeClipboardImage(element)
               .then(() => toast.success(t("imageCopied")))
               .catch((error) =>
                 toast.error(t("imageCopyFailed", { message: String(error) })),
@@ -236,7 +233,7 @@ export function MarkdownPreviewImage({
           disabled={!asset.resource}
           onSelect={() => {
             if (!asset.resource) return;
-            void saveMarkdownImage(asset.resource, {
+            void savePreparedImage(asset.resource, {
               title: t("saveImage"),
               imageFilter: t("imageFile"),
             })
