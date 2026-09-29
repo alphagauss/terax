@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
 import "./i18n";
 import { installSelectionClipboard } from "@/lib/selectionClipboard";
+import { installEditableClipboard } from "@/lib/editableClipboard";
 import { initializeAlphaPreferences } from "@/modules/alpha/preferences";
 import { initializeSidebarLayout } from "@/modules/sidebar";
 import { invoke } from "@tauri-apps/api/core";
@@ -24,6 +25,8 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
 
 const disposeSelectionClipboard = installSelectionClipboard();
 if (import.meta.hot) import.meta.hot.dispose(disposeSelectionClipboard);
+const disposeEditableClipboard = installEditableClipboard();
+if (import.meta.hot) import.meta.hot.dispose(disposeEditableClipboard);
 
 // Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true pnpm dev`.
 // Dev-only dynamic import so it never reaches the production bundle.
