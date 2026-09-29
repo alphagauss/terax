@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
+
+import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
+import { history, redoDepth, undoDepth } from "@codemirror/commands";
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-import { history, redoDepth, undoDepth } from "@codemirror/commands";
-import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
 
 const mocks = vi.hoisted(() => ({
   windows: true,
@@ -168,6 +169,7 @@ it("恢复原焦点与选区，只执行当前原生命令；禁用项、取消�
       restoreNative: false,
     }),
   );
+  expect(document.activeElement).toBe(field);
 });
 
 it("真实 CodeMirror 撤销重做使用自身历史，原生只收到取消，不执行两次", async () => {

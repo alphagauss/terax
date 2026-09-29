@@ -10,22 +10,20 @@ const MAX_LINUX_COPY_PIXELS = 9_000_000;
 export async function writeClipboardImage(
   image: HTMLImageElement,
 ): Promise<void> {
-  if (
-    !image.complete ||
-    image.naturalWidth === 0 ||
-    image.naturalHeight === 0
-  ) {
+  // 固定已绘制图片的尺寸，避免异步加载原生模块期间 src 变化导致像素与尺寸不一致。
+  const { naturalWidth: width, naturalHeight: height } = image;
+  if (!image.complete || width === 0 || height === 0) {
     throw new Error("image is not ready");
   }
-  const pixels = image.naturalWidth * image.naturalHeight;
+  const pixels = width * height;
   const maxPixels = IS_LINUX ? MAX_LINUX_COPY_PIXELS : MAX_COPY_PIXELS;
   if (!Number.isSafeInteger(pixels) || pixels > maxPixels) {
     throw new Error("image dimensions are too large to copy");
   }
 
   const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("image canvas is unavailable");
   try {
@@ -35,22 +33,13 @@ export async function writeClipboardImage(
         import("@tauri-apps/api/image"),
         import("@tauri-apps/plugin-clipboard-manager"),
       ]);
-      const imageData = context.getImageData(
-        0,
-        0,
-        image.naturalWidth,
-        image.naturalHeight,
-      );
+      const imageData = context.getImageData(0, 0, width, height);
       const rgba = new Uint8Array(
         imageData.data.buffer,
         imageData.data.byteOffset,
         imageData.data.byteLength,
       );
-      const nativeImage = await NativeImage.new(
-        rgba,
-        image.naturalWidth,
-        image.naturalHeight,
-      );
+      const nativeImage = await NativeImage.new(rgba, width, height);
       try {
         await writeImage(nativeImage);
       } finally {
