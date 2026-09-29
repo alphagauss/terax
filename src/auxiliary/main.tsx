@@ -4,6 +4,7 @@
  */
 
 import "@/lib/developmentPerformance";
+import { installEditableClipboard } from "@/lib/editableClipboard";
 import { TooltipProvider } from "@/components/controls/tooltip";
 import {
   AuxiliaryWindowErrorBoundary,
@@ -20,6 +21,9 @@ import { ThemeProvider } from "@/modules/theme";
 import "@/styles/globals.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
+
+const disposeEditableClipboard = installEditableClipboard();
+if (import.meta.hot) import.meta.hot.dispose(disposeEditableClipboard);
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";

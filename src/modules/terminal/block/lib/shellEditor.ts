@@ -47,6 +47,8 @@ export type ShellEditorOptions = {
   placeholderText?: string;
   onSubmit: (text: string) => void;
   onInterrupt: () => void;
+  /** 动态读取智能复制策略；有选区时允许浏览器触发编辑器复制。 */
+  copySelectionOnCtrlC: () => boolean;
   /** Escape with no completion open; return true when handled. */
   onEscape?: () => boolean;
   /** Live command-name list (history first-words + PATH) for completion. */
@@ -384,11 +386,14 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
       {
         key: "Ctrl-c",
         run: (view) => {
+          if (
+            opts.copySelectionOnCtrlC() &&
+            view.state.selection.ranges.some((range) => !range.empty)
+          ) return false;
           opts.onInterrupt();
           clear(view);
           return true;
         },
-        preventDefault: true,
       },
     ]),
   );

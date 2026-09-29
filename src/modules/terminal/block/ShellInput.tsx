@@ -10,7 +10,7 @@ import {
 import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import { resolveFontFamily } from "@/lib/fonts";
-import { fmtShortcut, MOD_KEY } from "@/lib/platform";
+import { fmtShortcut, IS_MAC, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useRef } from "react";
@@ -104,6 +104,8 @@ export default function ShellInput({
         cbRef.current.onSubmit(text);
       },
       onInterrupt: () => cbRef.current.onInterrupt(),
+      copySelectionOnCtrlC: () =>
+        !IS_MAC && usePreferencesStore.getState().terminalSmartCopyPaste,
       onEscape: () => clearTerminalBlockSelection(terminalIdRef.current),
     });
     handleRef.current = handle;
