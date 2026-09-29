@@ -12,6 +12,8 @@ pub mod app_data;
 pub mod auxiliary_window;
 #[cfg(feature = "desktop")]
 pub mod clipboard_files;
+#[cfg(feature = "desktop")]
+pub mod clipboard_images;
 #[cfg(all(feature = "desktop", windows))]
 pub mod editor_menu;
 #[cfg(feature = "desktop")]

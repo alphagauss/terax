@@ -10,7 +10,7 @@ const MAX_LINUX_COPY_PIXELS = 9_000_000;
 export async function writeClipboardImage(
   image: HTMLImageElement,
 ): Promise<void> {
-  // 固定已绘制图片的尺寸，避免异步加载原生模块期间 src 变化导致像素与尺寸不一致。
+  // 固定已绘制图片的尺寸，避免异步复制期间 src 变化导致像素与尺寸不一致。
   const { naturalWidth: width, naturalHeight: height } = image;
   if (!image.complete || width === 0 || height === 0) {
     throw new Error("image is not ready");
@@ -29,22 +29,19 @@ export async function writeClipboardImage(
   try {
     context.drawImage(image, 0, 0);
     if (USE_NATIVE_CLIPBOARD) {
-      const [{ Image: NativeImage }, { writeImage }] = await Promise.all([
-        import("@tauri-apps/api/image"),
-        import("@tauri-apps/plugin-clipboard-manager"),
-      ]);
       const imageData = context.getImageData(0, 0, width, height);
       const rgba = new Uint8Array(
         imageData.data.buffer,
         imageData.data.byteOffset,
         imageData.data.byteLength,
       );
-      const nativeImage = await NativeImage.new(rgba, width, height);
-      try {
-        await writeImage(nativeImage);
-      } finally {
-        await nativeImage.close();
-      }
+      // 使用二进制请求，避免数百万像素经 JSON 数字数组序列化。
+      await invoke("clipboard_write_image", rgba, {
+        headers: {
+          "x-image-width": String(width),
+          "x-image-height": String(height),
+        },
+      });
       return;
     }
 
