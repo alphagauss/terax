@@ -89,11 +89,13 @@ function NavigationViewport({
   activeId,
   itemIds,
   children,
+  windowDragRegion,
 }: {
   orientation: "horizontal" | "vertical";
   activeId: SidebarContainerId | null;
   itemIds: readonly SidebarContainerId[];
   children: ReactNode;
+  windowDragRegion?: boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const itemOrder = itemIds.join("\0");
@@ -135,6 +137,7 @@ function NavigationViewport({
     <div
       ref={viewportRef}
       data-sidebar-navigation-viewport
+      data-tauri-drag-region={windowDragRegion || undefined}
       className={cn(
         "overscroll-none scroll-smooth motion-reduce:scroll-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         orientation === "vertical"
@@ -143,6 +146,7 @@ function NavigationViewport({
       )}
     >
       <div
+        data-tauri-drag-region={windowDragRegion || undefined}
         className={cn(
           "flex",
           orientation === "vertical"
@@ -589,7 +593,7 @@ function NavigationItems({
   );
 }
 
-/** 渲染主侧边栏的纵向或横向容器导航。 */
+/** 渲染主侧边栏导航，空白区域复用标题栏的原生窗口交互。 */
 export function SidebarActivityBar({
   activityBar,
   ...props
@@ -599,6 +603,7 @@ export function SidebarActivityBar({
   const compact = activityBar.size === "compact" && vertical;
   const bar = vertical ? (
     <aside
+      data-tauri-drag-region
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="vertical"
       className={cn(
@@ -607,6 +612,7 @@ export function SidebarActivityBar({
       )}
     >
       <NavigationViewport
+        windowDragRegion
         orientation="vertical"
         activeId={props.activeId}
         itemIds={props.containers.map((container) => container.id)}
@@ -622,6 +628,7 @@ export function SidebarActivityBar({
     </aside>
   ) : (
     <div
+      data-tauri-drag-region
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="horizontal"
       style={{ height: SIDEBAR_COMPOSITE_BAR_HEIGHT }}
@@ -633,6 +640,7 @@ export function SidebarActivityBar({
       )}
     >
       <NavigationViewport
+        windowDragRegion
         orientation="horizontal"
         activeId={props.activeId}
         itemIds={props.containers.map((container) => container.id)}
