@@ -7,9 +7,9 @@
 // @vitest-environment happy-dom
 
 import {
-  writeClipboardImage,
-  savePreparedImage,
   saveImageAs,
+  savePreparedImage,
+  writeClipboardImage,
 } from "@/lib/imageActions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,6 +72,36 @@ beforeEach(() => {
 });
 
 describe("writeClipboardImage", () => {
+  it("图片来源在异步加载期间变化时，仍复制已经绘制的尺寸与像素", async () => {
+    native.windows = true;
+    const getImageData = vi.fn(() => ({
+      data: new Uint8ClampedArray([255, 0, 0, 255]),
+    }));
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage: vi.fn(), getImageData }),
+    } as unknown as HTMLCanvasElement;
+    const createElement = vi
+      .spyOn(document, "createElement")
+      .mockReturnValueOnce(canvas);
+    const image = { complete: true, naturalWidth: 1, naturalHeight: 1 };
+    try {
+      const copying = writeClipboardImage(image as HTMLImageElement);
+      image.naturalWidth = 0;
+      image.naturalHeight = 0;
+      await copying;
+      expect(getImageData).toHaveBeenCalledWith(0, 0, 1, 1);
+      expect(native.createImage).toHaveBeenCalledWith(
+        new Uint8Array([255, 0, 0, 255]),
+        1,
+        1,
+      );
+    } finally {
+      createElement.mockRestore();
+    }
+  });
+
   it("encodes the decoded image once and writes PNG bytes", async () => {
     const drawImage = vi.fn();
     const canvas = {
