@@ -42,10 +42,11 @@ vi.mock("@/modules/terminal/block/lib/shellEditor", () => ({
     view: {
       state: {
         selection: {
-          main: {
-            get empty() {
-              return !mocks.editorSelection;
-            },
+          get ranges() {
+            return [
+              { empty: true },
+              ...(mocks.editorSelection ? [{ empty: false }] : []),
+            ];
           },
         },
       },
