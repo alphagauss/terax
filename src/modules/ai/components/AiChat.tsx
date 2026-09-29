@@ -4,6 +4,7 @@
  * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
+import { writeClipboardText } from "@/lib/clipboard";
 import { DeliveryCard } from "@/modules/channels/components/DeliveryCard";
 import {
   EMPTY_DELIVERIES,
@@ -928,7 +929,7 @@ const MessageMeta = memo(function MessageMeta({
   const copy = useCallback(async () => {
     if (!copyText || typeof navigator === "undefined") return;
     try {
-      await navigator.clipboard.writeText(copyText);
+      await writeClipboardText(copyText);
     } catch {
       return;
     }

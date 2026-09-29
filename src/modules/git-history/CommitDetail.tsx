@@ -3,6 +3,7 @@
  * 提交说明、作者信息和文件路径需在紧凑布局下保持可读。
  */
 
+import { writeClipboardText } from "@/lib/clipboard";
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import { Spinner } from "@/components/ui/spinner";
@@ -140,8 +141,7 @@ export function CommitDetail({
             variant="ghost"
             className="cursor-pointer gap-1.5"
             onClick={() => {
-              void navigator.clipboard
-                .writeText(commit.sha)
+              void writeClipboardText(commit.sha)
                 .then(() => setCopiedSha(commit.sha))
                 .catch(() => undefined);
             }}

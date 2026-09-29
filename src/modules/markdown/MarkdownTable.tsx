@@ -1,4 +1,5 @@
 /** Markdown 表格共用复制、原生另存为和全屏操作，格式转换由 Streamdown 负责。 */
+import { writeClipboardHtml } from "@/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -105,21 +106,7 @@ export function MarkdownTable({
         });
         if (saved) toast.success(t("table.downloaded"));
       } else {
-        if (
-          navigator.clipboard?.write &&
-          typeof ClipboardItem !== "undefined"
-        ) {
-          await navigator.clipboard.write([
-            new ClipboardItem({
-              "text/plain": new Blob([content], { type: "text/plain" }),
-              "text/html": new Blob([table.outerHTML], { type: "text/html" }),
-            }),
-          ]);
-        } else if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(content);
-        } else {
-          throw new Error(t("table.clipboardUnavailable"));
-        }
+        await writeClipboardHtml(table.outerHTML, content);
         setCopied(true);
         window.clearTimeout(copyTimer.current);
         copyTimer.current = window.setTimeout(() => setCopied(false), 2_000);

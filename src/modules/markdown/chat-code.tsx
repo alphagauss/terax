@@ -6,6 +6,7 @@
 
 "use client";
 
+import { writeClipboardText } from "@/lib/clipboard";
 import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/modules/theme";
@@ -508,9 +509,8 @@ function CopyButton({ text }: { text: string }) {
   useEffect(() => () => window.clearTimeout(tRef.current), []);
 
   const onCopy = async () => {
-    if (!navigator?.clipboard?.writeText) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await writeClipboardText(text);
       setCopied(true);
       tRef.current = window.setTimeout(() => setCopied(false), 2_000);
     } catch {
