@@ -1,7 +1,7 @@
 /**
  * 本文件测试 页面图片复制与另存为动作。
  *
- * 锁定剪贴板只编码当前图片一次，并确保另存为复用既有资源 token。
+ * 锁定原生复制使用二进制像素，网页复制只编码一次，并确保另存为复用既有资源 token。
  */
 
 // @vitest-environment happy-dom
@@ -16,11 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({
   linux: false,
   windows: false,
-  closeImage: vi.fn(),
-  createImage: vi.fn(),
   invoke: vi.fn(),
   writeClipboard: vi.fn(),
-  writeImage: vi.fn(),
 }));
 
 vi.mock("@/lib/platform", () => ({
@@ -37,12 +34,6 @@ vi.mock("@/lib/clipboard", () => ({
   },
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
-vi.mock("@tauri-apps/api/image", () => ({
-  Image: { new: native.createImage },
-}));
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
-  writeImage: native.writeImage,
-}));
 
 const resource = {
   token: "image-token",
@@ -52,13 +43,8 @@ const resource = {
 beforeEach(() => {
   native.linux = false;
   native.windows = false;
-  native.closeImage.mockReset().mockResolvedValue(undefined);
-  native.createImage.mockReset().mockResolvedValue({
-    close: native.closeImage,
-  });
-  native.invoke.mockReset();
+  native.invoke.mockReset().mockResolvedValue(undefined);
   native.writeClipboard.mockReset().mockResolvedValue(undefined);
-  native.writeImage.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { write: native.writeClipboard },
@@ -72,7 +58,7 @@ beforeEach(() => {
 });
 
 describe("writeClipboardImage", () => {
-  it("图片来源在异步加载期间变化时，仍复制已经绘制的尺寸与像素", async () => {
+  it("图片来源在异步复制期间变化时，仍复制已经绘制的尺寸与像素", async () => {
     native.windows = true;
     const getImageData = vi.fn(() => ({
       data: new Uint8ClampedArray([255, 0, 0, 255]),
@@ -92,10 +78,10 @@ describe("writeClipboardImage", () => {
       image.naturalHeight = 0;
       await copying;
       expect(getImageData).toHaveBeenCalledWith(0, 0, 1, 1);
-      expect(native.createImage).toHaveBeenCalledWith(
+      expect(native.invoke).toHaveBeenCalledWith(
+        "clipboard_write_image",
         new Uint8Array([255, 0, 0, 255]),
-        1,
-        1,
+        { headers: { "x-image-width": "1", "x-image-height": "1" } },
       );
     } finally {
       createElement.mockRestore();
@@ -123,14 +109,14 @@ describe("writeClipboardImage", () => {
     await writeClipboardImage(image);
     expect(drawImage).toHaveBeenCalledWith(image, 0, 0);
     expect(native.writeClipboard).toHaveBeenCalledOnce();
-    expect(native.writeImage).not.toHaveBeenCalled();
+    expect(native.invoke).not.toHaveBeenCalled();
     expect(canvas.width).toBe(0);
     expect(canvas.height).toBe(0);
     createElement.mockRestore();
   });
 
   it.each(["linux", "windows"] as const)(
-    "writes RGBA and releases resources on %s",
+    "sends binary RGBA and clears the canvas on %s, including write failures",
     async (platform) => {
       native[platform] = true;
       const rgba = new Uint8ClampedArray([255, 0, 0, 255]);
@@ -156,23 +142,19 @@ describe("writeClipboardImage", () => {
 
       await writeClipboardImage(image);
 
-      expect(native.createImage).toHaveBeenCalledWith(
+      expect(native.invoke).toHaveBeenCalledExactlyOnceWith(
+        "clipboard_write_image",
         new Uint8Array([255, 0, 0, 255]),
-        1,
-        1,
+        { headers: { "x-image-width": "1", "x-image-height": "1" } },
       );
-      expect(native.writeImage).toHaveBeenCalledWith(
-        expect.objectContaining({ close: native.closeImage }),
-      );
-      expect(native.closeImage).toHaveBeenCalledOnce();
       expect(native.writeClipboard).not.toHaveBeenCalled();
       expect(toBlob).not.toHaveBeenCalled();
-      native.writeImage.mockRejectedValueOnce(new Error("clipboard busy"));
+      native.invoke.mockRejectedValueOnce(new Error("clipboard busy"));
       createElement.mockReturnValueOnce(canvas);
       await expect(writeClipboardImage(image)).rejects.toThrow(
         "clipboard busy",
       );
-      expect(native.closeImage).toHaveBeenCalledTimes(2);
+      expect(native.invoke).toHaveBeenCalledTimes(2);
       expect(native.writeClipboard).not.toHaveBeenCalled();
       expect(canvas.width).toBe(0);
       createElement.mockRestore();

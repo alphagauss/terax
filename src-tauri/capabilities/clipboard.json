@@ -9,10 +9,7 @@
     "auxiliary-file-properties"
   ],
   "permissions": [
-    "core:image:allow-new",
-    "core:resources:allow-close",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-write-image",
     "clipboard-manager:allow-write-html"
   ]
 }
