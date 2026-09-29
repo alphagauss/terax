@@ -98,6 +98,8 @@
     "sessionBusy": "此会话仍在完成上一轮运行。",
     "workingDirectory": "工作目录：{{path}}",
     "workingDirectoryUnavailable": "会话工作目录不可用。",
+    "resetWorkingDirectory": "恢复默认工作目录",
+    "restoreProjectDirectory": "恢复跟随当前项目目录",
     "connectDescription": "连接任意 AI 提供方或使用本地模型。密钥只保存在系统钥匙串中。",
     "connectProvider": "连接提供方",
     "unsupportedFile": "{{name}} 不是支持的文本或图片文件。",

@@ -109,6 +109,8 @@ export type Live = {
     input: import("@/modules/ai/lib/fileEdits").FileEditsOpenInput,
   ) => void;
   draftCwd: string | null;
+  draftProjectRoot?: string | null;
+  defaultDraftCwd?: string | null;
   revealWorkingDirectory: (cwd: string) => Promise<void>;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
@@ -225,6 +227,8 @@ type StoreState = {
    * 草稿只用于承载输入和 Chat 实例，绝不能进入历史列表或写入会话文件。
    */
   draftSessionId: string | null;
+  /** 仅绑定当前草稿，项目目录变化后恢复跟随。 */
+  draftCwdOverride: { sessionId: string; cwd: string } | null;
   sessions: SessionMeta[];
   activeSessionId: string | null;
   activeSessionRevision: number;
@@ -408,6 +412,7 @@ export async function appendSessionDisplay(
         state.draftSessionId,
         state.sessions,
         state.live.draftCwd,
+        state.draftCwdOverride,
       );
       if (!cwd) throw new Error(i18n.t("ai:commands.noWorkspace"));
       const release = !state.runLockSessionIds[id];
@@ -594,7 +599,12 @@ export function isSessionWritable(id: string): boolean {
 
 export const useChatStore = create<StoreState>((set, get) => ({
   live: NOOP_LIVE,
-  setLive: (live) => set({ live }),
+  setLive: (live) =>
+    set((state) => ({
+      live,
+      draftCwdOverride:
+        state.live.draftCwd === live.draftCwd ? state.draftCwdOverride : null,
+    })),
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
   setApiKeys: (keys) => set({ apiKeys: keys }),
@@ -745,6 +755,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   sessionsHydrated: false,
   draftSessionId: null,
+  draftCwdOverride: null,
   sessions: [],
   activeSessionId: null,
   activeSessionRevision: 0,

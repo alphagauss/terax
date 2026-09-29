@@ -14,10 +14,15 @@ const mocks = vi.hoisted(() => ({
   state: {
     activeSessionId: "draft",
     draftSessionId: "draft",
+    draftCwdOverride: null as { sessionId: string; cwd: string } | null,
     draftExternalAgentId: null,
     sessions: [],
     runLockSessionIds: {},
-    live: { draftCwd: "/project" },
+    live: {
+      draftCwd: "/project",
+      defaultDraftCwd: "/default/workspace" as string | null,
+      draftProjectRoot: "/project" as string | null,
+    },
     focusSignal: 0,
     pendingSelections: [],
     pendingFileAttachments: [],
@@ -41,6 +46,8 @@ vi.mock("@/modules/ai/store/chatStore", () => ({
     (select: (state: typeof mocks.state) => unknown) => select(mocks.state),
     {
       getState: () => mocks.state,
+      setState: (patch: Partial<typeof mocks.state>) =>
+        Object.assign(mocks.state, patch),
     },
   ),
   sessionMetadata: new Map(),
@@ -103,6 +110,9 @@ function Harness() {
 }
 function mount() {
   root = createRoot(document.createElement("div"));
+  render();
+}
+function render() {
   act(() =>
     root.render(
       <AiComposerProvider openFileGroups={[]}>
@@ -115,6 +125,12 @@ beforeEach(() => {
   env.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   mocks.primary = true;
+  mocks.state.activeSessionId = "draft";
+  mocks.state.draftSessionId = "draft";
+  mocks.state.draftCwdOverride = null;
+  mocks.state.live.draftProjectRoot = "/project";
+  mocks.state.live.draftCwd = "/project";
+  mocks.state.live.defaultDraftCwd = "/default/workspace";
   mocks.storage.clear();
   mocks.read.mockImplementation((key: string) => mocks.storage.get(key));
   mocks.write.mockImplementation(async (key: string, value: unknown) => {
@@ -128,6 +144,43 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   env.IS_REACT_ACT_ENVIRONMENT = false;
+});
+
+it("默认目录准备前及项目已是默认 workspace 时隐藏重置入口", () => {
+  mocks.state.live.defaultDraftCwd = null;
+  mount();
+  expect(composer.workingDirectoryAction).toBeNull();
+  mocks.state.live.defaultDraftCwd = "/default/workspace";
+  mocks.state.live.draftCwd = "/default/workspace";
+  mocks.state.live.draftProjectRoot = "/default/workspace";
+  render();
+  expect(composer.workingDirectoryAction).toBeNull();
+  act(() => composer.changeWorkingDirectory());
+  expect(mocks.state.draftCwdOverride).toBeNull();
+});
+
+it("按实际目录切换重置与恢复跟随，历史会话和无项目时不提供操作", async () => {
+  mount();
+  expect(composer.workingDirectoryAction).toBe("reset");
+  await act(async () => composer.changeWorkingDirectory());
+  render();
+  expect(composer.workingDirectory).toBe("/default/workspace");
+  expect(composer.workingDirectoryAction).toBe("restore");
+  await act(async () => composer.changeWorkingDirectory());
+  render();
+  expect(composer.workingDirectory).toBe("/project");
+  expect(composer.workingDirectoryAction).toBe("reset");
+  expect(mocks.state.draftCwdOverride).toBeNull();
+  mocks.state.draftCwdOverride = { sessionId: "draft", cwd: "/project" };
+  render();
+  expect(composer.workingDirectoryAction).toBe("reset");
+  mocks.state.activeSessionId = "saved";
+  render();
+  expect(composer.workingDirectoryAction).toBeNull();
+  mocks.state.activeSessionId = "draft";
+  mocks.state.live.draftProjectRoot = null;
+  render();
+  expect(composer.workingDirectoryAction).toBeNull();
 });
 
 it("主窗口重挂载恢复原始正文、图片、选区和 Snippet，移除图片覆盖缓存", () => {

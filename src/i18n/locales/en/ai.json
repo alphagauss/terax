@@ -98,6 +98,8 @@
     "sessionBusy": "This session is still finishing another run.",
     "workingDirectory": "Working directory: {{path}}",
     "workingDirectoryUnavailable": "The session working directory is unavailable.",
+    "resetWorkingDirectory": "Restore default working directory",
+    "restoreProjectDirectory": "Resume following the current project directory",
     "connectDescription": "Connect any AI provider or use a local model. Your key stays in the OS keychain.",
     "connectProvider": "Connect provider",
     "unsupportedFile": "{{name}} is not a supported text or image file.",

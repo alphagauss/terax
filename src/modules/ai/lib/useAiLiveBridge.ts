@@ -1,6 +1,6 @@
 /**
  * 本文件把当前 Workbench 的实时上下文、默认草稿目录和导航能力桥接到 AI 会话。
- * 默认目录只在 AI 可见且没有 Explorer 根时准备，历史目录导航仍复用现有标签。
+ * 默认目录在 AI 可见时准备，用于草稿目录切换；历史目录导航仍复用现有标签。
  */
 
 import {
@@ -48,12 +48,7 @@ export function useAiLiveBridge(params: Params) {
   useEffect(() => {
     const waitingForSsh =
       currentWorkspaceEnv().kind === "ssh" && !params.environmentHome;
-    if (
-      !params.visible ||
-      params.explorerRoot ||
-      defaultRoot ||
-      waitingForSsh
-    ) {
+    if (!params.visible || defaultRoot || waitingForSsh) {
       return;
     }
     let active = true;
@@ -74,19 +69,16 @@ export function useAiLiveBridge(params: Params) {
     return () => {
       active = false;
     };
-  }, [
-    defaultRoot,
-    params.environmentHome,
-    params.explorerRoot,
-    params.visible,
-    t,
-  ]);
+  }, [defaultRoot, params.environmentHome, params.visible, t]);
 
   useEffect(() => {
     setLive({
-      openFileReference: (path, line) => ref.current.openFileReference?.(path, line),
+      openFileReference: (path, line) =>
+        ref.current.openFileReference?.(path, line),
       openFileEdits: (input) => ref.current.openFileEdits?.(input),
       draftCwd: params.explorerRoot ?? defaultRoot,
+      draftProjectRoot: params.explorerRoot,
+      defaultDraftCwd: defaultRoot,
       revealWorkingDirectory: async (cwd: string) => {
         const decide = (path: string) => {
           const current = ref.current;

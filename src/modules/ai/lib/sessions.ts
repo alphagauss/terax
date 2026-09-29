@@ -81,16 +81,20 @@ export async function readSession(id: string): Promise<SessionFile> {
   };
 }
 
-/** 解析会话实际使用的固定工作目录，草稿尚未发送时跟随 Explorer 根目录。 */
+/** 解析会话工作目录；草稿默认跟随 Explorer，也可单独重置到默认目录。 */
 export function resolveSessionCwd(
   sessionId: string,
   draftSessionId: string | null,
   sessions: readonly SessionMeta[],
   explorerRoot: string | null,
+  draftOverride?: { sessionId: string; cwd: string } | null,
 ): string | null {
   const persisted = sessions.find((session) => session.id === sessionId);
   if (persisted) return persisted.cwd;
-  return sessionId === draftSessionId ? explorerRoot : null;
+  if (sessionId !== draftSessionId) return null;
+  return draftOverride?.sessionId === sessionId
+    ? draftOverride.cwd
+    : explorerRoot;
 }
 
 /** 判断活动会话是否可导航到当前环境中的工作目录。 */

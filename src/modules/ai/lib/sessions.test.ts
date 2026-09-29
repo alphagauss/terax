@@ -82,6 +82,24 @@ describe("session metadata merge", () => {
 });
 
 describe("session working directory", () => {
+  it("草稿目录覆盖不影响新草稿或已保存会话", () => {
+    const override = { sessionId: "draft", cwd: "/default/workspace" };
+    expect(
+      resolveSessionCwd("draft", "draft", [], "/project/other", override),
+    ).toBe(override.cwd);
+    expect(
+      resolveSessionCwd("new", "new", [], "/project/other", override),
+    ).toBe("/project/other");
+    expect(
+      resolveSessionCwd(
+        "draft",
+        "draft",
+        [meta("draft", 1)],
+        "/project/other",
+        override,
+      ),
+    ).toBe("/workspace/draft");
+  });
   it("follows Explorer for a draft and keeps persisted sessions fixed", () => {
     const persisted = meta("saved", 1);
     expect(resolveSessionCwd("draft", "draft", [], "/workspace/one")).toBe(
