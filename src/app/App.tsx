@@ -2,6 +2,7 @@
  * 本文件协调 Terax 主窗口的工作区、终端、侧栏和全局交互状态。
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
+import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
 import { PageContextMenu } from "@/components/menu/PageContextMenu";
 import { ChannelsPanel } from "@/modules/channels/components/lazy";
 import { getPrimaryNavigationActiveId } from "@/app/lib/primaryNavigation";
@@ -1946,6 +1947,7 @@ export default function App() {
     <ThemeProvider>
       <TooltipProvider>
         <PageContextMenu />
+        <EditorContextMenu />
         {directories.request && (
           <SpaceDirectoryDialog
             title={t(
