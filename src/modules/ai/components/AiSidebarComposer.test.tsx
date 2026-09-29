@@ -17,7 +17,11 @@ const composer = vi.hoisted(() => ({
   canPickFiles: true,
   pickFiles: vi.fn(),
   pendingSteering: 0,
-  workingDirectory: null,
+  workingDirectory: null as string | null,
+  workingDirectoryAction: null as "reset" | "restore" | null,
+  changeWorkingDirectory: vi.fn(),
+  canRevealWorkingDirectory: true,
+  revealWorkingDirectory: vi.fn(),
   files: [],
   pickedSnippets: [],
   voice: { supported: false },
@@ -76,6 +80,66 @@ it("运行中提交引导后在输入框上方显示待接入状态", async () =
       [...(input?.parentElement?.children ?? [])].indexOf(input as Element),
     );
   } finally {
+    act(() => root.unmount());
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+  }
+});
+
+it("草稿图标单独重置目录，点击路径仍导航，历史会话没有重置入口", async () => {
+  await preloadEn();
+  const environment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT: boolean;
+  };
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    composer.workingDirectory = "/project";
+    composer.workingDirectoryAction = "reset";
+    act(() => root.render(<AiSidebarComposer />));
+    const reset = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Restore default working directory"]',
+    );
+    expect(reset).not.toBeNull();
+    expect(reset?.textContent).not.toContain("/project");
+    act(() => reset?.click());
+    expect(composer.changeWorkingDirectory).toHaveBeenCalledTimes(1);
+    expect(composer.revealWorkingDirectory).not.toHaveBeenCalled();
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Working directory: /project"]',
+        )
+        ?.click(),
+    );
+    expect(composer.revealWorkingDirectory).toHaveBeenCalledTimes(1);
+    composer.workingDirectory = "/default/workspace";
+    composer.workingDirectoryAction = "restore";
+    act(() => root.render(<AiSidebarComposer />));
+    const restore = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Resume following the current project directory"]',
+    );
+    expect(restore).not.toBeNull();
+    expect(restore?.textContent).not.toContain("/default/workspace");
+    act(() => restore?.click());
+    expect(composer.changeWorkingDirectory).toHaveBeenCalledTimes(2);
+    expect(composer.revealWorkingDirectory).toHaveBeenCalledTimes(1);
+    composer.workingDirectoryAction = null;
+    act(() => root.render(<AiSidebarComposer />));
+    expect(container.contains(reset)).toBe(false);
+    expect(container.contains(restore)).toBe(false);
+    const path = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Working directory: /default/workspace"]',
+    );
+    expect(path?.querySelector("svg")).toBeNull();
+    const icon = path?.previousElementSibling;
+    expect(icon?.tagName).toBe("SPAN");
+    expect(icon?.querySelector("svg")).not.toBeNull();
+    act(() => path?.click());
+    expect(composer.revealWorkingDirectory).toHaveBeenCalledTimes(2);
+  } finally {
+    composer.workingDirectory = null;
+    composer.workingDirectoryAction = null;
     act(() => root.unmount());
     environment.IS_REACT_ACT_ENVIRONMENT = false;
   }

@@ -432,6 +432,7 @@ export async function startChatMessage(
       state.draftSessionId,
       state.sessions,
       state.live.draftCwd,
+      state.draftCwdOverride,
     );
     if (!cwd?.trim()) return false;
     const externalAgent =

@@ -66,6 +66,29 @@ afterEach(() => {
 });
 
 describe("AI live draft workspace", () => {
+  it("已有 Explorer 根时也发布默认目录，供草稿排除无效重置", async () => {
+    mocks.prepareDefaultWorkspaceRoot.mockResolvedValue("/default/workspace");
+    const setLive = vi.fn<(live: Live) => void>();
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () =>
+        root.render(
+          <Harness
+            explorerRoot="/default/workspace"
+            visible
+            setLive={setLive}
+          />,
+        ),
+      );
+      expect(setLive.mock.lastCall?.[0]).toMatchObject({
+        draftCwd: "/default/workspace",
+        draftProjectRoot: "/default/workspace",
+        defaultDraftCwd: "/default/workspace",
+      });
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
   it("prepares a default root only when visible and lets Explorer override it", async () => {
     mocks.prepareDefaultWorkspaceRoot.mockResolvedValue(
       "/home/alice/.terax/workspace",
@@ -113,9 +136,7 @@ describe("AI live draft workspace", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(
-        <Harness explorerRoot={null} visible setLive={setLive} />,
-      );
+      root.render(<Harness explorerRoot={null} visible setLive={setLive} />);
     });
     expect(mocks.prepareDefaultWorkspaceRoot).not.toHaveBeenCalled();
 

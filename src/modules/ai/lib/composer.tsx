@@ -112,6 +112,8 @@ type ComposerCtx = {
   readOnly: boolean;
   readOnlyEnvironmentKey: string | null;
   workingDirectory: string | null;
+  workingDirectoryAction: "reset" | "restore" | null;
+  changeWorkingDirectory: () => void;
   openFileGroups: readonly OpenFileGroup[];
   canRevealWorkingDirectory: boolean;
   revealingWorkingDirectory: boolean;
@@ -172,8 +174,27 @@ export function AiComposerProvider({
   const workingDirectory = useChatStore((s) => {
     const id = s.activeSessionId;
     if (!id) return null;
-    return resolveSessionCwd(id, s.draftSessionId, s.sessions, s.live.draftCwd);
+    return resolveSessionCwd(
+      id,
+      s.draftSessionId,
+      s.sessions,
+      s.live.draftCwd,
+      s.draftCwdOverride,
+    );
   });
+  const draftProjectRoot = useChatStore((s) =>
+    s.activeSessionId && s.activeSessionId === s.draftSessionId
+      ? s.live.draftProjectRoot
+      : null,
+  );
+  const defaultDraftCwd = useChatStore((s) => s.live.defaultDraftCwd);
+  const workingDirectoryAction = draftProjectRoot
+    ? workingDirectory === draftProjectRoot
+      ? defaultDraftCwd && workingDirectory !== defaultDraftCwd
+        ? "reset"
+        : null
+      : "restore"
+    : null;
   const canRevealWorkingDirectory = useChatStore((s) => {
     return canRevealSessionCwd(
       s.activeSessionId,
@@ -217,6 +238,16 @@ export function AiComposerProvider({
   }, [value, files, pickedSnippets]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+  /** 默认目录由桥接预先准备，草稿切换同步完成，不遗留晚到的目录请求。 */
+  const changeWorkingDirectory = () => {
+    if (!sessionId || !workingDirectoryAction || isBusy) return;
+    useChatStore.setState({
+      draftCwdOverride:
+        workingDirectoryAction === "reset" && defaultDraftCwd
+          ? { sessionId, cwd: defaultDraftCwd }
+          : null,
+    });
+  };
   const revealingWorkingDirectoryRef = useRef(false);
   const [revealingWorkingDirectory, setRevealingWorkingDirectory] =
     useState(false);
@@ -573,6 +604,8 @@ export function AiComposerProvider({
     readOnly,
     readOnlyEnvironmentKey,
     workingDirectory,
+    workingDirectoryAction: isBusy ? null : workingDirectoryAction,
+    changeWorkingDirectory,
     openFileGroups,
     canRevealWorkingDirectory,
     revealingWorkingDirectory,

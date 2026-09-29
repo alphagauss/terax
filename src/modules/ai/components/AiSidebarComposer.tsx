@@ -46,11 +46,13 @@ import {
   ArrowDown01Icon,
   ArrowUp02Icon,
   Clock01Icon,
+  Cancel01Icon,
   FavouriteIcon,
   Folder01Icon,
   HandIcon,
   Mic01Icon,
   PlugIcon,
+  Refresh01Icon,
   Search01Icon,
   SecurityWarningIcon,
   StarIcon,
@@ -73,6 +75,11 @@ export function AiSidebarComposer() {
   const drop = useComposerDrop(c);
   const guiding = c.isBusy && c.canSend;
   const stopping = c.isBusy && !guiding;
+  const workingDirectoryActionLabel = t(
+    c.workingDirectoryAction === "restore"
+      ? "composer.restoreProjectDirectory"
+      : "composer.resetWorkingDirectory",
+  );
   const submitLabel = t(
     stopping
       ? "statusBar.stop"
@@ -82,17 +89,12 @@ export function AiSidebarComposer() {
           ? "statusBar.steer"
           : "statusBar.send",
   );
-  const workingDirectoryContent = c.workingDirectory ? (
-    <>
-      <HugeiconsIcon
-        icon={Folder01Icon}
-        size={12}
-        strokeWidth={1.75}
-        className="shrink-0"
-      />
-      <span className="truncate font-mono">{c.workingDirectory}</span>
-    </>
-  ) : null;
+  const folderIcon = (
+    <HugeiconsIcon icon={Folder01Icon} size={12} strokeWidth={1.75} />
+  );
+  const workingDirectoryContent = (
+    <span className="truncate font-mono">{c.workingDirectory}</span>
+  );
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
@@ -213,23 +215,49 @@ export function AiSidebarComposer() {
         </div>
 
         {c.workingDirectory ? (
-          c.canRevealWorkingDirectory ? (
-            <button
-              type="button"
-              disabled={c.revealingWorkingDirectory}
-              onClick={c.revealWorkingDirectory}
-              className="-mt-2 flex min-w-0 items-center gap-1.5 rounded px-1 text-left text-[11px] leading-3 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
-              aria-label={t("composer.workingDirectory", {
-                path: c.workingDirectory,
-              })}
-            >
-              {workingDirectoryContent}
-            </button>
-          ) : (
-            <div className="-mt-2 flex min-w-0 items-center gap-1.5 px-1 text-[11px] leading-3 text-muted-foreground">
-              {workingDirectoryContent}
-            </div>
-          )
+          <div className="-mt-2 flex min-w-0 items-center gap-1.5 px-1 text-[11px] leading-3 text-muted-foreground">
+            {c.workingDirectoryAction ? (
+              <Hint content={workingDirectoryActionLabel}>
+                <button
+                  type="button"
+                  onClick={c.changeWorkingDirectory}
+                  aria-label={workingDirectoryActionLabel}
+                  className="group relative size-3 shrink-0 rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <span className="group-hover:invisible">{folderIcon}</span>
+                  <HugeiconsIcon
+                    icon={
+                      c.workingDirectoryAction === "restore"
+                        ? Refresh01Icon
+                        : Cancel01Icon
+                    }
+                    size={12}
+                    strokeWidth={1.75}
+                    className="invisible absolute inset-0 group-hover:visible"
+                  />
+                </button>
+              </Hint>
+            ) : (
+              <span className="size-3 shrink-0">{folderIcon}</span>
+            )}
+            {c.canRevealWorkingDirectory ? (
+              <button
+                type="button"
+                disabled={c.revealingWorkingDirectory}
+                onClick={c.revealWorkingDirectory}
+                className="flex min-w-0 items-center gap-1.5 rounded text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+                aria-label={t("composer.workingDirectory", {
+                  path: c.workingDirectory,
+                })}
+              >
+                {workingDirectoryContent}
+              </button>
+            ) : (
+              <div className="flex min-w-0 items-center gap-1.5">
+                {workingDirectoryContent}
+              </div>
+            )}
+          </div>
         ) : null}
       </div>
     </div>

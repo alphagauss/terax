@@ -381,6 +381,22 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
   });
 
+  it("草稿重置保留到项目目录变化，切回原项目也继续跟随", () => {
+    const live = { ...useChatStore.getState().live, draftCwd: "/project" };
+    useChatStore.setState({
+      live,
+      draftCwdOverride: { sessionId: "draft", cwd: "/default/workspace" },
+    });
+    useChatStore.getState().setLive({ ...live });
+    expect(useChatStore.getState().draftCwdOverride?.cwd).toBe(
+      "/default/workspace",
+    );
+    useChatStore.getState().setLive({ ...live, draftCwd: "/other" });
+    expect(useChatStore.getState().draftCwdOverride).toBeNull();
+    useChatStore.getState().setLive(live);
+    expect(useChatStore.getState().draftCwdOverride).toBeNull();
+  });
+
   it("首次帮助无需模型，创建会话但不创建模型消息", async () => {
     useChatStore.setState({
       draftSessionId: first.id,
