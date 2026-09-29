@@ -178,6 +178,12 @@ pub fn run() {
         .manage(LaunchFiles(Mutex::new(launch_files)))
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            crate::modules::editor_menu::editor_menu_connect,
+            #[cfg(windows)]
+            crate::modules::editor_menu::editor_menu_disconnect,
+            #[cfg(windows)]
+            crate::modules::editor_menu::editor_menu_finish,
             commands::net::http_prepare_file,
             commands::net::http_file_request,
             commands::net::http_release_file,
@@ -369,6 +375,8 @@ pub fn run() {
                     }
                 }
                 if matches!(event, tauri::WindowEvent::Destroyed) {
+                    #[cfg(windows)]
+                    crate::modules::editor_menu::window_destroyed(label);
                     app.state::<net::HttpState>().cancel_owner(label);
                 }
                 if label == "main" && matches!(event, tauri::WindowEvent::Destroyed) {

@@ -5,6 +5,15 @@
   "rename": "Rename",
   "delete": "Delete",
   "copy": "Copy",
+  "editorMenu": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select all",
+    "failed": "Unable to perform the edit. Please try again."
+  },
   "pageMenu": {
     "saveImage": "Save image as…",
     "imageFilter": "Images",
