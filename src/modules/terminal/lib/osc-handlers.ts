@@ -1,3 +1,4 @@
+import { writeClipboardText } from "@/lib/clipboard";
 import { IS_WINDOWS } from "@/lib/platform";
 import type { IMarker, Terminal } from "@xterm/xterm";
 
@@ -142,5 +143,5 @@ function parseOsc52Clipboard(data: string): string | null {
 }
 
 async function writeSystemClipboard(text: string): Promise<void> {
-  await navigator.clipboard.writeText(text);
+  await writeClipboardText(text);
 }

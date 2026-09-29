@@ -1,3 +1,4 @@
+import { writeClipboardText } from "@/lib/clipboard";
 import { Hint } from "@/components/controls/tooltip";
 import {
   Popover,
@@ -150,7 +151,7 @@ function InstallPill({ preset }: { preset: LspPreset }) {
 
   const copy = () => {
     if (!install) return;
-    void navigator.clipboard.writeText(install.command).then(() => {
+    void writeClipboardText(install.command).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });

@@ -3,6 +3,7 @@
  * 页面先展示目标自身的快速快照，再异步执行可取消的目录统计，不持有 Workspace 运行时。
  */
 
+import { writeClipboardText } from "@/lib/clipboard";
 import { Hint } from "@/components/controls/tooltip";
 import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
 import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
@@ -179,9 +180,9 @@ export function FilePropertiesWindowPage() {
 
   /** 将完整路径写入系统剪贴板，并短暂显示复制成功状态。 */
   const copyPath = async () => {
-    if (!target || !navigator.clipboard?.writeText) return;
+    if (!target) return;
     try {
-      await navigator.clipboard.writeText(target);
+      await writeClipboardText(target);
       window.clearTimeout(copyFeedbackTimeoutRef.current);
       setPathCopied(true);
       copyFeedbackTimeoutRef.current = window.setTimeout(

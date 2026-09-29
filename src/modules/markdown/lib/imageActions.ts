@@ -4,13 +4,15 @@
  * 复制只在用户触发时创建短生命周期画布，另存为直接复用原生侧已准备的原始资源。
  */
 
+import { USE_NATIVE_CLIPBOARD } from "@/lib/clipboard";
+import { IS_LINUX } from "@/lib/platform";
 import type { PreparedMarkdownImage } from "@/modules/markdown/lib/imageResources";
 import { invoke } from "@tauri-apps/api/core";
 
-const MAX_WEB_COPY_PIXELS = 16_777_216;
+const MAX_COPY_PIXELS = 16_777_216;
 const MAX_LINUX_COPY_PIXELS = 9_000_000;
 
-/** 将当前已解码图片写入系统剪贴板；Web Clipboard 编码 PNG，Linux 使用原生 RGBA。 */
+/** 将当前已解码图片写入系统剪贴板；Web Clipboard 编码 PNG，Windows 与 Linux 使用原生 RGBA。 */
 export async function copyMarkdownImage(
   image: HTMLImageElement,
 ): Promise<void> {
@@ -21,9 +23,8 @@ export async function copyMarkdownImage(
   ) {
     throw new Error("image is not ready");
   }
-  const linux = isLinuxWebView();
   const pixels = image.naturalWidth * image.naturalHeight;
-  const maxPixels = linux ? MAX_LINUX_COPY_PIXELS : MAX_WEB_COPY_PIXELS;
+  const maxPixels = IS_LINUX ? MAX_LINUX_COPY_PIXELS : MAX_COPY_PIXELS;
   if (!Number.isSafeInteger(pixels) || pixels > maxPixels) {
     throw new Error("image dimensions are too large to copy");
   }
@@ -35,7 +36,7 @@ export async function copyMarkdownImage(
   if (!context) throw new Error("image canvas is unavailable");
   try {
     context.drawImage(image, 0, 0);
-    if (linux) {
+    if (USE_NATIVE_CLIPBOARD) {
       const [{ Image: NativeImage }, { writeImage }] = await Promise.all([
         import("@tauri-apps/api/image"),
         import("@tauri-apps/plugin-clipboard-manager"),
@@ -94,10 +95,4 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
       else reject(new Error("image encoding failed"));
     }, "image/png");
   });
-}
-
-function isLinuxWebView(): boolean {
-  return (
-    /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)
-  );
 }

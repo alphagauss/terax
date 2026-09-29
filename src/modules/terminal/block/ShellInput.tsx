@@ -3,7 +3,10 @@
  * 输入草稿与焦点状态按终端 ID 隔离，提交仍写入对应 PTY。
  */
 
-import { readTerminalClipboard } from "@/modules/terminal/lib/terminalClipboard";
+import {
+  readTerminalClipboard,
+  writeTerminalClipboard,
+} from "@/modules/terminal/lib/terminalClipboard";
 import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import { resolveFontFamily } from "@/lib/fonts";
@@ -162,15 +165,15 @@ export default function ShellInput({
     if (focused && atPrompt) handleRef.current?.focus();
   }, [focused, atPrompt]);
 
-  // The editor holds focus at the prompt, so a Cmd+C over a grid selection lands
-  // here, not on the xterm. Copy the grid selection unless the editor has its own.
+  // 输入框持有焦点时，终端网格选区仍走原生复制；编辑器自身选区由编辑器处理。
   const onCopyCapture = (e: React.ClipboardEvent) => {
     const view = handleRef.current?.view;
     if (view && !view.state.selection.main.empty) return;
     const sel = terminalGridSelection(terminalId);
     if (!sel) return;
     e.preventDefault();
-    e.clipboardData.setData("text/plain", sel);
+    e.stopPropagation();
+    void writeTerminalClipboard(sel);
   };
 
   const dropActive = useTerminalDropStore(

@@ -3,6 +3,7 @@
  * 负责命令块操作、AI 入口及相关下拉菜单，不持有终端会话生命周期。
  */
 
+import { writeClipboardText } from "@/lib/clipboard";
 import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
@@ -87,8 +88,7 @@ function relPath(p: string): string {
 }
 
 function copy(text: string, message: string) {
-  void navigator.clipboard
-    .writeText(text)
+  void writeClipboardText(text)
     .then(() => toast.success(message))
     .catch(() => {});
 }

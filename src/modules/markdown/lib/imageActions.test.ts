@@ -14,6 +14,8 @@ import type { PreparedMarkdownImage } from "@/modules/markdown/lib/imageResource
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const native = vi.hoisted(() => ({
+  linux: false,
+  windows: false,
   closeImage: vi.fn(),
   createImage: vi.fn(),
   invoke: vi.fn(),
@@ -21,6 +23,19 @@ const native = vi.hoisted(() => ({
   writeImage: vi.fn(),
 }));
 
+vi.mock("@/lib/platform", () => ({
+  get IS_LINUX() {
+    return native.linux;
+  },
+  get IS_WINDOWS() {
+    return native.windows;
+  },
+}));
+vi.mock("@/lib/clipboard", () => ({
+  get USE_NATIVE_CLIPBOARD() {
+    return native.linux || native.windows;
+  },
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 vi.mock("@tauri-apps/api/image", () => ({
   Image: { new: native.createImage },
@@ -35,6 +50,8 @@ const resource: PreparedMarkdownImage = {
 };
 
 beforeEach(() => {
+  native.linux = false;
+  native.windows = false;
   native.closeImage.mockReset().mockResolvedValue(undefined);
   native.createImage.mockReset().mockResolvedValue({
     close: native.closeImage,
@@ -42,10 +59,6 @@ beforeEach(() => {
   native.invoke.mockReset();
   native.writeClipboard.mockReset().mockResolvedValue(undefined);
   native.writeImage.mockReset().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "userAgent", {
-    configurable: true,
-    value: "Terax test",
-  });
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { write: native.writeClipboard },
@@ -86,47 +99,53 @@ describe("copyMarkdownImage", () => {
     createElement.mockRestore();
   });
 
-  it("writes an explicit RGBA image resource on Linux", async () => {
-    Object.defineProperty(navigator, "userAgent", {
-      configurable: true,
-      value: "Terax Linux",
-    });
-    const rgba = new Uint8ClampedArray([255, 0, 0, 255]);
-    const drawImage = vi.fn();
-    const toBlob = vi.fn();
-    const canvas = {
-      width: 0,
-      height: 0,
-      getContext: () => ({
-        drawImage,
-        getImageData: () => ({ data: rgba }),
-      }),
-      toBlob,
-    } as unknown as HTMLCanvasElement;
-    const createElement = vi
-      .spyOn(document, "createElement")
-      .mockReturnValueOnce(canvas);
-    const image = {
-      complete: true,
-      naturalWidth: 1,
-      naturalHeight: 1,
-    } as HTMLImageElement;
+  it.each(["linux", "windows"] as const)(
+    "writes RGBA and releases resources on %s",
+    async (platform) => {
+      native[platform] = true;
+      const rgba = new Uint8ClampedArray([255, 0, 0, 255]);
+      const drawImage = vi.fn();
+      const toBlob = vi.fn();
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage,
+          getImageData: () => ({ data: rgba }),
+        }),
+        toBlob,
+      } as unknown as HTMLCanvasElement;
+      const createElement = vi
+        .spyOn(document, "createElement")
+        .mockReturnValueOnce(canvas);
+      const image = {
+        complete: true,
+        naturalWidth: 1,
+        naturalHeight: 1,
+      } as HTMLImageElement;
 
-    await copyMarkdownImage(image);
+      await copyMarkdownImage(image);
 
-    expect(native.createImage).toHaveBeenCalledWith(
-      new Uint8Array([255, 0, 0, 255]),
-      1,
-      1,
-    );
-    expect(native.writeImage).toHaveBeenCalledWith(
-      expect.objectContaining({ close: native.closeImage }),
-    );
-    expect(native.closeImage).toHaveBeenCalledOnce();
-    expect(native.writeClipboard).not.toHaveBeenCalled();
-    expect(toBlob).not.toHaveBeenCalled();
-    createElement.mockRestore();
-  });
+      expect(native.createImage).toHaveBeenCalledWith(
+        new Uint8Array([255, 0, 0, 255]),
+        1,
+        1,
+      );
+      expect(native.writeImage).toHaveBeenCalledWith(
+        expect.objectContaining({ close: native.closeImage }),
+      );
+      expect(native.closeImage).toHaveBeenCalledOnce();
+      expect(native.writeClipboard).not.toHaveBeenCalled();
+      expect(toBlob).not.toHaveBeenCalled();
+      native.writeImage.mockRejectedValueOnce(new Error("clipboard busy"));
+      createElement.mockReturnValueOnce(canvas);
+      await expect(copyMarkdownImage(image)).rejects.toThrow("clipboard busy");
+      expect(native.closeImage).toHaveBeenCalledTimes(2);
+      expect(native.writeClipboard).not.toHaveBeenCalled();
+      expect(canvas.width).toBe(0);
+      createElement.mockRestore();
+    },
+  );
 });
 
 describe("saveMarkdownImage", () => {

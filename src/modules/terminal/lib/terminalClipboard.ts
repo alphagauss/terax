@@ -1,4 +1,5 @@
 /** 终端粘贴优先处理文件路径；远端拒绝宿主文件，内存图片不会生成临时文件。 */
+import { writeClipboardText } from "@/lib/clipboard";
 import { readClipboardFiles } from "@/modules/file-actions/clipboard";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { formatDroppedPaths } from "@/modules/terminal/lib/quoteShellPath";
@@ -48,16 +49,7 @@ export async function readTerminalClipboard(): Promise<string> {
 }
 
 export async function writeTerminalClipboard(text: string): Promise<void> {
-  if (IS_LINUX) {
-    try {
-      const { writeText } = await import(
-        "@tauri-apps/plugin-clipboard-manager"
-      );
-      await writeText(text);
-      return;
-    } catch {}
-  }
   try {
-    await webClipboard()?.writeText(text);
+    await writeClipboardText(text);
   } catch {}
 }

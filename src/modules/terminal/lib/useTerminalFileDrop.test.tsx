@@ -34,7 +34,7 @@ vi.mock("@/modules/workspace", () => ({
 vi.mock("@/modules/terminal/lib/rendererPool", () => ({
   pasteIntoTerminal: mocks.paste,
 }));
-vi.mock("@/lib/platform", () => ({ IS_WINDOWS: false }));
+vi.mock("@/lib/platform", () => ({ IS_WINDOWS: false, IS_LINUX: false }));
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 vi.mock("sonner", () => ({ toast: { info: mocks.info } }));
 

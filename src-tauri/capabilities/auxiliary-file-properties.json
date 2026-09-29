@@ -5,5 +5,5 @@
   "windows": [
     "auxiliary-file-properties"
   ],
-  "permissions": []
+  "permissions": ["clipboard-manager:allow-write-text"]
 }

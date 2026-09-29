@@ -1,4 +1,5 @@
 /** 聊天引用与资源管理器共用的文件操作，始终使用当前进程的固定环境。 */
+import { writeClipboardText } from "@/lib/clipboard";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace";
@@ -44,8 +45,7 @@ export async function resolveFileReference(
 
 export const revealFile = (path: string) => revealItemInDir(path);
 export const openSystemFile = (path: string) => openPath(path);
-export const copyFilePath = (path: string) =>
-  navigator.clipboard.writeText(path);
+export const copyFilePath = (path: string) => writeClipboardText(path);
 
 export async function copyFileContent(path: string): Promise<void> {
   const result = await invoke<
@@ -53,5 +53,5 @@ export async function copyFileContent(path: string): Promise<void> {
   >("fs_read_file", { path, workspace: currentWorkspaceEnv(), force: false });
   if (result.kind !== "text")
     throw new Error(result.kind === "binary" ? "binary" : "toolarge");
-  await navigator.clipboard.writeText(result.content);
+  await writeClipboardText(result.content);
 }

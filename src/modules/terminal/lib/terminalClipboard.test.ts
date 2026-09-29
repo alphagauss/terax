@@ -20,6 +20,15 @@ const native = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => native);
 
+vi.mock("@/lib/platform", () => ({
+  get IS_LINUX() {
+    return /Linux/.test(navigator.userAgent);
+  },
+  get IS_WINDOWS() {
+    return /Windows/.test(navigator.userAgent);
+  },
+}));
+
 const web = {
   readText: vi.fn<() => Promise<string>>(),
   writeText: vi.fn<(t: string) => Promise<void>>(),
@@ -78,7 +87,7 @@ describe("terminalClipboard", () => {
     await expect(readTerminalClipboard()).resolves.toBe("web");
   });
 
-  it("never touches the native clipboard off Linux", async () => {
+  it("keeps the web clipboard on macOS", async () => {
     platform(MAC);
     web.readText.mockResolvedValue("web");
     const { readTerminalClipboard, writeTerminalClipboard } = await load();
@@ -123,8 +132,8 @@ describe("terminalClipboard", () => {
     );
   });
 
-  it("writes the native clipboard first on Linux", async () => {
-    platform(LINUX);
+  it.each([LINUX, "Windows"])("writes natively on %s", async (userAgent) => {
+    platform(userAgent);
     native.writeText.mockResolvedValue();
     const { writeTerminalClipboard } = await load();
     await writeTerminalClipboard("copied");
