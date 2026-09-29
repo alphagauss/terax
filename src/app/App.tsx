@@ -1967,6 +1967,11 @@ export default function App() {
               <ResizablePanel
                 id="primary-sidebar"
                 panelRef={sidebar.panelRefs.primary}
+                disabled={
+                  zenMode ||
+                  secondaryPresentationActive ||
+                  sidebar.runtime.primary.collapsed
+                }
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
                   initialSecondaryMaximized ||
@@ -2093,6 +2098,11 @@ export default function App() {
               <ResizablePanel
                 id="secondary-sidebar"
                 panelRef={sidebar.panelRefs.secondary}
+                disabled={
+                  zenMode ||
+                  secondaryPresentationActive ||
+                  sidebar.runtime.secondary.collapsed
+                }
                 groupResizeBehavior={
                   secondaryPresentationActive
                     ? "preserve-relative-size"
