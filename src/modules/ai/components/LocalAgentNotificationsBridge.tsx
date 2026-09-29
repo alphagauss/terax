@@ -71,20 +71,20 @@ export function LocalAgentNotificationsBridge({
   useLayoutEffect(() => {
     const attention = useSessionAttentionStore.getState();
     for (const sessionId of Object.keys(runLockSessionIds)) {
-      if (visible && activeSessionId === sessionId) {
+      if (focused && visible && activeSessionId === sessionId) {
         attention.markViewed(sessionId);
       } else {
         attention.markBackgroundRunning(sessionId);
       }
     }
-    if (visible && activeSessionId) {
+    if (focused && visible && activeSessionId) {
       attention.markViewed(activeSessionId);
       useAgentStore.getState().dismissNotificationsForTarget({
         source: "local",
         sessionId: activeSessionId,
       });
     }
-  }, [activeSessionId, runLockSessionIds, visible]);
+  }, [activeSessionId, focused, runLockSessionIds, visible]);
 
   useEffect(() => {
     const interactiveRuns = Object.fromEntries(
