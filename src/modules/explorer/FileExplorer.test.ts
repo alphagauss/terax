@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   rootStatus: "loaded",
   remoteReady: true,
   runtimePhase: "idle",
+  names: ["file.txt"],
 }));
 
 afterEach(() => {
@@ -29,6 +30,7 @@ afterEach(() => {
   mocks.rootStatus = "loaded";
   mocks.remoteReady = true;
   mocks.runtimePhase = "idle";
+  mocks.names = ["file.txt"];
 });
 
 vi.mock("@/components/controls/button", () => ({
@@ -126,14 +128,6 @@ vi.mock("@hugeicons/core-free-icons", () => ({
   Search01Icon: {},
 }));
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count }: { count: number }) => ({
-    getTotalSize: () => count * 24,
-    getVirtualItems: () =>
-      count > 0 ? [{ index: 0, key: "first-row", size: 24, start: 0 }] : [],
-    scrollToIndex: vi.fn(),
-  }),
-}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -143,8 +137,15 @@ vi.mock("./ExplorerSearch", () => ({
 }));
 vi.mock("./InlineInput", () => ({ InlineInput: () => null }));
 vi.mock("./TreeRow", () => ({
-  EntryRow: ({ path, name }: { path: string; name: string }) =>
-    createElement("div", { "data-fs-path": path }, name),
+  EntryRow: ({
+    path,
+    name,
+    domId,
+  }: {
+    path: string;
+    name: string;
+    domId: string;
+  }) => createElement("div", { "data-fs-path": path, id: domId }, name),
   PendingRow: () => null,
   StatusRow: () => null,
 }));
@@ -196,7 +197,11 @@ vi.mock("./lib/useFileTree", () => ({
         status: mocks.rootStatus,
         entries: mocks.empty
           ? []
-          : [{ name: "file.txt", kind: "file", gitignored: false }],
+          : mocks.names.map((name) => ({
+              name,
+              kind: "file",
+              gitignored: false,
+            })),
       },
     },
     pendingCreate: null,
@@ -224,6 +229,70 @@ const viewRegistrySource = readFileSync(
   path.join(here, "../workbench/viewRegistry.tsx"),
   "utf8",
 );
+
+it("keeps every file row mounted across sidebar switches and locates the active file", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  mocks.names = Array.from({ length: 80 }, (_, index) => `file-${index}.txt`);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const props = { rootPath: "/home/remote", onOpenFile: vi.fn() };
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  try {
+    await act(async () => root.render(createElement(FileExplorer, props)));
+    const rows = [...container.querySelectorAll<HTMLElement>("[data-fs-path]")];
+    expect(rows).toHaveLength(80);
+    const tree = container.querySelector<HTMLElement>('[role="tree"]');
+    if (!tree) throw new Error("Missing file tree");
+    Object.defineProperty(tree, "clientHeight", { value: 240 });
+    vi.spyOn(tree, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 200, 240),
+    );
+    vi.spyOn(rows[79], "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 1896, 200, 24),
+    );
+    for (const active of [false, true]) {
+      await act(async () =>
+        root.render(createElement(FileExplorer, { ...props, active })),
+      );
+      const current = container.querySelectorAll("[data-fs-path]");
+      expect(current).toHaveLength(rows.length);
+      rows.forEach((row, index) => {
+        expect(current[index]).toBe(row);
+      });
+    }
+    await act(async () =>
+      root.render(
+        createElement(FileExplorer, {
+          ...props,
+          activeFilePath: "/home/remote/file-79.txt",
+        }),
+      ),
+    );
+    await act(async () => {
+      for (const callback of frames.splice(0)) callback(0);
+    });
+    expect(tree.scrollTop).toBe(1680);
+    expect(tree.getAttribute("aria-activedescendant")).toBe(rows[79].id);
+    await act(async () => {
+      tree.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
+      );
+    });
+    expect(tree.getAttribute("aria-activedescendant")).toBe(rows[78].id);
+    await act(async () => {
+      tree.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(props.onOpenFile).toHaveBeenCalledWith("/home/remote/file-78.txt");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
 
 function expectNoHooksAfter(sourceText: string, marker: string) {
   const earlyReturn = sourceText.indexOf(marker);

@@ -18,7 +18,7 @@ vi.mock("@/modules/explorer/lib/iconResolver", () => ({
   fileIconUrl: () => null,
 }));
 
-it("keeps the Changes scroll node and commit input mounted while hidden", async () => {
+it("keeps all Changes rows and the commit input mounted across switches and supports keyboard navigation", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const savedMessages = commitMessageStore.getState();
   const container = document.createElement("div");
@@ -40,21 +40,19 @@ it("keeps the Changes scroll node and commit input mounted while hidden", async 
       behind: 0,
       isDetached: false,
       truncated: false,
-      changedFiles: [
-        {
-          path: "a.ts",
-          originalPath: null,
-          indexStatus: "M",
-          worktreeStatus: " ",
-          staged: true,
-          unstaged: false,
-          untracked: false,
-          statusLabel: "Modified",
-        },
-      ],
+      changedFiles: Array.from({ length: 40 }, (_, index) => ({
+        path: index === 0 ? "a.ts" : `file-${index}.ts`,
+        originalPath: null,
+        indexStatus: "M",
+        worktreeStatus: " ",
+        staged: true,
+        unstaged: false,
+        untracked: false,
+        statusLabel: "Modified",
+      })),
     },
     diffStats: null,
-    changedCount: 1,
+    changedCount: 40,
     upstream: null,
     ahead: 0,
     behind: 0,
@@ -92,6 +90,8 @@ it("keeps the Changes scroll node and commit input mounted while hidden", async 
     const input = container.querySelector("textarea");
     expect(scroll).not.toBeNull();
     expect(input).not.toBeNull();
+    const rows = [...container.querySelectorAll('[role="option"]')];
+    expect(rows).toHaveLength(40);
     input?.setSelectionRange(2, 7);
 
     // 检查隐藏期间的真实节点，避免仅在恢复后重建相同内容也通过测试。
@@ -103,7 +103,28 @@ it("keeps the Changes scroll node and commit input mounted while hidden", async 
       expect(input?.value).toBe("unfinished commit");
       expect(input?.selectionStart).toBe(2);
       expect(input?.selectionEnd).toBe(7);
+      const current = container.querySelectorAll('[role="option"]');
+      expect(current).toHaveLength(rows.length);
+      rows.forEach((row, index) => {
+        expect(current[index]).toBe(row);
+      });
     }
+    const list = container.querySelector<HTMLElement>('[role="listbox"]');
+    if (!list) throw new Error("Missing Changes list");
+    await act(async () => {
+      list.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    expect(list.getAttribute("aria-activedescendant")).toBe(rows[0].id);
+    await act(async () => {
+      list.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(onOpenDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "a.ts" }),
+    );
   } finally {
     await act(async () => root.unmount());
     container.remove();

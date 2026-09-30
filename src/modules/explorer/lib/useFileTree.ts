@@ -370,33 +370,23 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [remoteReady, removeWatch, treeScope, workspace],
   );
 
-  // Root change → restore the cached expansion for this root, re-scope watches,
-  // and persist the outgoing root's expansion on the way out.
+  // 只有目录或连接域变化才恢复缓存；普通侧栏切换保留树数据及编辑状态。
   useEffect(() => {
     requestGenerationRef.current += 1;
     inFlightRef.current.clear();
     pendingRefreshRef.current.clear();
     nodesScopeRef.current = treeScope;
-    if (!rootPath) {
-      setNodes({});
-      setExpanded(new Set());
-      setPendingCreate(null);
-      setRenaming(null);
-      deletingPathsRef.current = new Set();
-      deletionTokensRef.current.clear();
-      setDeletingPaths(new Set());
-      return;
-    }
     setPendingCreate(null);
     setRenaming(null);
     deletingPathsRef.current = new Set();
     deletionTokensRef.current.clear();
     setDeletingPaths(new Set());
 
-    const restored = recallExpansion(expansionScope);
-    setExpanded(new Set(restored));
+    const restored = new Set(rootPath ? recallExpansion(expansionScope) : []);
+    expandedRef.current = restored;
+    setExpanded(restored);
     const cachedNodes: TreeState = {};
-    for (const path of new Set([rootPath, ...restored])) {
+    for (const path of rootPath ? new Set([rootPath, ...restored]) : []) {
       const cached = readCachedDirectory({
         workspace,
         path,
@@ -408,28 +398,32 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       }
     }
     setNodes(cachedNodes);
-    // Sync the ref synchronously: nodesRef only updates after the next render,
-    // so without this a fast (cached) fetchChildren below would read the stale
-    // pre-clear "loaded" node, hit the sameDirListing early-return, and skip
-    // re-populating, leaving a valid root with an empty tree when rootPath
-    // changes rapidly (e.g. switching folders in quick succession).
+    // 后续可见性 effect 必须读取新域的数据，避免快速响应与旧缓存比较后跳过更新。
     nodesRef.current = cachedNodes;
-
-    if (!remoteReady || !active) {
-      return () => {
-        rememberExpansion(expansionScope, expandedRef.current);
-      };
-    }
-
-    void fetchChildren(rootPath);
-    for (const d of restored) void fetchChildren(d);
-    if (workspace.kind !== "ssh") {
-      const toWatch = [rootPath, ...restored];
-      for (const path of toWatch) addWatch(path);
-    }
-
     return () => {
       rememberExpansion(expansionScope, expandedRef.current);
+      requestGenerationRef.current += 1;
+      inFlightRef.current.clear();
+      pendingRefreshRef.current.clear();
+    };
+  }, [expansionScope, rootPath, treeScope, workspace]);
+
+  // 隐藏仅释放监听和过期读取；恢复时在现有行上刷新，不用缓存替换活跃树。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 显示偏好通过 ref 供异步读取使用，变化时仍须主动刷新目录。
+  useEffect(() => {
+    if (!rootPath || !remoteReady || !active) return;
+    const visiblePaths = remoteDirectoryPollPaths(
+      rootPath,
+      expandedRef.current,
+    );
+    for (const path of visiblePaths) addWatch(path);
+    const loadedPaths = Object.keys(nodesRef.current).filter(
+      (path) => nodesRef.current[path]?.status === "loaded",
+    );
+    for (const path of new Set([...visiblePaths, ...loadedPaths])) {
+      void fetchChildren(path);
+    }
+    return () => {
       requestGenerationRef.current += 1;
       inFlightRef.current.clear();
       pendingRefreshRef.current.clear();
@@ -437,14 +431,13 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       watchedRef.current.clear();
     };
   }, [
-    expansionScope,
     fetchChildren,
     remoteReady,
     active,
     rootPath,
-    treeScope,
     addWatch,
-    workspace,
+    showHidden,
+    gitDecorations,
   ]);
 
   useEffect(() => {
@@ -477,16 +470,6 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       }
     });
   }, [active, fetchChildren, rootPath, workspace.kind]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is intentionally omitted so ordinary tree edits do not refetch every expanded directory.
-  useEffect(() => {
-    if (!rootPath || !active) return;
-    const loadedPaths = Object.entries(nodes)
-      .filter(([, state]) => state.status === "loaded")
-      .map(([path]) => path);
-    for (const path of loadedPaths) void fetchChildren(path);
-    // Re-list loaded directories when visibility or git-decoration prefs change.
-  }, [showHidden, gitDecorations, rootPath, fetchChildren, active]);
 
   // SFTP 没有通用的服务端推送监听。仅在 Explorer 可见时轮询已展示目录，并从上一轮
   // 完成后再计算等待时间，避免高延迟连接形成持续堆积的请求。

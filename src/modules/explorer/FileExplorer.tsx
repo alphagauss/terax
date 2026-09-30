@@ -1,6 +1,7 @@
 /**
  * 本文件实现工作区文件资源管理器。
  * 负责文件树、搜索、常规文件操作和非本地 Workspace 的后台传输入口。
+ * 文件树按普通文档流保留全部展示行，避免侧栏恢复依赖虚拟滚动范围。
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
@@ -30,6 +31,7 @@ import {
 } from "@/components/controls/alert-dialog";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
+import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import { openFileProperties } from "@/modules/file-properties/openFileProperties";
@@ -61,7 +63,6 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   forwardRef,
   memo,
@@ -247,9 +248,6 @@ function RemoteConnectionNotice({
   );
 }
 
-const ROW_HEIGHT = 24;
-const OVERSCAN = 8;
-
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path;
@@ -323,7 +321,7 @@ function buildRows(
 
   const walk = (parent: string, depth: number, parentIgnored: boolean) => {
     const node = tree.nodes[parent];
-    if (!node || node.status !== "loaded") return;
+    if (node?.status !== "loaded") return;
     const pending = tree.pendingCreate;
     const pendingIndex =
       pending?.parentPath === parent
@@ -603,24 +601,15 @@ export const FileExplorer = memo(
       }
     }, [entryIndexByPath, selectedPath]);
 
-    const virtualizer = useVirtualizer({
-      count: rows.length,
-      getScrollElement: () => scrollRef.current,
-      estimateSize: () => ROW_HEIGHT,
-      overscan: OVERSCAN,
-      getItemKey: (index) => rows[index]?.key ?? index,
-    });
-
-    const scrollEntryIntoView = useCallback(
-      (path: string) => {
-        const index = entryIndexByPath.get(path);
-        if (index === undefined) return;
-        virtualizer.scrollToIndex(index, { align: "auto" });
-      },
-      [entryIndexByPath, virtualizer],
-    );
+    const scrollEntryIntoView = useCallback((path: string) => {
+      scrollListRowIntoView(
+        scrollRef.current,
+        `file-tree-item-${encodeURIComponent(path)}`,
+      );
+    }, []);
 
     const lastSyncedActivePathRef = useRef<string | null>(null);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 根目录变化后，同一路径也须重新展开与定位。
     useEffect(() => {
       lastSyncedActivePathRef.current = null;
     }, [rootPath]);
@@ -953,6 +942,7 @@ export const FileExplorer = memo(
         case "rename": {
           return (
             <EntryRow
+              key={row.key}
               domId={`file-tree-item-${encodeURIComponent(row.path)}`}
               path={row.path}
               name={row.name}
@@ -977,6 +967,7 @@ export const FileExplorer = memo(
         case "pending":
           return (
             <PendingRow
+              key={row.key}
               depth={row.depth}
               kind={row.pendingKind}
               onCommit={tree.commitCreate}
@@ -986,6 +977,7 @@ export const FileExplorer = memo(
         case "status":
           return (
             <StatusRow
+              key={row.key}
               depth={row.depth}
               message={row.message}
               tone={row.tone}
@@ -1236,36 +1228,7 @@ export const FileExplorer = memo(
                       {root.message}
                     </div>
                   )}
-                  {root?.status === "loaded" ? (
-                    <div
-                      style={{
-                        height: virtualizer.getTotalSize(),
-                        position: "relative",
-                        width: "100%",
-                      }}
-                    >
-                      {virtualizer.getVirtualItems().map((virtualRow) => {
-                        const row = rows[virtualRow.index];
-                        if (!row) return null;
-                        return (
-                          <div
-                            key={virtualRow.key}
-                            data-virtual-row-index={virtualRow.index}
-                            style={{
-                              position: "absolute",
-                              // 避免 WebView 恢复显示时漏绘 transform 定位的虚拟行。
-                              top: virtualRow.start,
-                              left: 0,
-                              width: "100%",
-                              height: virtualRow.size,
-                            }}
-                          >
-                            {renderRow(row)}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                  {root?.status === "loaded" ? rows.map(renderRow) : null}
                 </div>
               ) : null}
             </div>

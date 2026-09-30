@@ -1,7 +1,7 @@
 /**
  * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
  * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
- * 普通侧栏切换保留 Changes 展示树；open 控制面板手动刷新和 Graph 活动、展示，
+ * Changes 使用普通文档流，侧栏切换保留展示树；open 控制面板手动刷新和 Graph 活动、展示，
  * 不停止共享仓库控制器的数据更新。
  */
 
@@ -42,6 +42,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
 import { IS_MAC } from "@/lib/platform";
+import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
 import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
 import {
@@ -77,7 +78,6 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type KeyboardEvent,
   memo,
@@ -114,12 +114,6 @@ type Props = {
   onOpenFile?: (absolutePath: string) => void;
   onNavigateToPath?: (path: string) => void;
 };
-
-const ROW_HEIGHTS = {
-  banner: 32,
-  header: 24,
-  entry: 24,
-} as const;
 
 type RowDescriptor =
   | { kind: "banner-diverged"; key: string }
@@ -583,30 +577,6 @@ function SourceControlViewContainerComponent({
     return out;
   }, [rows]);
 
-  const estimateSize = useCallback(
-    (index: number) => {
-      const row = rows[index];
-      if (!row) return ROW_HEIGHTS.entry;
-      switch (row.kind) {
-        case "banner-diverged":
-          return ROW_HEIGHTS.banner;
-        case "list-header":
-          return ROW_HEIGHTS.header;
-        case "entry":
-          return ROW_HEIGHTS.entry;
-      }
-    },
-    [rows],
-  );
-
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize,
-    overscan: 12,
-    getItemKey: (index) => rows[index]?.key ?? index,
-  });
-
   const moveFocus = useCallback(
     (direction: 1 | -1) => {
       if (focusableIndices.length === 0) return;
@@ -622,9 +592,9 @@ function SourceControlViewContainerComponent({
       const target = rows[targetRowIndex];
       if (!target) return;
       setFocusedRowKey(target.key);
-      virtualizer.scrollToIndex(targetRowIndex, { align: "auto" });
+      scrollListRowIntoView(scrollRef.current, `scm-row-${target.key}`);
     },
-    [focusableIndices, focusedRowKey, rowKeyToIndex, rows, virtualizer],
+    [focusableIndices, focusedRowKey, rowKeyToIndex, rows],
   );
 
   const focusedEntry = useCallback((): SourceControlFileEntry | null => {
@@ -990,51 +960,22 @@ function SourceControlViewContainerComponent({
                               ref={scrollRef}
                               className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
                             >
-                              <div
-                                style={{
-                                  height: virtualizer.getTotalSize(),
-                                  position: "relative",
-                                  width: "100%",
-                                }}
-                              >
-                                {virtualizer
-                                  .getVirtualItems()
-                                  .map((virtualRow) => {
-                                    const row = rows[virtualRow.index];
-                                    if (!row) return null;
-                                    return (
-                                      <div
-                                        key={virtualRow.key}
-                                        style={{
-                                          position: "absolute",
-                                          // 避免 WebView 恢复显示时漏绘 transform 定位的虚拟行。
-                                          top: virtualRow.start,
-                                          left: 0,
-                                          width: "100%",
-                                          height: virtualRow.size,
-                                        }}
-                                      >
-                                        <RowRenderer
-                                          row={row}
-                                          focused={focusedRowKey === row.key}
-                                          actionBusy={scm.actionBusy}
-                                          headerCheckState={
-                                            scm.headerCheckState
-                                          }
-                                          repoRoot={scm.repo?.repoRoot ?? null}
-                                          onFocusRow={setFocusedRowKey}
-                                          onToggleAll={scm.toggleAll}
-                                          onOpenFileDiff={scm.openFileDiff}
-                                          onToggleStageFile={
-                                            scm.toggleStageFile
-                                          }
-                                          onDiscardFile={scm.requestDiscardFile}
-                                          onOpenFile={onOpenFile}
-                                        />
-                                      </div>
-                                    );
-                                  })}
-                              </div>
+                              {rows.map((row) => (
+                                <RowRenderer
+                                  key={row.key}
+                                  row={row}
+                                  focused={focusedRowKey === row.key}
+                                  actionBusy={scm.actionBusy}
+                                  headerCheckState={scm.headerCheckState}
+                                  repoRoot={scm.repo?.repoRoot ?? null}
+                                  onFocusRow={setFocusedRowKey}
+                                  onToggleAll={scm.toggleAll}
+                                  onOpenFileDiff={scm.openFileDiff}
+                                  onToggleStageFile={scm.toggleStageFile}
+                                  onDiscardFile={scm.requestDiscardFile}
+                                  onOpenFile={onOpenFile}
+                                />
+                              ))}
                             </div>
                           </div>
                         )}
