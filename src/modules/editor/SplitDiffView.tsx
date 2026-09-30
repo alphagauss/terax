@@ -1,9 +1,10 @@
 /**
  * 本文件实现只读的左右分栏 Git diff 视图。
  *
- * 负责同步两侧编辑器、独立横向滚动条和基于外层 MergeView 滚动区域的变更概览。
+ * 负责同步两侧编辑器、临时分栏比例、独立横向滚动条和基于外层 MergeView 滚动区域的变更概览。
  */
 
+import { ResizeHandle } from "@/components/layout/SplitLayout";
 import type { FindHandle } from "@/modules/find";
 import { defaultKeymap } from "@codemirror/commands";
 import { foldGutter } from "@codemirror/language";
@@ -16,7 +17,16 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  type CSSProperties,
+  forwardRef,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { SPLIT_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
@@ -97,6 +107,10 @@ function bindHorizontalScrollbar(
  */
 export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
   function SplitDiffView({ original, modified, path, wordWrap }, ref) {
+    const { t } = useTranslation("editor");
+    const panelId = useId();
+    const [leftRatio, setLeftRatio] = useState(0.5);
+    const [editorWidth, setEditorWidth] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
     const leftScrollbarRef = useRef<HTMLDivElement>(null);
     const rightScrollbarRef = useRef<HTMLDivElement>(null);
@@ -170,6 +184,16 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
       });
 
       viewRef.current = view;
+      // 使用编辑器内容区的宽度，让分隔条和底部滚动条避开外层纵向滚动条。
+      const editors = view.dom.querySelector<HTMLDivElement>(
+        ".cm-mergeViewEditors",
+      );
+      const measureWidth = () => {
+        if (editors) setEditorWidth(editors.clientWidth);
+      };
+      const widthObserver = new ResizeObserver(measureWidth);
+      if (editors) widthObserver.observe(editors);
+      measureWidth();
       const rememberLeftFocus = () => {
         lastFocusedViewRef.current = view.a;
       };
@@ -212,6 +236,7 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
       return () => {
         cancelled = true;
         cancelAnimationFrame(railFrame);
+        widthObserver.disconnect();
         leftBinding.destroy();
         rightBinding.destroy();
         syncScrollbarsRef.current = () => undefined;
@@ -266,13 +291,40 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
     }));
 
     return (
-      <div className="split-diff-view relative flex h-full min-h-0 flex-col">
+      <div
+        className="split-diff-view relative flex h-full min-h-0 min-w-0 flex-col"
+        style={
+          {
+            "--split-diff-left-width": `${leftRatio * 100}%`,
+          } as CSSProperties
+        }
+      >
         <div
+          id={panelId}
           ref={containerRef}
           className="relative min-h-0 flex-1 [&>.cm-mergeView]:h-full [&>.cm-mergeView]:overflow-x-hidden [&>.cm-mergeView]:overflow-y-auto"
         />
+        {editorWidth > 0 && (
+          <div
+            className="absolute inset-y-0 flex w-px"
+            style={{ left: editorWidth * leftRatio }}
+          >
+            <ResizeHandle
+              label={t("diff.resizeColumns")}
+              panelId={panelId}
+              size={editorWidth * leftRatio}
+              minSize={editorWidth * 0.2}
+              maxSize={editorWidth * 0.8}
+              defaultSize={editorWidth * 0.5}
+              onCommit={(size) => setLeftRatio(size / editorWidth)}
+            />
+          </div>
+        )}
         <div ref={railRef} className="cm-changeOverview" aria-hidden="true" />
-        <div className="grid h-[var(--scrollbar-size)] shrink-0 grid-cols-2">
+        <div
+          className="split-diff-scrollbars grid h-[var(--scrollbar-size)] shrink-0"
+          style={{ width: editorWidth || undefined }}
+        >
           <div
             ref={leftScrollbarRef}
             className="split-diff-horizontal-scrollbar app-scrollbar overflow-x-auto overflow-y-hidden"

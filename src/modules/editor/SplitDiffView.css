@@ -1,3 +1,15 @@
+.split-diff-view .cm-mergeViewEditor:first-child {
+  flex: 0 0 var(--split-diff-left-width);
+}
+
+.split-diff-view .cm-mergeViewEditor {
+  min-width: 0;
+}
+
+.split-diff-scrollbars {
+  grid-template-columns: var(--split-diff-left-width) minmax(0, 1fr);
+}
+
 .split-diff-view:hover .split-diff-horizontal-scrollbar {
   --scrollbar-current-thumb: var(--scrollbar-thumb);
   transition-duration: var(--scrollbar-show-duration);

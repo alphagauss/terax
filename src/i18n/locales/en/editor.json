@@ -16,6 +16,7 @@
     "overwrite": "Overwrite"
   },
   "diff": {
+    "resizeColumns": "Resize diff columns",
     "loading": "Loading diff…",
     "unavailable": "Diff preview is not available for this file."
   },
