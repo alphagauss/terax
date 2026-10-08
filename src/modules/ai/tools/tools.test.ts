@@ -7,6 +7,7 @@ import { asSchema, type FlexibleSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import type { ToolContext } from "./context";
 import { buildTools } from "./tools";
+import { buildShellTools } from "./shell";
 
 const context: ToolContext = {
   getCwd: () => "/workspace",
@@ -72,6 +73,40 @@ describe("AI tool provider schemas", () => {
       for (const propertySchema of Object.values(jsonSchema.properties ?? {})) {
         expect(hasDeclaredJsonType(propertySchema)).toBe(true);
       }
+    },
+  );
+
+  it.each([
+    [
+      { kind: "bash" as const, executable: "/bin/bash", version: "5.2" },
+      ["default", "bash"],
+      false,
+    ],
+    [
+      { kind: "pwsh" as const, executable: "C:/pwsh.exe", version: "7.6" },
+      ["default", "pwsh"],
+      true,
+    ],
+    [
+      {
+        kind: "cmd" as const,
+        executable: "C:/Windows/System32/cmd.exe",
+        version: null,
+      },
+      ["default", "cmd"],
+      false,
+    ],
+  ])(
+    "exposes only detected shell selectors for %j",
+    async (shell, selectors, powerShell) => {
+      const tools = buildShellTools({ ...context, shells: [shell] });
+      const schema = await asSchema(
+        tools.shell_exec.inputSchema as FlexibleSchema<unknown>,
+      ).jsonSchema;
+      expect(schema.properties?.shell).toMatchObject({ enum: selectors });
+      const text = JSON.stringify(schema);
+      expect(text).not.toMatch(/WSL|SSH|Windows|Linux|macOS|remote|Local/);
+      expect(text.includes("For PowerShell scripts")).toBe(powerShell);
     },
   );
 

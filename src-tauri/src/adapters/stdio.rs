@@ -87,6 +87,7 @@ impl Host {
             "host_bootstrap" => Ok(
                 json!({"cwd": self.cwd, "platform": std::env::consts::OS, "environmentKey": "local", "protocol": 1}),
             ),
+            "shell_environment" => value(shell::shell_environment(env).await),
             "workspace_current_dir" => Ok(json!(self.cwd)),
             "workspace_authorize" => {
                 value(workspace::workspace_authorize(arg(a, "path")?, env, &self.registry).await)

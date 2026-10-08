@@ -3,6 +3,7 @@
  * 模型使用临时本地服务，会话存储使用内存测试替身，不读取凭据或改动用户会话。
  */
 
+import type { ShellIdentity } from "@/modules/ai/lib/native";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
@@ -106,6 +107,7 @@ const server = createServer(async (request, response) => {
 
 try {
   await native.host.invoke("host_bootstrap");
+  const shells = await native.host.invoke<ShellIdentity[]>("shell_environment");
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert(address && typeof address !== "string");
@@ -116,6 +118,7 @@ try {
       resolveAgentExecutionEnvironment(
         { kind: "local" },
         process.platform === "win32" ? "windows" : "linux",
+        shells,
       ),
     getCustomInstructions: () => "",
     getDefaultSubagentModel: () => null,

@@ -4,10 +4,11 @@
 //! 使用长生命周期 exec channel；三者共享 stdin、输出 offset、超时和终止语义。
 //! SSH Profile 目录只决定默认位置，不限制用户明确选择的 Agent 工作目录。
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -28,6 +29,262 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(1);
 const INTERNAL_READ_LIMIT: usize = 4 * 1024 * 1024;
 const FINISHED_OUTPUT_CAPACITY: usize = 256 * 1024;
 
+/// 提供给模型的解释器身份；kind 同时是工具的显式选择值。
+#[derive(Clone, Debug, Serialize)]
+pub struct ShellIdentity {
+    pub kind: ShellKind,
+    pub executable: String,
+    pub version: Option<String>,
+}
+
+/// 每个执行环境首次使用时探测一次；提示和执行复用同一快照，失败不缓存。
+/// SSH 调用必须位于阻塞线程，避免阻塞连接运行时。
+pub fn agent_shells(workspace: &WorkspaceEnv) -> Result<Vec<ShellIdentity>, String> {
+    static SHELLS: OnceLock<Mutex<HashMap<String, Vec<ShellIdentity>>>> = OnceLock::new();
+    let key = serde_json::to_string(workspace).map_err(|error| error.to_string())?;
+    let mut cache = SHELLS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    if let Some(shells) = cache.get(&key) {
+        return Ok(shells.clone());
+    }
+    let shells = match workspace {
+        WorkspaceEnv::Local => {
+            #[cfg(windows)]
+            {
+                resolve_shells(
+                    &WINDOWS_SHELLS,
+                    |program| {
+                        let path = if program == "cmd" {
+                            which::which(
+                                std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into()),
+                            )
+                            .ok()
+                        } else {
+                            which::which(program).ok()
+                        };
+                        path.map(|path| path.to_string_lossy().into_owned())
+                    },
+                    |kind, path| shell_version(kind, std::path::Path::new(path)),
+                )
+            }
+            #[cfg(unix)]
+            {
+                resolve_posix_shells(
+                    |path| which::which(path).is_ok(),
+                    |kind, path| shell_version(kind, std::path::Path::new(path)),
+                )
+            }
+        }
+        WorkspaceEnv::Wsl { distro } => {
+            #[cfg(windows)]
+            {
+                crate::modules::workspace::validate_wsl_distro_name(distro)?;
+                let mut command = Command::new("wsl.exe");
+                command.args(["-d", distro, "--exec", "/bin/sh", "-c", POSIX_SHELL_PROBE]);
+                parse_posix_shell_probe(&probe_output(&mut command, Duration::from_secs(15))?)?
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = distro;
+                return Err("WSL is only available on Windows".into());
+            }
+        }
+        WorkspaceEnv::Ssh { profile_id } => {
+            #[cfg(feature = "desktop")]
+            {
+                let command = format!(
+                    "/bin/sh -c {}",
+                    super::quote::shell_quote(POSIX_SHELL_PROBE)
+                );
+                let output = remote::manager::exec_blocking(
+                    profile_id,
+                    &command,
+                    None,
+                    Duration::from_secs(15),
+                )?;
+                if output.timed_out || output.truncated || output.exit_code != Some(0) {
+                    return Err("SSH shell discovery failed or timed out".into());
+                }
+                parse_posix_shell_probe(&String::from_utf8_lossy(&output.stdout))?
+            }
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = profile_id;
+                return Err("SSH requires a desktop workspace in this build".into());
+            }
+        }
+    };
+    cache.insert(key, shells.clone());
+    Ok(shells)
+}
+
+/// 远端只执行封闭探测；缺少 timeout 时省略版本，不影响解释器可用性。
+#[cfg(any(windows, feature = "desktop", test))]
+const POSIX_SHELL_PROBE: &str = r#"printf 'TERAX_SHELLS_BEGIN\n'
+for path in /bin/bash /bin/sh /bin/zsh; do
+  [ -f "$path" ] && [ -x "$path" ] || continue
+  printf '%s\t' "$path"
+  if [ "$path" != /bin/sh ] && command -v timeout >/dev/null 2>&1; then
+    timeout -k 1 3 "$path" --version 2>/dev/null | head -n 1
+  fi
+  printf '\n'
+done
+printf 'TERAX_SHELLS_END\n'"#;
+
+#[cfg(any(windows, feature = "desktop", test))]
+fn parse_posix_shell_probe(output: &str) -> Result<Vec<ShellIdentity>, String> {
+    let body = output
+        .trim()
+        .strip_prefix("TERAX_SHELLS_BEGIN\n")
+        .and_then(|value| value.strip_suffix("TERAX_SHELLS_END"))
+        .ok_or("Incomplete shell discovery response")?;
+    let versions: HashMap<_, _> = body
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .collect();
+    Ok(resolve_posix_shells(
+        |path| versions.contains_key(path),
+        |_, path| parse_shell_version(versions[path]),
+    ))
+}
+
+fn resolve_posix_shells(
+    mut available: impl FnMut(&str) -> bool,
+    probe_version: impl FnMut(ShellKind, &str) -> Option<String>,
+) -> Vec<ShellIdentity> {
+    resolve_shells(
+        &[
+            (ShellKind::Bash, "/bin/bash"),
+            (ShellKind::Sh, "/bin/sh"),
+            (ShellKind::Zsh, "/bin/zsh"),
+        ],
+        |path| available(path).then(|| path.to_string()),
+        probe_version,
+    )
+}
+
+#[cfg(windows)]
+const WINDOWS_SHELLS: [(ShellKind, &str); 3] = [
+    (ShellKind::Pwsh, "pwsh"),
+    (ShellKind::Powershell, "powershell"),
+    (ShellKind::Cmd, "cmd"),
+];
+
+fn resolve_shells(
+    candidates: &[(ShellKind, &str)],
+    mut find: impl FnMut(&str) -> Option<String>,
+    mut probe_version: impl FnMut(ShellKind, &str) -> Option<String>,
+) -> Vec<ShellIdentity> {
+    candidates
+        .iter()
+        .filter_map(|&(kind, program)| {
+            let executable = find(program)?;
+            // 版本只是提示信息，探测失败不改变解释器可用项及默认优先级。
+            let version = if matches!(kind, ShellKind::Sh | ShellKind::Cmd) {
+                None
+            } else {
+                probe_version(kind, &executable)
+            };
+            Some(ShellIdentity {
+                kind,
+                executable,
+                version,
+            })
+        })
+        .collect()
+}
+
+/// 版本探测禁用输入，使用有界等待并清理进程树；失败仅表示版本未知。
+fn shell_version(kind: ShellKind, path: &std::path::Path) -> Option<String> {
+    let mut command = Command::new(path);
+    match kind {
+        ShellKind::Pwsh | ShellKind::Powershell => {
+            command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                "($PSVersionTable.PSVersion.Major.ToString() + '.' + $PSVersionTable.PSVersion.Minor)"]);
+        }
+        ShellKind::Bash | ShellKind::Zsh => {
+            command.arg("--version");
+        }
+        _ => return None,
+    }
+    probe_output(&mut command, Duration::from_secs(3))
+        .ok()
+        .and_then(|output| parse_shell_version(&output))
+}
+
+fn probe_output(command: &mut Command, timeout: Duration) -> Result<String, String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    let (child, job) =
+        crate::modules::proc::job::ProcessJob::spawn(command).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    let child = {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+        SharedChild::spawn(command).map_err(|error| error.to_string())?
+    };
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Err(_) => break None,
+            Ok(None) if Instant::now() >= deadline => break None,
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    #[cfg(windows)]
+    drop(job);
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    let _ = child.wait();
+    if !status.is_some_and(|status| status.success()) {
+        return Err("Shell probe failed or timed out".into());
+    }
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .ok_or("Shell probe stdout is unavailable")?
+        .take(4096)
+        .read_to_string(&mut output)
+        .map_err(|error| error.to_string())?;
+    Ok(output)
+}
+
+/// Bash、Zsh 的版本横幅和 PowerShell 的纯版本号统一缩短为主、次版本。
+fn parse_shell_version(output: &str) -> Option<String> {
+    let token = output
+        .lines()
+        .next()?
+        .split_whitespace()
+        .find(|token| token.starts_with(|c: char| c.is_ascii_digit()))?;
+    let mut parts = token.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor: String = parts
+        .next()?
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    Some(format!("{major}.{}", minor.parse::<u32>().ok()?))
+}
+
+fn select_shell(shells: &[ShellIdentity], shell: ShellKind) -> Result<&ShellIdentity, String> {
+    let selected = if shell == ShellKind::Default {
+        shells.first()
+    } else {
+        shells.iter().find(|entry| entry.kind == shell)
+    };
+    selected.ok_or_else(|| {
+        format!("Selected shell {shell:?} is unavailable in the environment snapshot")
+    })
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ShellKind {
@@ -35,6 +292,7 @@ pub enum ShellKind {
     Bash,
     Sh,
     Zsh,
+    Pwsh,
     Powershell,
     Cmd,
 }
@@ -208,9 +466,11 @@ impl AgentProcess {
         login: bool,
         purpose: ProcessPurpose,
     ) -> Result<Arc<Self>, String> {
+        let shells = agent_shells(&workspace)?;
+        let selected = select_shell(&shells, shell)?;
         let marker = format!("__TERAX_AGENT_CWD_{id}__");
         let (mut native, wsl_termination) =
-            build_local_command(&id, &workspace, &command, &cwd, shell, login, &marker)?;
+            build_local_command(&id, &workspace, &command, &cwd, selected, login, &marker)?;
         native
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -313,8 +573,10 @@ impl AgentProcess {
         let workspace = manager.workspace(profile_id).await?;
         let marker = format!("__TERAX_AGENT_CWD_{id}__");
         let pid_file = format!("/tmp/terax-agent-{id}.pid");
+        let shells = super::shell_environment(Some(workspace_env.clone())).await?;
+        let selected = select_shell(&shells, shell)?;
         let remote_command =
-            build_remote_command(&command, &cwd, shell, login, &marker, &pid_file)?;
+            build_remote_command(&command, &cwd, selected, login, &marker, &pid_file)?;
         let channel = workspace.open_exec_channel().await?;
         channel
             .exec(true, remote_command.into_bytes())
@@ -802,14 +1064,15 @@ fn build_local_command(
     workspace: &WorkspaceEnv,
     command: &str,
     cwd: &str,
-    shell: ShellKind,
+    identity: &ShellIdentity,
     login: bool,
     marker: &str,
 ) -> Result<(Command, Option<WslTermination>), String> {
     #[cfg(windows)]
     if let WorkspaceEnv::Wsl { distro } = workspace {
         crate::modules::workspace::validate_wsl_distro_name(distro)?;
-        let shell_program = posix_shell(shell)?;
+        posix_shell(identity.kind)?;
+        let shell_program = identity.executable.as_str();
         let payload = posix_payload(command, marker);
         let pid_file = format!("/tmp/terax-agent-{_id}.pid");
         let wrapper = posix_group_wrapper(&payload, &pid_file, shell_program, login);
@@ -837,10 +1100,10 @@ fn build_local_command(
     }
     #[cfg(unix)]
     {
-        let shell_program = posix_shell(shell)?;
+        let shell_program = identity.executable.as_str();
         let mut native = Command::new(shell_program);
         if login {
-            if !matches!(shell, ShellKind::Default | ShellKind::Bash | ShellKind::Zsh) {
+            if !matches!(shell_program, "/bin/bash" | "/bin/zsh") {
                 return Err("login is only supported by bash or zsh".into());
             }
             native.arg("-l");
@@ -854,15 +1117,9 @@ fn build_local_command(
         if login {
             return Err("login is not supported by Windows shells".into());
         }
-        let selected = match shell {
-            ShellKind::Default | ShellKind::Powershell => ShellKind::Powershell,
-            ShellKind::Cmd => ShellKind::Cmd,
-            _ => return Err("selected shell is not supported by a Windows Local workspace".into()),
-        };
-        let mut native = match selected {
+        let mut native = match identity.kind {
             ShellKind::Cmd => {
-                let mut command_line =
-                    Command::new(std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into()));
+                let mut command_line = Command::new(&identity.executable);
                 command_line.args(["/D", "/V:ON", "/C"]);
                 command_line.arg(format!(
                     "{command}\r\n\r\nset \"__terax_rc=!ERRORLEVEL!\"\r\necho {marker}%CD%\r\nexit /b !__terax_rc!"
@@ -870,10 +1127,7 @@ fn build_local_command(
                 command_line
             }
             _ => {
-                let program = which::which("pwsh")
-                    .or_else(|_| which::which("powershell"))
-                    .unwrap_or_else(|_| "powershell.exe".into());
-                let mut command_line = Command::new(program);
+                let mut command_line = Command::new(&identity.executable);
                 command_line.args(["-NoLogo", "-NoProfile", "-Command"]);
                 // 无窗口启动时 PowerShell 7 也可能使用系统代码页，须与管道的 UTF-8 契约对齐。
                 command_line.arg(format!(
@@ -891,12 +1145,13 @@ fn build_local_command(
 fn build_remote_command(
     command: &str,
     cwd: &str,
-    shell: ShellKind,
+    identity: &ShellIdentity,
     login: bool,
     marker: &str,
     pid_file: &str,
 ) -> Result<String, String> {
-    let shell_program = posix_shell(shell)?;
+    posix_shell(identity.kind)?;
+    let shell_program = identity.executable.as_str();
     let payload = posix_payload(command, marker);
     let command = format!(
         "cd -- {} && {payload}",
@@ -931,12 +1186,16 @@ fn posix_payload(command: &str, marker: &str) -> String {
     )
 }
 
+#[cfg(any(windows, feature = "desktop", test))]
 fn posix_shell(shell: ShellKind) -> Result<&'static str, String> {
     match shell {
-        ShellKind::Default | ShellKind::Bash => Ok("/bin/bash"),
+        ShellKind::Bash => Ok("/bin/bash"),
+        ShellKind::Default => {
+            Err("default shell must be resolved from the environment snapshot".into())
+        }
         ShellKind::Sh => Ok("/bin/sh"),
         ShellKind::Zsh => Ok("/bin/zsh"),
-        ShellKind::Powershell | ShellKind::Cmd => {
+        ShellKind::Pwsh | ShellKind::Powershell | ShellKind::Cmd => {
             Err("selected shell is not supported by a POSIX workspace".into())
         }
     }
@@ -1052,7 +1311,11 @@ mod tests {
         let command = build_remote_command(
             "printf \"it's fine\"",
             "/srv/it's here",
-            ShellKind::Bash,
+            &ShellIdentity {
+                kind: ShellKind::Bash,
+                executable: "/bin/bash".into(),
+                version: None,
+            },
             false,
             "marker",
             "/tmp/pid",
@@ -1068,7 +1331,11 @@ mod tests {
         let result = build_remote_command(
             "echo ok",
             "/tmp",
-            ShellKind::Powershell,
+            &ShellIdentity {
+                kind: ShellKind::Powershell,
+                executable: "powershell".into(),
+                version: None,
+            },
             false,
             "marker",
             "/tmp/pid",
@@ -1077,8 +1344,156 @@ mod tests {
     }
 
     #[test]
-    fn posix_default_shell_is_bash() {
-        assert_eq!(posix_shell(ShellKind::Default).unwrap(), "/bin/bash");
+    fn posix_command_builders_require_a_resolved_default() {
+        assert!(posix_shell(ShellKind::Default).is_err());
+        assert_eq!(posix_shell(ShellKind::Bash).unwrap(), "/bin/bash");
+    }
+
+    #[test]
+    fn posix_snapshot_selects_first_available_without_requiring_versions() {
+        let shells = resolve_posix_shells(|path| path != "/bin/bash", |_, _| None);
+        assert_eq!(
+            shells
+                .iter()
+                .map(|entry| entry.executable.as_str())
+                .collect::<Vec<_>>(),
+            ["/bin/sh", "/bin/zsh"]
+        );
+        assert!(shells.iter().all(|entry| entry.version.is_none()));
+        assert_eq!(
+            select_shell(&shells, ShellKind::Default)
+                .unwrap()
+                .executable,
+            "/bin/sh"
+        );
+        assert!(select_shell(&shells, ShellKind::Bash).is_err());
+        let only_zsh = resolve_posix_shells(|path| path == "/bin/zsh", |_, _| None);
+        assert_eq!(
+            select_shell(&only_zsh, ShellKind::Default)
+                .unwrap()
+                .executable,
+            "/bin/zsh"
+        );
+        assert!(select_shell(&[], ShellKind::Default).is_err());
+        assert_eq!(
+            select_shell(&shells, ShellKind::Sh).unwrap().executable,
+            "/bin/sh"
+        );
+        assert_eq!(
+            select_shell(&shells, ShellKind::Zsh).unwrap().executable,
+            "/bin/zsh"
+        );
+        let shells = resolve_posix_shells(
+            |_| true,
+            |kind, path| {
+                assert_ne!(kind, ShellKind::Sh);
+                (path == "/bin/bash").then(|| "5.2".into())
+            },
+        );
+        assert_eq!(
+            select_shell(&shells, ShellKind::Default)
+                .unwrap()
+                .executable,
+            "/bin/bash"
+        );
+        assert_eq!(shells[0].version.as_deref(), Some("5.2"));
+        assert!(shells[2].version.is_none());
+    }
+
+    #[test]
+    fn remote_shell_probe_preserves_availability_when_versions_are_missing() {
+        let shells = parse_posix_shell_probe(
+            "TERAX_SHELLS_BEGIN\n/bin/sh\t\n/bin/zsh\tzsh 5.9 (linux)\n\nTERAX_SHELLS_END\n",
+        )
+        .unwrap();
+        assert_eq!(
+            select_shell(&shells, ShellKind::Default).unwrap().kind,
+            ShellKind::Sh
+        );
+        assert!(select_shell(&shells, ShellKind::Bash).is_err());
+        assert!(shells[0].version.is_none());
+        assert_eq!(shells[1].version.as_deref(), Some("5.9"));
+        assert!(
+            parse_posix_shell_probe("TERAX_SHELLS_BEGIN\nTERAX_SHELLS_END\n")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(parse_posix_shell_probe("connection error").is_err());
+        assert!(parse_posix_shell_probe("TERAX_SHELLS_BEGIN\n/bin/bash\t").is_err());
+    }
+
+    #[test]
+    fn shell_version_banners_keep_only_major_and_minor() {
+        for (output, expected) in [
+            (
+                "GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)\nCopyright",
+                Some("5.2"),
+            ),
+            (
+                "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin)",
+                Some("3.2"),
+            ),
+            ("zsh 5.9 (x86_64-ubuntu-linux-gnu)", Some("5.9")),
+            ("7.6\r\n", Some("7.6")),
+            ("", None),
+            ("not available", None),
+            ("5.invalid", None),
+        ] {
+            assert_eq!(parse_shell_version(output).as_deref(), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_posix_snapshot_matches_execution_and_reported_version() {
+        let shells = agent_shells(&WorkspaceEnv::Local).unwrap();
+        for identity in &shells {
+            let (mut command, _) = build_local_command(
+                "identity",
+                &WorkspaceEnv::Local,
+                "printf '%s\\n' ready",
+                "/tmp",
+                identity,
+                false,
+                "__CWD__",
+            )
+            .unwrap();
+            assert_eq!(
+                command.get_program(),
+                std::ffi::OsStr::new(&identity.executable)
+            );
+            assert!(command.output().unwrap().status.success());
+            if identity.kind == ShellKind::Sh {
+                assert!(identity.version.is_none());
+            }
+            if let Some(version) = &identity.version {
+                assert_eq!(version.split('.').count(), 2);
+                assert_eq!(
+                    shell_version(identity.kind, std::path::Path::new(&identity.executable))
+                        .as_ref(),
+                    Some(version)
+                );
+            }
+        }
+        let default = select_shell(&shells, ShellKind::Default).and_then(|identity| {
+            build_local_command(
+                "default",
+                &WorkspaceEnv::Local,
+                "printf ready",
+                "/tmp",
+                identity,
+                false,
+                "__CWD__",
+            )
+        });
+        if let Some(first) = shells.first() {
+            assert_eq!(
+                default.unwrap().0.get_program(),
+                std::ffi::OsStr::new(&first.executable)
+            );
+        } else {
+            assert!(default.is_err());
+        }
     }
 
     #[test]
@@ -1106,16 +1521,161 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_shell_selection_preserves_priority_and_explicit_identity() {
+        for available in [
+            vec!["pwsh", "powershell", "cmd"],
+            vec!["powershell", "cmd"],
+            vec!["cmd"],
+            vec![],
+        ] {
+            // 模拟全部版本探测失败，路径存在的解释器仍必须保留。
+            let shells = resolve_shells(
+                &WINDOWS_SHELLS,
+                |name| {
+                    available
+                        .contains(&name)
+                        .then(|| format!("C:/shells/{name}.exe"))
+                },
+                |_, _| None,
+            );
+            assert!(shells.iter().all(|shell| shell.version.is_none()));
+            assert_eq!(shells.len(), available.len());
+            if let Some(first) = shells.first() {
+                assert_eq!(first.executable, format!("C:/shells/{}.exe", available[0]));
+                assert_eq!(
+                    select_shell(&shells, ShellKind::Default)
+                        .unwrap()
+                        .executable,
+                    first.executable
+                );
+            } else {
+                assert!(select_shell(&shells, ShellKind::Default).is_err());
+            }
+            for (name, kind) in [
+                ("pwsh", ShellKind::Pwsh),
+                ("powershell", ShellKind::Powershell),
+                ("cmd", ShellKind::Cmd),
+            ] {
+                let selected = select_shell(&shells, kind);
+                if available.contains(&name) {
+                    assert_eq!(
+                        selected.unwrap().executable,
+                        format!("C:/shells/{name}.exe")
+                    );
+                } else {
+                    assert!(selected.is_err());
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cmd_becomes_default_without_powershell_and_snapshot_stays_fixed() {
+        const CHILD: &str = "TERAX_CMD_DEFAULT_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            // 独立进程隔离 PATH 和 OnceLock，避免影响并行测试。
+            let directory = tempfile::tempdir().unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "modules::shell::process::tests::cmd_becomes_default_without_powershell_and_snapshot_stays_fixed"])
+                .env(CHILD, std::env::var_os("PATH").unwrap())
+                .env("PATH", directory.path())
+                .current_dir(directory.path())
+                .output().unwrap();
+            assert!(output.status.success(), "{:?}", output);
+            return;
+        }
+        let workspace = WorkspaceEnv::Local;
+        let shells = agent_shells(&workspace).unwrap();
+        assert_eq!(shells.len(), 1);
+        assert_eq!(shells[0].kind, ShellKind::Cmd);
+        std::env::set_var("PATH", std::env::var_os(CHILD).unwrap());
+        assert_eq!(agent_shells(&workspace).unwrap().len(), 1);
+        let cwd = std::env::current_dir().unwrap();
+        for shell in [ShellKind::Pwsh, ShellKind::Powershell] {
+            assert!(select_shell(&shells, shell).is_err());
+        }
+        for shell in [ShellKind::Default, ShellKind::Cmd] {
+            let (mut command, _) = build_local_command(
+                "cmd",
+                &workspace,
+                "echo ready",
+                cwd.to_str().unwrap(),
+                select_shell(&shells, shell).unwrap(),
+                false,
+                "__CWD__",
+            )
+            .unwrap();
+            assert_eq!(
+                command.get_program(),
+                std::ffi::OsStr::new(&shells[0].executable)
+            );
+            let output = command.output().unwrap();
+            assert!(output.status.success());
+            assert!(String::from_utf8(output.stdout).unwrap().contains("ready"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_selectors_execute_the_reported_program_version_and_utf8_script() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("check.ps1");
+        let shells = agent_shells(&WorkspaceEnv::Local).unwrap();
+        for identity in shells
+            .iter()
+            .filter(|entry| matches!(entry.kind, ShellKind::Pwsh | ShellKind::Powershell))
+        {
+            // Windows PowerShell 的脚本读取使用 BOM；pwsh 验证无 BOM 中文脚本。
+            let bom = if identity.kind == ShellKind::Powershell {
+                "\u{feff}"
+            } else {
+                ""
+            };
+            std::fs::write(&script, format!("{bom}[Console]::WriteLine('中文脚本'); [Console]::WriteLine((Get-Process -Id $PID).Path); [Console]::WriteLine(($PSVersionTable.PSVersion.Major.ToString() + '.' + $PSVersionTable.PSVersion.Minor))")).unwrap();
+            let (mut command, _) = build_local_command(
+                "identity",
+                &WorkspaceEnv::Local,
+                "& './check.ps1'",
+                directory.path().to_str().unwrap(),
+                identity,
+                false,
+                "__CWD__",
+            )
+            .unwrap();
+            assert_eq!(
+                command.get_program(),
+                std::ffi::OsStr::new(&identity.executable)
+            );
+            let output = command.output().unwrap();
+            assert!(output.status.success());
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(stdout.contains("中文脚本"));
+            assert_eq!(
+                std::fs::canonicalize(stdout.lines().nth(1).unwrap()).unwrap(),
+                std::fs::canonicalize(&identity.executable).unwrap()
+            );
+            if let Some(version) = &identity.version {
+                assert_eq!(version.split('.').count(), 2);
+                assert_eq!(stdout.lines().nth(2), Some(version.as_str()));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn powershell_utf8_pipes_preserve_text_cwd_and_exit_code() {
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().join("中文目录");
         std::fs::create_dir(&cwd).unwrap();
         let marker = "__TERAX_AGENT_CWD_encoding__";
         let mut tested = 0;
-        for shell in ["pwsh", "powershell"] {
-            let Ok(program) = which::which(shell) else {
-                continue;
-            };
+        for identity in agent_shells(&WorkspaceEnv::Local)
+            .unwrap()
+            .iter()
+            .filter(|entry| matches!(entry.kind, ShellKind::Pwsh | ShellKind::Powershell))
+        {
+            let shell = &identity.executable;
             tested += 1;
             for exit_code in [0, 7] {
                 // 子进程显式按 UTF-8 接收管道，验证父 Shell 的 $OutputEncoding。
@@ -1127,21 +1687,17 @@ $line = [Console]::ReadLine()
 Write-Output "stdin:$line"
 $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::WriteLine(''pipe:'' + [Console]::ReadLine()); exit {exit_code}'"#
                 );
-                let (template, _) = build_local_command(
+                let (mut native, _) = build_local_command(
                     "encoding",
                     &WorkspaceEnv::Local,
                     &script,
                     cwd.to_str().unwrap(),
-                    ShellKind::Powershell,
+                    identity,
                     false,
                     marker,
                 )
                 .unwrap();
-                // 复用实际命令封装，仅替换可执行文件以覆盖已安装的两个版本。
-                let mut native = Command::new(&program);
                 native
-                    .args(template.get_args())
-                    .current_dir(&cwd)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
@@ -1195,6 +1751,37 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
 
     #[cfg(windows)]
     #[test]
+    #[ignore = "requires TERAX_TEST_WSL_DISTRO pointing to an installed distribution"]
+    fn wsl_discovery_and_default_execution_use_the_same_snapshot() {
+        let workspace = WorkspaceEnv::Wsl {
+            distro: std::env::var("TERAX_TEST_WSL_DISTRO").unwrap(),
+        };
+        let shells = agent_shells(&workspace).unwrap();
+        assert!(!shells.is_empty());
+        println!("{}", serde_json::to_string(&shells).unwrap());
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            workspace.clone(),
+            "printf 'shell-snapshot-ready\\n'".into(),
+            "/tmp".into(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::Shell,
+        )
+        .unwrap();
+        let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
+        assert_eq!(response.status, ProcessStatus::Exited);
+        assert_eq!(response.exit_code, Some(0));
+        assert!(response.stdout.contains("shell-snapshot-ready"));
+        assert_eq!(
+            serde_json::to_value(agent_shells(&workspace).unwrap()).unwrap(),
+            serde_json::to_value(shells).unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn wsl_command_uses_sets_id_and_a_private_pid_file() {
         let id = uuid::Uuid::new_v4().to_string();
         let (command, termination) = build_local_command(
@@ -1204,7 +1791,11 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
             },
             "echo ok",
             "/work",
-            ShellKind::Bash,
+            &ShellIdentity {
+                kind: ShellKind::Bash,
+                executable: "/bin/bash".into(),
+                version: None,
+            },
             false,
             "marker",
         )

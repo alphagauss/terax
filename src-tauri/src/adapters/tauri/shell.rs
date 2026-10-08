@@ -6,6 +6,14 @@ use crate::modules::fs::agent::AgentPermissionMode;
 use crate::modules::shell::{self as service, *};
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
+/// 读取实际执行环境的 Shell 快照。
+#[tauri::command]
+pub async fn shell_environment(
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Vec<ShellIdentity>, String> {
+    service::shell_environment(workspace).await
+}
+
 /// 运行非 AI 模块使用的一次性命令，输出有界且超时后终止进程树。
 #[tauri::command]
 pub async fn shell_run_command(

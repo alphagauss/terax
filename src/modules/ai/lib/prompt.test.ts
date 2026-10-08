@@ -21,36 +21,23 @@ const history: ModelMessage[] = [
 
 describe("agent system prompt", () => {
   it.each([
-    [
-      { kind: "local" } as const,
-      "windows" as const,
-      { platform: "Windows", workspace: "Local", defaultShell: "PowerShell" },
-    ],
-    [
-      { kind: "local" } as const,
-      "macos" as const,
-      { platform: "macOS", workspace: "Local", defaultShell: "Bash" },
-    ],
-    [
-      { kind: "local" } as const,
-      "linux" as const,
-      { platform: "Linux", workspace: "Local", defaultShell: "Bash" },
-    ],
-    [
-      { kind: "wsl", distro: "Ubuntu" } as const,
-      "windows" as const,
-      { platform: "Linux", workspace: "WSL", defaultShell: "Bash" },
-    ],
+    [{ kind: "local" } as const, "windows" as const, "Windows"],
+    [{ kind: "local" } as const, "macos" as const, "macOS"],
+    [{ kind: "local" } as const, "linux" as const, "Linux"],
+    [{ kind: "wsl", distro: "Ubuntu" } as const, "windows" as const, "Linux"],
     [
       { kind: "ssh", profileId: "server" } as const,
       "windows" as const,
-      { platform: "Linux", workspace: "SSH", defaultShell: "Bash" },
+      "Linux",
     ],
   ])(
-    "maps %j on %s to its shell execution environment",
-    (workspace, host, expected) => {
-      expect(resolveAgentExecutionEnvironment(workspace, host)).toEqual(
-        expected,
+    "maps %j on %s to its execution environment",
+    (workspace, host, platform) => {
+      const shells = [
+        { kind: "bash" as const, executable: "/bin/bash", version: null },
+      ];
+      expect(resolveAgentExecutionEnvironment(workspace, host, shells)).toEqual(
+        { platform, shells },
       );
     },
   );
@@ -59,7 +46,11 @@ describe("agent system prompt", () => {
     const agent = { name: "Channel", instructions: "Reply through messaging." };
     const options = {
       cwd: "/workspace",
-      environment: resolveAgentExecutionEnvironment({ kind: "local" }, "linux"),
+      environment: resolveAgentExecutionEnvironment(
+        { kind: "local" },
+        "linux",
+        [{ kind: "bash", executable: "/bin/bash", version: null }],
+      ),
       agent,
       customInstructions: "Global rule",
       projectInstructions: [
@@ -107,13 +98,102 @@ describe("agent system prompt", () => {
     );
   });
 
+  it.each(["Linux", "macOS"] as const)(
+    "uses the first available %s shell as default when Bash is missing",
+    (platform) => {
+      const prompt = buildAgentSystemPrompt({
+        cwd: "/workspace",
+        environment: {
+          platform,
+          shells: [
+            { kind: "sh", executable: "/bin/sh", version: null },
+            { kind: "zsh", executable: "/bin/zsh", version: "5.9" },
+          ],
+        },
+        agent: { name: "Builder", instructions: "" },
+        customInstructions: "",
+        projectInstructions: [],
+      });
+      expect(prompt).toContain('Shell tool default: "sh"');
+      expect(prompt).not.toContain("was not found");
+      expect(prompt).toContain('"executable":"/bin/zsh","version":"5.9"');
+      expect(prompt).not.toMatch(/Local|WSL|SSH|remote|Windows/);
+      expect(prompt).toContain("Use POSIX syntax when selecting sh");
+      expect(prompt).not.toContain("Shell execution is unavailable.");
+    },
+  );
+
+  it.each(["WSL", "SSH"] as const)(
+    "uses detected %s alternatives and versions",
+    (workspace) => {
+      const prompt = buildAgentSystemPrompt({
+        cwd: "/workspace",
+        environment: {
+          ...resolveAgentExecutionEnvironment(
+            workspace === "WSL"
+              ? { kind: "wsl", distro: "Ubuntu" }
+              : { kind: "ssh", profileId: "server" },
+            "windows",
+            [{ kind: "zsh", executable: "/bin/zsh", version: "5.9" }],
+          ),
+        },
+        agent: { name: "Builder", instructions: "" },
+        customInstructions: "",
+        projectInstructions: [],
+      });
+      expect(prompt).toContain('Shell tool default: "zsh"');
+      expect(prompt).toContain('"executable":"/bin/zsh","version":"5.9"');
+      expect(prompt).toContain("Operating system: Linux");
+      expect(prompt).not.toMatch(
+        /Local|WSL|SSH|remote|Windows|PowerShell|macOS/,
+      );
+      expect(prompt).not.toContain("/bin/bash");
+    },
+  );
+
+  it("keeps chat prompts available when the native default shell is missing", () => {
+    const environment = resolveAgentExecutionEnvironment(
+      { kind: "local" },
+      "windows",
+      [],
+    );
+    const prompt = buildAgentSystemPrompt({
+      cwd: "D:/workspace/project",
+      environment,
+      agent: { name: "Builder", instructions: "" },
+      customInstructions: "",
+      projectInstructions: [],
+    });
+    expect(prompt).toContain("Shell tool default: null");
+    expect(prompt).toContain("Shell execution is unavailable.");
+    expect(prompt).not.toContain(
+      "executes commands directly in the default shell",
+    );
+  });
+
   it("builds deterministic normalized instructions with explicit shell context", () => {
     const options = {
       cwd: "D:/workspace/project",
       environment: {
         platform: "Windows",
-        workspace: "Local",
-        defaultShell: "PowerShell",
+        shells: [
+          {
+            kind: "pwsh",
+            executable: "C:/Program Files/PowerShell/7/pwsh.exe",
+            version: "7.1",
+          },
+          {
+            kind: "powershell",
+            executable:
+              "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            version: "5.1",
+          },
+          {
+            kind: "cmd",
+            executable: "C:/Windows/System32/cmd.exe",
+            version: null,
+          },
+        ],
       } as const,
       agent: { name: "Builder", instructions: "  Build carefully.\r\n" },
       customInstructions: "  Be direct.\r\n",
@@ -124,8 +204,39 @@ describe("agent system prompt", () => {
 
     const prompt = buildAgentSystemPrompt(options);
 
-    expect(prompt).toContain("Execution environment: Windows Local");
-    expect(prompt).toContain("Shell tool default: PowerShell");
+    expect(prompt).toContain("Operating system: Windows");
+    expect(prompt).toContain('Shell tool default: "pwsh"');
+    expect(prompt).toContain('"version":"7.1"');
+    expect(prompt).toContain('"version":"5.1"');
+    expect(prompt).not.toContain('"version":null');
+    expect(prompt).toContain(
+      'Omitting shell or choosing "default" executes commands directly in the default shell.',
+    );
+    const unknownVersionPrompt = buildAgentSystemPrompt({
+      ...options,
+      environment: {
+        ...options.environment,
+        shells: [{ ...options.environment.shells[0], version: null }],
+      },
+    });
+    expect(unknownVersionPrompt).toContain('Shell tool default: "pwsh"');
+    expect(unknownVersionPrompt).toContain(
+      options.environment.shells[0].executable,
+    );
+    expect(unknownVersionPrompt).not.toContain('"version":');
+    const cmdPrompt = buildAgentSystemPrompt({
+      ...options,
+      environment: {
+        ...options.environment,
+        shells: options.environment.shells.slice(2),
+      },
+    });
+    expect(cmdPrompt).toContain('Shell tool default: "cmd"');
+    expect(cmdPrompt).not.toContain('"pwsh"');
+    expect(cmdPrompt).not.toContain('"powershell"');
+    expect(prompt).toContain(
+      'Omitting shell or choosing "default" executes commands directly in the default shell.',
+    );
     expect(prompt).toContain('Working directory: "D:/workspace/project"');
 
     expect(prompt).toContain(

@@ -35,6 +35,7 @@ Provider 地址、凭据策略、目录与运行 adapter 统一由 `providerRegi
 - 删除 Custom Agent 必须在原生锁内级联删除所有 Workspace 的关联会话。任一会话运行中则拒绝整个操作，通用配置删除不能绕过。
 - draft cwd 跟随 Explorer 根；AI 可见时 Local、WSL 延迟准备各自的 `~/.terax/workspace`，SSH 使用 profile 默认根，无 Explorer 根时使用该默认目录。用户明确打开的其他远端根同样可用。草稿的工作目录与 Explorer 根一致时，输入框下方文件夹图标悬停显示叉号，可重置到默认目录；不一致时显示恢复箭头，可恢复跟随当前项目目录。操作仅作用于当前草稿；Explorer 根变化后自动恢复跟随，无 Explorer 根或两者均为默认目录时不显示切换入口。
 - 首次发送冻结 cwd，所有相对工具路径基于它解析。恢复会话可恢复已保存 cwd 的授权，但不改变 Explorer 根。
+- Agent 首次使用某执行环境时在该环境内探测 Shell，成功结果在进程内缓存，提示与执行共用同一快照。Windows 按 pwsh、Windows PowerShell、CMD，Linux、macOS、WSL、SSH 按 /bin/bash、/bin/sh、/bin/zsh 的顺序选首个可用项为 default，不跟随交互式 Shell；显式选择不可用项报错，执行失败不切换解释器。模型仅接收实际操作系统和可用解释器，不注入 Local、WSL、SSH 等连接方式或其他平台说明；工具枚举与主 Agent、Subagent 的系统提示共用解释器快照。版本仅保留主、次版本，版本探测失败只省略版本。连接失败或不完整探测不缓存，也不伪装成无可用解释器；无可用项不阻止应用启动，只使 Shell 调用报错。
 - shell_exec 未显式指定 cwd 时延续该聊天最近同步完成的 Shell cwd；已返回为长任务的进程不得在稍后退出时改变聊天 cwd。
 - 终端输出只在明确工具调用时读取，附件和选区只在明确附加时发送，活动标签不自动注入用户消息。
 

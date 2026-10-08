@@ -26,8 +26,19 @@ use crate::modules::workspace::resolve_path;
 use crate::modules::workspace::validate_wsl_distro_name;
 use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
 
+pub use process::{
+    agent_shells, ProcessInfo, ProcessResponse, ProcessStatus, ShellIdentity, ShellKind,
+};
 pub(crate) use process::{AgentProcess, ProcessPurpose};
-pub use process::{ProcessInfo, ProcessResponse, ProcessStatus, ShellKind};
+
+/// 在实际执行环境内探测解释器；阻塞工作不占用异步运行时。
+pub async fn shell_environment(
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Vec<ShellIdentity>, String> {
+    tokio::task::spawn_blocking(move || agent_shells(&WorkspaceEnv::from_option(workspace)))
+        .await
+        .map_err(|error| error.to_string())?
+}
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_ONESHOT_TIMEOUT_SECS: u64 = 300;

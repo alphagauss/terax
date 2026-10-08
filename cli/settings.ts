@@ -3,6 +3,7 @@
  * 命令行选择只作用于本次运行，不修改桌面的全局默认模型或权限。
  */
 
+import type { ShellIdentity } from "@/modules/ai/lib/native";
 import { readModelUsages } from "@/modules/ai/lib/modelUsage";
 
 import i18n from "i18next";
@@ -107,6 +108,7 @@ export async function loadTerminalSettings(modelOption?: string) {
     !(provider ? keys[provider] : instanceKeys[model.providerId])
   )
     throw new Error(t("missingKey"));
+  const shells = await invokeNative<ShellIdentity[]>("shell_environment");
   const platform =
     process.platform === "win32"
       ? "windows"
@@ -133,7 +135,11 @@ export async function loadTerminalSettings(modelOption?: string) {
       getKeys: () => keys,
       getModel: () => selectedModel,
       getEnvironment: () =>
-        resolveAgentExecutionEnvironment({ kind: "local" }, platform),
+        resolveAgentExecutionEnvironment(
+          { kind: "local" },
+          platform,
+          shells,
+        ),
       getCustomInstructions: () =>
         typeof settings.customInstructions === "string"
           ? settings.customInstructions

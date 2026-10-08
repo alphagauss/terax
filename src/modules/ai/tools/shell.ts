@@ -135,15 +135,25 @@ const processInputSchema = z
 
 /** 创建统一 Shell 工具，并在每次有副作用的调用前读取最新权限模式。 */
 export function buildShellTools(ctx: ToolContext) {
+  const shells = ctx.shells ?? [];
+  const hasPowerShell = shells.some(
+    ({ kind }) => kind === "pwsh" || kind === "powershell",
+  );
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Workspace-local commands run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. Never start full-screen TTY programs such as vim, less, or top.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. Never start full-screen TTY programs such as vim, less, or top.",
       inputSchema: z.object({
         command: z
           .string()
           .min(1)
-          .max(256 * 1024),
+          .max(256 * 1024)
+          .describe(
+            "Shell source interpreted directly by the selected shell. Use its syntax and invoke scripts directly. When nesting shells, protect inner variables from expansion by the outer shell." +
+              (hasPowerShell
+                ? " For PowerShell scripts, use & './script.ps1' in the selected interpreter."
+                : ""),
+          ),
         cwd: z
           .string()
           .max(32 * 1024)
@@ -178,9 +188,17 @@ export function buildShellTools(ctx: ToolContext) {
           .max(256 * 1024)
           .optional(),
         shell: z
-          .enum(["default", "bash", "sh", "zsh", "powershell", "cmd"])
-          .optional(),
-        login: z.boolean().optional(),
+          .enum(["default", ...shells.map(({ kind }) => kind)])
+          .optional()
+          .describe(
+            'Omitted or "default" uses the default interpreter listed in SESSION ENVIRONMENT. Explicit selectors use their listed executable. Use the selected interpreter’s syntax. Unavailable selections fail; execution failures never switch interpreters.',
+          ),
+        login: z
+          .boolean()
+          .optional()
+          .describe(
+            "Defaults to false. Requests login mode for the selected interpreter; unsupported selections fail.",
+          ),
       }),
       execute: async (input) => {
         const approvalRequired =

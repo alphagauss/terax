@@ -45,7 +45,9 @@ export type SessionTransportDependencies = {
   getAgent: () => AgentConfiguration | Promise<AgentConfiguration>;
   getTurnId: () => string;
   getCwd: () => string;
-  getEnvironment: () => AgentExecutionEnvironment;
+  getEnvironment: () =>
+    | AgentExecutionEnvironment
+    | Promise<AgentExecutionEnvironment>;
   getExternalAgent?: () => ExternalAgentBinding | null;
   getPermissionMode?: () => "ask" | "full-access";
   getProviderBaseURLs?: () => Readonly<ProviderBaseURLs>;
@@ -101,6 +103,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
   let runtimeTask: Promise<{
     systemPrompt: string;
     agent: AgentConfiguration;
+    shells: AgentExecutionEnvironment["shells"];
   }> | null = null;
 
   let runtimeTurnId: string | null = null;
@@ -110,6 +113,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
         customInstructions: string;
         systemPrompt: string;
         agent: AgentConfiguration;
+        shells: AgentExecutionEnvironment["shells"];
       }
     | undefined;
 
@@ -119,7 +123,6 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     if (runtimeTask && runtimeTurnId === turnId) return runtimeTask;
     runtimeTurnId = turnId;
     const cwd = deps.getCwd();
-    const environment = deps.getEnvironment();
     const customInstructions = deps
       .getCustomInstructions()
       .replace(/\r\n?/g, "\n")
@@ -130,13 +133,14 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
         prepared.customInstructions === customInstructions
       )
         return prepared;
-      const projectInstructions = await readWorkspaceInstructions(
-        cwd,
-        agent.workspaceFiles,
-      );
+      const [environment, projectInstructions] = await Promise.all([
+        deps.getEnvironment(),
+        readWorkspaceInstructions(cwd, agent.workspaceFiles),
+      ]);
       prepared = {
         customInstructions,
         agent,
+        shells: environment.shells,
         systemPrompt: buildAgentSystemPrompt({
           cwd,
           environment,
@@ -188,7 +192,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       });
     }
     const frozenModel = modelSnapshot;
-    const { systemPrompt, agent } = await getRuntime();
+    const { systemPrompt, agent, shells } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),
       model: frozenModel.model,
@@ -211,7 +215,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,
       allowedTools: agent.tools,
-      toolContext: deps.toolContext,
+      toolContext: { ...deps.toolContext, shells },
       turnId,
       getCompactionConfiguration: deps.getCompactionConfiguration,
       onCompacting: deps.onCompacting,

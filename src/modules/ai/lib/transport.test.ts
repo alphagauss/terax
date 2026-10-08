@@ -34,8 +34,7 @@ import { createSessionTransport } from "./transport";
 
 const environment = {
   platform: "Windows",
-  workspace: "Local",
-  defaultShell: "PowerShell",
+  shells: [{ kind: "pwsh", executable: "C:/pwsh.exe", version: "7.1" }],
 } as const;
 
 const toolContext: ToolContext = {
@@ -108,7 +107,7 @@ describe("session transport", () => {
         tools: ["read_file"],
       }),
       getCwd: () => "D:/workspace/project",
-      getEnvironment: () => environment,
+      getEnvironment: async () => environment,
     });
 
     await transport.sendMessages({ messages });
@@ -152,6 +151,7 @@ describe("session transport", () => {
       icon: "spark",
       tools: ["read_file"],
     };
+    const getEnvironment = vi.fn(async () => environment);
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
       toolContext,
@@ -163,7 +163,7 @@ describe("session transport", () => {
       getCustomInstructions: () => customInstructions,
       getAgent: () => agent,
       getCwd: () => "D:/workspace/project",
-      getEnvironment: () => environment,
+      getEnvironment,
     });
     const messages: UIMessage[] = [
       {
@@ -204,9 +204,15 @@ describe("session transport", () => {
         .value,
     ).toBe("high");
     expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(1);
+    expect(getEnvironment).toHaveBeenCalledTimes(1);
     const firstPrompt = mocks.runAgentStream.mock.calls[0][0].systemPrompt;
     const secondPrompt = mocks.runAgentStream.mock.calls[1][0].systemPrompt;
     expect(secondPrompt).toBe(firstPrompt);
+    expect(firstPrompt).toContain(JSON.stringify(environment.shells));
+    expect(firstRun.toolContext.shells).toEqual(environment.shells);
+    expect(mocks.runAgentStream.mock.calls[1][0].toolContext.shells).toBe(
+      firstRun.toolContext.shells,
+    );
     expect(mocks.runAgentStream.mock.calls[0][0].modelParameters[0].value).toBe(
       "low",
     );
@@ -236,6 +242,7 @@ describe("session transport", () => {
     expect(next.systemPrompt).toContain("Changed project instructions");
     expect(next.allowedTools).toEqual(["grep"]);
     expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(2);
+    expect(getEnvironment).toHaveBeenCalledTimes(2);
 
     // 单独修改文档不触发初始化，下一轮仍复用完整配置。
     mocks.readWorkspaceInstructions.mockResolvedValue([
@@ -250,6 +257,7 @@ describe("session transport", () => {
       next.allowedTools,
     );
     expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(2);
+    expect(getEnvironment).toHaveBeenCalledTimes(2);
 
     // 仅修改全局指令也必须重新读取文档。
     customInstructions = "Third preference";
@@ -308,7 +316,7 @@ describe("session transport", () => {
         tools: ["read_file"],
       }),
       getCwd: () => "D:/workspace/project",
-      getEnvironment: () => environment,
+      getEnvironment: async () => environment,
       getExternalAgent: () => ({ agentId: "claude", sessionId: "session-1" }),
       getPermissionMode: () => "ask",
       onSystemPrompt: persist,

@@ -97,6 +97,12 @@ fn pipe_host_preserves_read_before_edit_and_conflict_checks() {
 fn pipe_eof_terminates_the_owned_shell() {
     let root = tempfile::tempdir().unwrap();
     let mut host = HostProcess::new(root.path());
+    let environment = host.call("shell_environment", json!({}));
+    assert!(!environment["result"].as_array().unwrap().is_empty());
+    assert_eq!(
+        host.call("shell_environment", json!({}))["result"],
+        environment["result"]
+    );
     let command = if cfg!(windows) {
         "$PID; Start-Sleep -Seconds 30"
     } else {

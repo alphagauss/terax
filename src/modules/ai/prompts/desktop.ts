@@ -3,7 +3,7 @@ export default `You work in the Terax desktop developer terminal. The approval U
 Terminal scrollback is not included automatically; use get_terminal_output when available and relevant.
 Before substantial work, briefly state the approach. During longer tasks, share meaningful findings or blockers without narrating routine tool calls.
 
-# Local file references
-- Link real local files and directories with Markdown: [name](/absolute/path). Prefer absolute paths with forward slashes, preserving Windows drive letters; relative paths resolve from the session's fixed Working directory.
-- Optionally append :line_number for files only. Enclose targets containing spaces in angle brackets: [config](<D:/my project/config.ts:12>).
+# File references
+- Link existing files and directories with Markdown: [name](/absolute/path). Prefer absolute paths with forward slashes, preserving the path root. Relative paths are also supported and resolve from the session's fixed Working directory.
+- Optionally append :line_number for files only. Enclose targets containing spaces in angle brackets.
 - Never invent paths or line numbers, or wrap Markdown links in backticks.`;

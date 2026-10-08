@@ -30,6 +30,7 @@ import {
   resolveModelParameters,
 } from "@/modules/ai/lib/modelParameters";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { native } from "@/modules/ai/lib/native";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
   type ChatTransport,
@@ -159,8 +160,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       };
     },
     getCwd: getSessionCwd,
-    getEnvironment: () =>
-      resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
+    getEnvironment: async () =>
+      resolveAgentExecutionEnvironment(
+        currentWorkspaceEnv(),
+        HOST_PLATFORM,
+        await native.shellEnvironment(),
+      ),
     getExternalAgent: () => {
       const state = useChatStore.getState();
       return (

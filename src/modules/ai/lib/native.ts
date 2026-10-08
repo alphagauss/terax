@@ -30,8 +30,16 @@ export type ShellKind =
   | "bash"
   | "sh"
   | "zsh"
+  | "pwsh"
   | "powershell"
   | "cmd";
+
+/** 实际执行环境的原生 Shell 快照，列表首项为默认。 */
+export type ShellIdentity = {
+  kind: Exclude<ShellKind, "default">;
+  executable: string;
+  version: string | null;
+};
 
 export type ShellProcessStatus =
   | "running"
@@ -281,6 +289,7 @@ export type GitBranchListResult = {
 };
 
 export const native = {
+  shellEnvironment: () => invoke<ShellIdentity[]>("shell_environment"),
   workspaceCurrentDir: () => invokeNative<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
     invoke<string>("workspace_authorize", {

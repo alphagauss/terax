@@ -5,6 +5,7 @@
 
 import type { HostPlatform } from "@/lib/platform";
 import type { ProviderId } from "@/modules/ai/config";
+import type { ShellIdentity } from "@/modules/ai/lib/native";
 import CORE_PROMPT from "@/modules/ai/prompts/core";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import type { ModelMessage, SystemModelMessage } from "ai";
@@ -22,8 +23,7 @@ export type PromptSection = { kind: PromptSectionKind; content: string };
 
 export type AgentExecutionEnvironment = {
   platform: "Windows" | "macOS" | "Linux" | "Unknown";
-  workspace: "Local" | "WSL" | "SSH";
-  defaultShell: "PowerShell" | "Bash" | "System default";
+  shells: readonly ShellIdentity[];
 };
 
 type BuildAgentSystemPromptOptions = {
@@ -46,36 +46,25 @@ export type PreparedAgentPrompt = {
 export function resolveAgentExecutionEnvironment(
   workspace: WorkspaceEnv,
   hostPlatform: HostPlatform,
+  shells: readonly ShellIdentity[],
 ): AgentExecutionEnvironment {
-  if (workspace.kind === "wsl") {
-    return { platform: "Linux", workspace: "WSL", defaultShell: "Bash" };
+  if (workspace.kind !== "local") {
+    return { platform: "Linux", shells };
   }
-  if (workspace.kind === "ssh") {
-    return { platform: "Linux", workspace: "SSH", defaultShell: "Bash" };
-  }
-  if (hostPlatform === "windows") {
-    return {
-      platform: "Windows",
-      workspace: "Local",
-      defaultShell: "PowerShell",
-    };
-  }
-  if (hostPlatform === "macos") {
-    return { platform: "macOS", workspace: "Local", defaultShell: "Bash" };
-  }
-  if (hostPlatform === "linux") {
-    return { platform: "Linux", workspace: "Local", defaultShell: "Bash" };
-  }
-  return {
-    platform: "Unknown",
-    workspace: "Local",
-    defaultShell: "System default",
-  };
+  const platform =
+    hostPlatform === "windows"
+      ? "Windows"
+      : hostPlatform === "macos"
+        ? "macOS"
+        : hostPlatform === "linux"
+          ? "Linux"
+          : "Unknown";
+  return { platform, shells };
 }
 
 /**
  * 构造一轮内保持不变的系统提示词分段。
- * 环境块使用受控枚举，并将工作目录编码为 JSON string，避免特殊路径改变提示结构。
+ * Shell 身份来自原生执行环境快照，名称和路径编码为 JSON string，避免改变提示结构。
  */
 export function buildAgentPromptSections({
   cwd,
@@ -84,17 +73,25 @@ export function buildAgentPromptSections({
   customInstructions,
   projectInstructions,
 }: BuildAgentSystemPromptOptions): PromptSection[] {
-  const executionEnvironment =
-    environment.workspace === "Local"
-      ? `${environment.platform} Local`
-      : environment.workspace === "WSL"
-        ? `${environment.platform} via WSL`
-        : `${environment.platform} over SSH`;
+  const defaultShell = environment.shells[0]?.kind ?? null;
+  const hasSh = environment.shells.some(({ kind }) => kind === "sh");
   const environmentBlock = `## SESSION ENVIRONMENT
-Execution environment: ${executionEnvironment}
-Shell tool default: ${environment.defaultShell}
+Operating system: ${environment.platform}
+Shell tool default: ${JSON.stringify(defaultShell)}
+Shell choices (selector, executable, version): ${JSON.stringify(
+    environment.shells.map(({ kind, executable, version }) => ({
+      kind,
+      executable,
+      ...(version ? { version } : {}),
+    })),
+  )}
+${
+  environment.shells.length
+    ? `Omitting shell or choosing "default" executes commands directly in the default shell.`
+    : "No supported shell was found in this environment. Shell execution is unavailable."
+}${hasSh ? "\nUse POSIX syntax when selecting sh." : ""}
 Working directory: ${JSON.stringify(cwd)}
-Relative paths passed to tools resolve from this directory. Use the default shell's syntax unless shell_exec explicitly selects another shell. This environment is fixed for the session.`;
+Relative paths passed to tools resolve from this directory. This environment is fixed for the session.`;
   return composeAgentPromptSections({
     environment: environmentBlock,
     workspace: projectInstructions.map(({ path, content }) =>

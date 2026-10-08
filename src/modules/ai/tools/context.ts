@@ -4,6 +4,8 @@
  */
 
 export type ToolContext = {
+  /** 与本轮系统提示共用的解释器快照，Subagent 原样继承。 */
+  shells?: readonly import("@/modules/ai/lib/native").ShellIdentity[];
   /** 只由 Channel 主运行提供，不向 Subagent 传播发送能力。 */
   getMessageSender?: () =>
     | import("@/modules/channels/types").ChannelMessageSender

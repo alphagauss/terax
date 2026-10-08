@@ -301,6 +301,7 @@ pub fn run() {
             git::commands::git_list_branches,
             git::commands::git_checkout_branch,
             commands::shell::shell_run_command,
+            commands::shell::shell_environment,
             commands::shell::shell_exec,
             commands::shell::shell_process,
             commands::shell::shell_list,
