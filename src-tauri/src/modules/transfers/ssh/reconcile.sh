@@ -61,6 +61,21 @@ terax_record_file_batch() {
 
 # 使用当前 terax_reconcile 栈帧的局部批次；递归使用独立队列，父目录文件留在原位等待提交。
 terax_flush_file_batch() {
+  if [ "$mode" = merge_newer ]; then
+    # 父目录批次可能等待子目录提交，必须在移动前重新比较目标，而非沿用入队时间。
+    local source_item target_item eligible=()
+    batch_old=()
+    for source_item in "${batch_new[@]}"; do
+      target_item=$target/${source_item##*/}
+      if terax_exists "$target_item"; then
+        [ -f "$target_item" ] && [ ! -L "$target_item" ] || return 1
+        [ "$source_item" -nt "$target_item" ] || continue
+        batch_old+=("$target_item")
+      fi
+      eligible+=("$source_item")
+    done
+    batch_new=("${eligible[@]}")
+  fi
   terax_record_file_batch "$backup" "${batch_old[@]}" || return $?
   terax_record_file_batch "$target" "${batch_new[@]}" || return $?
   batch_old=()
@@ -86,7 +101,7 @@ terax_record_directory_metadata() {
   if (( (8#$final_mode & 0700) != 0700 )); then
     writable_directories+=("$final_reference")
   fi
-  if [ "$3" = merge_skip ]; then
+  if [ "$3" = merge_skip ] || [ "$3" = merge_newer ]; then
     final_mode=$original_mode
     final_atime=$original_atime
     final_mtime=$original_mtime
@@ -168,6 +183,7 @@ terax_reconcile() {
     fi
     if terax_exists "$target_item"; then
       [ "$mode" = merge_skip ] && continue
+      [ "$mode" != merge_newer ] || return 1
       terax_record_move "$target_item" "$backup_item"
     fi
     terax_record_move "$source_item" "$target_item"

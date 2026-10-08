@@ -33,6 +33,7 @@ pub(crate) enum RootCommitMode {
     Replace,
     Merge,
     MergeSkip,
+    MergeNewer,
 }
 
 /// 顶层来源的 staging、最终目标和冲突授权。
@@ -409,6 +410,7 @@ fn remote_transaction_command(roots: &[RemoteRoot], cleanup_paths: &[String]) ->
                 RootCommitMode::Replace => "replace",
                 RootCommitMode::Merge => "merge",
                 RootCommitMode::MergeSkip => "merge_skip",
+                RootCommitMode::MergeNewer => "merge_newer",
                 RootCommitMode::Create => unreachable!("existing directory cannot use create mode"),
             };
             command.push_str(&format!(
@@ -633,7 +635,10 @@ fn reconcile_local_directory(
         transaction.directories.push(LocalDirectoryMetadata {
             target: work.target.clone(),
             original: target_metadata.clone(),
-            final_metadata: if work.mode == RootCommitMode::MergeSkip {
+            final_metadata: if matches!(
+                work.mode,
+                RootCommitMode::MergeSkip | RootCommitMode::MergeNewer
+            ) {
                 target_metadata
             } else {
                 stage_metadata
@@ -682,6 +687,29 @@ fn reconcile_local_directory(
                     mode: work.mode,
                 });
                 continue;
+            }
+            if work.mode == RootCommitMode::MergeNewer {
+                if let Some(metadata) = &target_metadata {
+                    if metadata.file_type().is_symlink()
+                        || !metadata.is_file()
+                        || !stage_metadata.is_file()
+                    {
+                        return Err(std::io::Error::other("sync target changed type"));
+                    }
+                    let source_time = stage_metadata
+                        .modified()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(std::io::Error::other)?
+                        .as_secs();
+                    let target_time = metadata
+                        .modified()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(std::io::Error::other)?
+                        .as_secs();
+                    if source_time <= target_time {
+                        continue;
+                    }
+                }
             }
             if target_metadata.is_some() && work.mode == RootCommitMode::MergeSkip {
                 continue;
@@ -1348,6 +1376,81 @@ fn message(value: String) -> TransferRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn sync_commit_rechecks_times_preserves_target_only_and_directory_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("stage");
+        let target = directory.path().join("target");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        for (name, source_time, target_time) in [
+            ("newer", 20, 10),
+            ("equal", 20, 20),
+            ("target-edited", 20, 30),
+        ] {
+            std::fs::write(stage.join(name), b"source").unwrap();
+            std::fs::write(target.join(name), b"target").unwrap();
+            filetime::set_file_mtime(
+                stage.join(name),
+                filetime::FileTime::from_unix_time(source_time, 0),
+            )
+            .unwrap();
+            filetime::set_file_mtime(
+                target.join(name),
+                filetime::FileTime::from_unix_time(target_time, 0),
+            )
+            .unwrap();
+        }
+        std::fs::write(stage.join("new"), b"new").unwrap();
+        std::fs::write(target.join("old-name"), b"keep").unwrap();
+        let identity = local_identity(&target).await;
+        let root = LocalRoot {
+            source_path: "source".into(),
+            stage,
+            final_path: target.clone(),
+            kind: TransferEntryKind::Directory,
+            destination_kind: Some(TransferEntryKind::Directory),
+            mode: RootCommitMode::MergeNewer,
+            merge_preconditions: Vec::new(),
+        };
+        commit_local_root(&root).await.unwrap();
+        assert_eq!(local_identity(&target).await, identity);
+        for (name, expected) in [
+            ("newer", "source"),
+            ("equal", "target"),
+            ("target-edited", "target"),
+            ("new", "new"),
+            ("old-name", "keep"),
+        ] {
+            assert_eq!(
+                std::fs::read_to_string(target.join(name)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_commit_rolls_back_if_target_changes_type() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("stage");
+        let target = directory.path().join("target");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(stage.join("conflict"), b"source").unwrap();
+        std::fs::create_dir(target.join("conflict")).unwrap();
+        let root = LocalRoot {
+            source_path: "source".into(),
+            stage,
+            final_path: target.clone(),
+            kind: TransferEntryKind::Directory,
+            destination_kind: Some(TransferEntryKind::Directory),
+            mode: RootCommitMode::MergeNewer,
+            merge_preconditions: Vec::new(),
+        };
+        assert!(commit_local_root(&root).await.is_err());
+        assert!(target.join("conflict").is_dir());
+    }
 
     async fn local_identity(path: &Path) -> super::super::source::LocalSourceIdentity {
         let metadata = tokio::fs::symlink_metadata(path).await.unwrap();

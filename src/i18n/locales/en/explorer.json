@@ -44,5 +44,42 @@
     "paste": "Paste",
     "noClipboardFiles": "The clipboard contains no files with paths.",
     "pasteFailed": "Could not paste files: {{error}}"
+  },
+  "sync": {
+    "title": "Sync folder contents…",
+    "description": "Recursively sync directory contents without nesting the source folder.",
+    "remote": "SSH / WSL directory",
+    "local": "Local directory",
+    "chooseDirectory": "Choose directory",
+    "direction": "Sync direction",
+    "upload": "Local → SSH / WSL",
+    "download": "SSH / WSL → Local",
+    "excludes": "Additional excluded names",
+    "excludesHint": "Add one exact file or directory name at a time, at every level. Wildcards are not interpreted. Add or clear the input before previewing.",
+    "rule": "Copy missing files and files newer on the source, comparing modification times in seconds. Skip equal or newer targets. Keep destination-only files; do not merge file contents. Transfer a changes-only archive and compare again when executing.",
+    "summary": "Add {{added}}, update {{updated}}, skip {{skipped}}, conflicts {{conflicts}}; {{bytes}} file bytes to transfer.",
+    "conflictsHint": "Resolve or exclude type conflicts and unsupported entries, then preview again.",
+    "details": "View differences",
+    "truncated": "Showing up to 1000 entries, prioritizing conflicts and changes. Counts include all entries.",
+    "working": "Working…",
+    "preview": "Preview changes",
+    "start": "Start sync",
+    "actions": {
+      "add": "Add",
+      "update": "Update",
+      "skip": "Skip",
+      "conflict": "Conflict"
+    },
+    "excludeOptions": "Exclusions",
+    "respectGitignore": "Respect source .gitignore",
+    "excludeGit": "Exclude .git files and directories at every level",
+    "excludeDirectory": "Exclude {{name}} directories at every level",
+    "gitignoreHint": "Use .gitignore files in the selected source directory and its subdirectories, including ! exceptions. Destination and global rules are not used. Explicit exclusions take precedence; matching tracked files are excluded too.",
+    "excludeName": "File or directory name",
+    "excludePlaceholder": "For example, .cache",
+    "addExclude": "Add",
+    "removeExclude": "Remove exclusion {{name}}",
+    "invalidExclude": "Enter one valid name without paths, commas, or control characters.",
+    "duplicateExclude": "This name is already excluded."
   }
 }

@@ -93,6 +93,7 @@ pub async fn file_save_as(
                 env,
                 workspace.bootstrap().id.clone(),
                 EnqueueTransferRequest {
+                    sync: None,
                     direction: TransferDirection::Download,
                     strategy: TransferStrategy::Direct,
                     sources: vec![path],

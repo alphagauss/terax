@@ -509,6 +509,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("task.jsonl");
         let request = EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
@@ -556,6 +557,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("task.jsonl");
         let request = EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
@@ -610,6 +612,7 @@ mod tests {
             &path,
             &JournalRecord::Created {
                 request: EnqueueTransferRequest {
+                    sync: None,
                     destination_name: None,
                     direction: TransferDirection::Upload,
                     strategy: TransferStrategy::Archive,
@@ -672,6 +675,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("task.jsonl");
         let request = EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,

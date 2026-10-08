@@ -11,6 +11,15 @@ use super::errors::TransferFailure;
 use super::models::{EnqueueTransferRequest, ResolveTransferConflictRequest, TransferTaskSnapshot};
 use super::TransferState;
 
+/// 只读比较目录内容；实际入队后重新比较，不复用过期覆盖决定。
+#[tauri::command]
+pub async fn transfer_sync_preview(
+    workspace: State<'_, WorkspaceProcessState>,
+    request: EnqueueTransferRequest,
+) -> Result<super::sync::SyncPreview, TransferFailure> {
+    super::sync::preview(&workspace.bootstrap().env, request).await
+}
+
 /// 将文件、文件夹或批量来源按请求中的策略加入后台队列。
 #[tauri::command]
 pub async fn transfer_enqueue(

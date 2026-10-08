@@ -5,6 +5,7 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import { FolderSyncDialog } from "@/modules/transfers/FolderSyncDialog";
 import { DirectoryPathInput } from "@/modules/workspace/DirectoryPathInput";
 import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
@@ -443,6 +444,7 @@ export const FileExplorer = memo(
         ? runtime.phase
         : null;
     const [emptyPath, setEmptyPath] = useState("");
+    const [syncPath, setSyncPath] = useState<string | null>(null);
 
     /** 通过原生选择器创建文件或文件夹后台上传任务。 */
     const enqueueUpload = useCallback(
@@ -1271,6 +1273,13 @@ export const FileExplorer = memo(
                 )}
                 {workspaceEnv.kind !== "local" ? (
                   <>
+                    {menuTarget.isDir && (
+                      <ContextMenuItem
+                        onSelect={() => setSyncPath(menuTarget.path)}
+                      >
+                        {t("sync.title")}
+                      </ContextMenuItem>
+                    )}
                     <TransferStrategyMenu
                       label={t("menu.downloadToLocal")}
                       onSelect={(strategy) =>
@@ -1382,6 +1391,11 @@ export const FileExplorer = memo(
                     {t("menu.openInTerminal")}
                   </ContextMenuItem>
                 )}
+                {workspaceEnv.kind !== "local" && (
+                  <ContextMenuItem onSelect={() => setSyncPath(rootPath)}>
+                    {t("sync.title")}
+                  </ContextMenuItem>
+                )}
                 {workspaceEnv.kind !== "local"
                   ? (["files", "folders"] as const).map((kind) => (
                       <TransferStrategyMenu
@@ -1461,6 +1475,13 @@ export const FileExplorer = memo(
           </AlertDialogContent>
         </AlertDialog>
 
+        {syncPath && (
+          <FolderSyncDialog
+            key={syncPath}
+            remotePath={syncPath}
+            onClose={() => setSyncPath(null)}
+          />
+        )}
         {dnd.dragLabel ? (
           <div
             ref={dnd.ghostRef}

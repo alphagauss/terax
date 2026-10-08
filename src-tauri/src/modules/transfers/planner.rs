@@ -2,7 +2,8 @@
 //!
 //! 本模块在写入目标前解析来源、校验 Workspace 边界并生成带私有 staging 路径的
 //! 不可变计划。Direct 会递归扫描全部条目；Archive 只确认顶层根，子树交给打包或
-//! 接收端安全解压处理，从而避免高延迟环境中的重复遍历。规划阶段不创建或修改文件。
+//! 接收端安全解压处理，从而避免高延迟环境中的重复遍历。目录同步额外通过批量清单
+//! 筛选需要归档的条目。规划阶段不创建或修改文件。
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -39,6 +40,7 @@ struct PlanningTaskIdentity<'a> {
     staging_id: &'a str,
     owner_id: &'a str,
     destination_name: Option<&'a str>,
+    contents: bool,
 }
 
 /// 同一宿主文件系统中的单文件复制项。
@@ -66,6 +68,7 @@ pub(crate) struct PlannedDirectory<S, D> {
 
 /// Host 与 WSL 之间由 Direct 和 Archive 共用的完整计划。
 pub(crate) struct LocalPlan {
+    pub(crate) sync: Option<super::sync::SyncSelection>,
     pub(crate) task_id: String,
     pub(crate) owner_task_id: String,
     pub(crate) wsl: WslArchiveContext,
@@ -113,6 +116,7 @@ pub(crate) struct RemoteUploadFile {
 
 /// SSH 上传 Manifest 及其任务独占 SFTP 会话和命令 transport。
 pub(crate) struct RemoteUploadPlan {
+    pub(crate) sync: Option<super::sync::SyncSelection>,
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
     pub(crate) task_id: String,
@@ -135,6 +139,7 @@ pub(crate) struct RemoteDownloadFile {
 
 /// SSH 下载计划及扫描、复制所需的任务连接上下文。
 pub(crate) struct RemoteDownloadPlan {
+    pub(crate) sync: Option<super::sync::SyncSelection>,
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
     pub(crate) task_id: String,
@@ -263,6 +268,7 @@ pub(crate) async fn prepare(
         staging_id: task_id,
         owner_id: &owner_id,
         destination_name: request.destination_name.as_deref(),
+        contents: request.sync.is_some(),
     };
     let plan = match workspace {
         WorkspaceEnv::Local => {
@@ -357,7 +363,17 @@ pub(crate) async fn prepare(
         }
     };
 
-    let prepared = PreparedTransfer { manifest: plan };
+    let mut prepared = PreparedTransfer { manifest: plan };
+    if request.sync.is_some() {
+        if let Err(error) = super::sync::prepare(&mut prepared, workspace, request, context).await {
+            match &prepared.manifest {
+                TransferManifest::RemoteUpload(plan) => close_sftp(&plan.session).await,
+                TransferManifest::RemoteDownload(plan) => close_sftp(&plan.session).await,
+                TransferManifest::Local(_) => {}
+            }
+            return Err(error);
+        }
+    }
     prepared.publish_totals(context).await?;
     Ok(prepared)
 }
@@ -427,6 +443,7 @@ async fn plan_local(
         files: Vec::new(),
         roots: Vec::new(),
         scan_failures: 0,
+        sync: None,
     };
     let mut root_names = HashSet::new();
     let mut source_roots: Vec<PathBuf> = Vec::new();
@@ -457,13 +474,20 @@ async fn plan_local(
         }
         source_roots.push(source.clone());
         let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
-        let final_path = local_root_destination(
-            &source,
-            &destination_parent,
-            sanitize_names,
-            task.destination_name,
-            metadata.is_dir(),
-        )?;
+        let final_path = if task.contents {
+            if !metadata.is_dir() {
+                return Err(invalid("folder sync requires a directory source".into()));
+            }
+            destination_parent.clone()
+        } else {
+            local_root_destination(
+                &source,
+                &destination_parent,
+                sanitize_names,
+                task.destination_name,
+                metadata.is_dir(),
+            )?
+        };
         if !root_names.insert(local_name_identity(final_path.as_os_str())) {
             return Err(message(format!(
                 "multiple sources map to the same destination: {}",
@@ -642,6 +666,7 @@ async fn plan_remote_upload(
         files: Vec::new(),
         roots: Vec::new(),
         scan_failures: 0,
+        sync: None,
     };
     let mut root_names = HashSet::new();
     let mut source_roots: Vec<PathBuf> = Vec::new();
@@ -681,7 +706,14 @@ async fn plan_remote_upload(
         if !root_names.insert(name.clone()) {
             return Err(invalid(format!("duplicate destination name: {name}")));
         }
-        let final_path = join_remote(&destination_parent, &name);
+        let final_path = if task.contents {
+            if !metadata.is_dir() {
+                return Err(invalid("folder sync requires a directory source".into()));
+            }
+            destination_parent.clone()
+        } else {
+            join_remote(&destination_parent, &name)
+        };
         let stage = remote_stage_path(&final_path, task.staging_id, root_index)?;
         ensure_remote_target_available(&plan.session, &stage).await?;
         plan.roots.push(RemoteRoot {
@@ -834,6 +866,7 @@ async fn plan_remote_download(
         files: Vec::new(),
         roots: Vec::new(),
         scan_failures: 0,
+        sync: None,
     };
     let mut root_names = HashSet::new();
     let mut source_roots: Vec<String> = Vec::new();
@@ -883,7 +916,14 @@ async fn plan_remote_download(
                 "multiple remote sources map to the same local name: {destination_name}"
             )));
         }
-        let final_path = destination_parent.join(destination_name);
+        let final_path = if task.contents {
+            if !source_metadata.file_type().is_dir() {
+                return Err(invalid("folder sync requires a directory source".into()));
+            }
+            destination_parent.clone()
+        } else {
+            destination_parent.join(destination_name)
+        };
         let stage = local_stage_path(&final_path, task.staging_id, root_index)?;
         ensure_local_target_available(&stage).await?;
         plan.roots.push(LocalRoot {

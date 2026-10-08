@@ -5,7 +5,9 @@
 //! Planner 指定的 staging。WSL 上传在目标侧批量提交，避免小文件被放大为 UNC 往返。
 
 #[cfg(windows)]
-use std::{path::Path, process::Stdio, time::Duration};
+use crate::modules::transfers::manager::TaskControl;
+#[cfg(windows)]
+use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
@@ -52,6 +54,26 @@ const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 type RunResult<T> = Result<T, TransferRunError>;
+
+/// 同步清单通过标准输入发送，复用归档命令的暂停、取消和进程回收。
+#[cfg(windows)]
+pub(crate) async fn run_sync_script(
+    distro: &str,
+    script: String,
+    control: Arc<TaskControl>,
+    output_limit: usize,
+) -> RunResult<Vec<u8>> {
+    run_wsl_program_inner(
+        distro,
+        "bash",
+        &["-s"],
+        control,
+        true,
+        Some(script.into_bytes()),
+        output_limit,
+    )
+    .await
+}
 
 /// 按 Planner 保留的 WSL 方向执行上传或下载。
 pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> RunResult<()> {
@@ -173,7 +195,24 @@ async fn execute_download(
         let directory = create_work_dir(distro, &plan.task_id).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
-        let remote_sha256 = create_wsl_archive(distro, &remote_archive, sources, context).await?;
+        let remote_sha256 = if let Some(selection) = &plan.sync {
+            let mut script = selection.pack_script(&sources[0], &remote_archive);
+            script.push_str(&format!(
+                "sha256sum -- {}\n",
+                crate::modules::remote::session::shell_quote(&remote_archive)
+            ));
+            let output = super::super::sync::run_script(
+                &WorkspaceEnv::Wsl {
+                    distro: distro.to_string(),
+                },
+                script,
+                context.control(),
+            )
+            .await?;
+            parse_sha256(&output)?
+        } else {
+            create_wsl_archive(distro, &remote_archive, sources, context).await?
+        };
         context.set_stage(TransferStage::Verifying).await;
         verify_sources(plan, context).await?;
 
@@ -544,7 +583,16 @@ async fn run_wsl_program(
     args: &[&str],
     context: &ExecutionContext,
 ) -> RunResult<Vec<u8>> {
-    run_wsl_program_inner(distro, program, args, context, true).await
+    run_wsl_program_inner(
+        distro,
+        program,
+        args,
+        context.control(),
+        true,
+        None,
+        COMMAND_OUTPUT_LIMIT,
+    )
+    .await
 }
 
 #[cfg(windows)]
@@ -555,7 +603,16 @@ async fn run_wsl_commit_program(
     args: &[&str],
     context: &ExecutionContext,
 ) -> RunResult<Vec<u8>> {
-    run_wsl_program_inner(distro, program, args, context, false).await
+    run_wsl_program_inner(
+        distro,
+        program,
+        args,
+        context.control(),
+        false,
+        None,
+        COMMAND_OUTPUT_LIMIT,
+    )
+    .await
 }
 
 #[cfg(windows)]
@@ -564,8 +621,10 @@ async fn run_wsl_program_inner(
     distro: &str,
     program: &str,
     args: &[&str],
-    context: &ExecutionContext,
+    control: Arc<TaskControl>,
     interruptible: bool,
+    input: Option<Vec<u8>>,
+    output_limit: usize,
 ) -> RunResult<Vec<u8>> {
     crate::modules::workspace::validate_wsl_distro_name(distro)
         .map_err(|error| message(format!("invalid WSL archive environment: {error}")))?;
@@ -580,7 +639,11 @@ async fn run_wsl_program_inner(
         .arg("terax-wsl-archive")
         .arg(program)
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -588,6 +651,15 @@ async fn run_wsl_program_inner(
     let mut child = command
         .spawn()
         .map_err(|error| message(format!("start WSL archive command: {error}")))?;
+    let input_task = input.map(|input| {
+        let mut stdin = child.stdin.take().expect("piped WSL input");
+        tokio::spawn(async move {
+            stdin.write_all(&input).await?;
+            stdin.shutdown().await?;
+            drop(stdin);
+            Ok::<_, std::io::Error>(())
+        })
+    });
     let stdout = child
         .stdout
         .take()
@@ -606,13 +678,12 @@ async fn run_wsl_program_inner(
         .trim()
         .parse::<u32>()
         .map_err(|_| message("WSL archive process did not report a valid process id"))?;
-    let stdout_task = tokio::spawn(read_limited(stdout));
-    let stderr_task = tokio::spawn(read_limited(stderr));
+    let stdout_task = tokio::spawn(read_limited(stdout, output_limit));
+    let stderr_task = tokio::spawn(read_limited(stderr, COMMAND_OUTPUT_LIMIT));
     let timeout = tokio::time::sleep(COMMAND_TIMEOUT);
     tokio::pin!(timeout);
 
     let status = if interruptible {
-        let control = context.control();
         let mut stopped = false;
         loop {
             if control.is_cancelled() {
@@ -673,6 +744,12 @@ async fn run_wsl_program_inner(
     let stderr = stderr_task
         .await
         .map_err(|error| message(format!("join WSL archive stderr: {error}")))??;
+    if let Some(input_task) = input_task {
+        input_task
+            .await
+            .map_err(|error| message(format!("join WSL input: {error}")))?
+            .map_err(|error| message(format!("write WSL input: {error}")))?;
+    }
     if status.success() {
         Ok(stdout)
     } else {
@@ -700,17 +777,17 @@ async fn signal_wsl(distro: &str, pid: u32, signal: &str) -> RunResult<()> {
 }
 
 #[cfg(windows)]
-async fn read_limited<R>(reader: R) -> RunResult<Vec<u8>>
+async fn read_limited<R>(reader: R, limit: usize) -> RunResult<Vec<u8>>
 where
     R: AsyncRead + Unpin,
 {
     let mut output = Vec::new();
     reader
-        .take((COMMAND_OUTPUT_LIMIT + 1) as u64)
+        .take((limit + 1) as u64)
         .read_to_end(&mut output)
         .await
         .map_err(|error| message(format!("read WSL archive output: {error}")))?;
-    if output.len() > COMMAND_OUTPUT_LIMIT {
+    if output.len() > limit {
         return Err(message("WSL archive command output exceeded the limit"));
     }
     Ok(output)

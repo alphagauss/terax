@@ -1,8 +1,8 @@
 //! Archive 传输策略与本地安全归档。
 //!
-//! Archive 仅用于用户显式创建的 WSL 或 SSH 任务。它只在规划阶段确认顶层来源，
-//! 随后以单个 tar.gz 传输，并通过 SHA-256 和受控解包保证完整性与路径安全。归档
-//! 条目提供的路径永远不会直接交给文件系统。
+//! Archive 仅用于用户显式创建的 WSL 或 SSH 任务。普通上传只确认顶层来源，目录
+//! 同步按预扫描差异清单筛选。单个 tar.gz 通过 SHA-256 和受控解包保证完整性与路径安全，
+//! 归档条目提供的路径永远不会直接交给文件系统。
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -119,7 +119,14 @@ pub(crate) async fn build_upload_archive(
             source_identity: file.source_identity,
         });
     }
-    build_archive(entries, context).await
+    let selected = plan.sync.as_ref().map(|selection| {
+        selection
+            .entries
+            .iter()
+            .map(|(relative, entry)| (plan.directories[0].source.join(relative), entry.clone()))
+            .collect()
+    });
+    build_archive(entries, selected, context).await
 }
 
 /// 按 WSL staging 相对路径创建本地 tar.gz，跨边界时只传输这一条归档流。
@@ -153,11 +160,19 @@ pub(crate) async fn build_wsl_upload_archive(
             source_identity: file.source_identity,
         });
     }
-    build_archive(entries, context).await
+    let selected = plan.sync.as_ref().map(|selection| {
+        selection
+            .entries
+            .iter()
+            .map(|(relative, entry)| (plan.directories[0].source.join(relative), entry.clone()))
+            .collect()
+    });
+    build_archive(entries, selected, context).await
 }
 
 async fn build_archive(
     entries: Vec<PackEntry>,
+    selected: Option<std::collections::BTreeMap<PathBuf, super::sync::SyncEntry>>,
     context: &mut ExecutionContext,
 ) -> RunResult<LocalArchive> {
     let _timer = super::diagnostics::PhaseTimer::new(context.task_id(), "local_pack");
@@ -177,7 +192,13 @@ async fn build_archive(
     let control = context.control();
     let build_control = control.clone();
     let build = tokio::task::spawn_blocking(move || {
-        build_archive_blocking(&build_path, entries, &excluded_path, &build_control)
+        build_archive_blocking(
+            &build_path,
+            entries,
+            &excluded_path,
+            &build_control,
+            selected.as_ref(),
+        )
     })
     .await
     .map_err(|error| message(format!("join archive task: {error}")))?;
@@ -223,6 +244,7 @@ fn build_archive_blocking(
     entries: Vec<PackEntry>,
     excluded_path: &Path,
     control: &Arc<TaskControl>,
+    selected: Option<&std::collections::BTreeMap<PathBuf, super::sync::SyncEntry>>,
 ) -> io::Result<ArchiveBuild> {
     let file = OpenOptions::new()
         .write(true)
@@ -239,14 +261,28 @@ fn build_archive_blocking(
     while let Some(action) = pending.pop() {
         control_io(control)?;
         match action {
-            PackAction::Entry(entry) => append_pack_entry(
-                &mut archive,
-                entry,
-                &mut seen,
-                &mut file_count,
-                &mut pending,
-                control,
-            )?,
+            PackAction::Entry(entry) => {
+                if let Some(selected) = selected {
+                    let Some(expected) = selected.get(&entry.source) else {
+                        continue;
+                    };
+                    if (entry.kind == ArchiveEntryKind::File) != (expected.kind == 'f')
+                        || (entry.kind == ArchiveEntryKind::File
+                            && (entry.size != expected.size
+                                || entry.mtime as i64 != expected.modified))
+                    {
+                        return Err(source_changed_io(&entry.source));
+                    }
+                }
+                append_pack_entry(
+                    &mut archive,
+                    entry,
+                    &mut seen,
+                    &mut file_count,
+                    &mut pending,
+                    control,
+                )?;
+            }
             PackAction::DirectoryEntries {
                 source,
                 archive_path,
@@ -259,7 +295,9 @@ fn build_archive_blocking(
                         contextual_io_error(format!("read directory {}", source.display()), error)
                     })?;
                     let child_source = child.path();
-                    if child_source == excluded_path {
+                    if child_source == excluded_path
+                        || selected.is_some_and(|selected| !selected.contains_key(&child_source))
+                    {
                         pending.push(PackAction::DirectoryEntries {
                             source,
                             archive_path,
@@ -302,6 +340,11 @@ fn build_archive_blocking(
                 }
             },
         }
+    }
+    if selected.is_some_and(|selected| selected.len() != seen.len()) {
+        return Err(io::Error::other(
+            "sync source entries disappeared while packing",
+        ));
     }
     archive.finish().map_err(|error| {
         contextual_io_error(format!("finish local archive {}", path.display()), error)
@@ -912,6 +955,74 @@ fn message(value: impl Into<String>) -> TransferRunError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sync_archive_contains_only_selected_paths_and_detects_missing_sources() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(source.join("nested")).unwrap();
+        std::fs::write(source.join("nested/selected"), b"new").unwrap();
+        std::fs::write(source.join("unchanged"), b"do not transfer").unwrap();
+        let archive_path = directory.path().join("delta.tar.gz");
+        File::create(&archive_path).unwrap();
+        let make_entry = || {
+            pack_entry_from_metadata(
+                source.clone(),
+                "root".into(),
+                &std::fs::metadata(&source).unwrap(),
+            )
+            .unwrap()
+        };
+        let mut selected = std::collections::BTreeMap::new();
+        for relative in ["", "nested", "nested/selected"] {
+            let path = source.join(relative);
+            let metadata = std::fs::metadata(&path).unwrap();
+            selected.insert(
+                path,
+                super::super::sync::SyncEntry {
+                    kind: if metadata.is_dir() { 'd' } else { 'f' },
+                    size: metadata.len(),
+                    modified: archive_mtime(&metadata) as i64,
+                },
+            );
+        }
+        let control = Arc::new(TaskControl::new());
+        build_archive_blocking(
+            &archive_path,
+            vec![make_entry()],
+            &archive_path,
+            &control,
+            Some(&selected),
+        )
+        .unwrap();
+        let destination = directory.path().join("extracted");
+        let count = extract_archive_roots(
+            &archive_path,
+            vec![ExtractRoot {
+                archive_path: "root".into(),
+                destination: destination.clone(),
+                kind: ArchiveEntryKind::Directory,
+            }],
+            &control,
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(
+            std::fs::read(destination.join("nested/selected")).unwrap(),
+            b"new"
+        );
+        assert!(!destination.join("unchanged").exists());
+        std::fs::remove_file(source.join("nested/selected")).unwrap();
+        assert!(build_archive_blocking(
+            &archive_path,
+            vec![make_entry()],
+            &archive_path,
+            &control,
+            Some(&selected)
+        )
+        .is_err());
+    }
+
     fn write_test_archive(path: &Path, entry_path: &[u8], kind: EntryType) {
         let file = File::create(path).unwrap();
         let encoder = GzEncoder::new(file, Compression::fast());
@@ -1035,7 +1146,7 @@ mod tests {
         };
         let control = Arc::new(TaskControl::new());
 
-        build_archive_blocking(&archive_path, vec![entry], &archive_path, &control).unwrap();
+        build_archive_blocking(&archive_path, vec![entry], &archive_path, &control, None).unwrap();
         let destination = directory.path().join("destination");
         let files = extract_archive_roots(
             &archive_path,

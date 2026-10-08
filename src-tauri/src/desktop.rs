@@ -221,6 +221,7 @@ pub fn run() {
             remote::commands::ssh_tunnel_update,
             remote::commands::ssh_tunnel_list,
             transfers::commands::transfer_enqueue,
+            transfers::commands::transfer_sync_preview,
             transfers::commands::transfer_resolve_conflict,
             transfers::commands::transfer_ignore_failure,
             transfers::commands::transfer_retry_failure,

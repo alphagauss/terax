@@ -21,6 +21,7 @@ mod progress;
 mod scheduler;
 mod source;
 mod ssh;
+mod sync;
 mod wsl;
 
 pub(crate) use journal::remove_workspace_files;

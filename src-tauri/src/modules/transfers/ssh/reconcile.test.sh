@@ -359,4 +359,32 @@ for scenario in success rollback; do
     [ "$(stat -c %a "$directory/target/b")" = 755 ]
   fi
 done
+# 父目录文件在子目录提交期间被编辑时，必须在真正提交父批次前重新检查时间。
+directory=$root/sync_concurrent_edit
+mkdir -p "$directory/stage/m" "$directory/target/m"
+printf source > "$directory/stage/a"
+printf old > "$directory/target/a"
+printf source > "$directory/stage/m/file"
+touch -d @20 "$directory/stage/a"
+touch -d @10 "$directory/target/a"
+bash -c '
+  source "$1"
+  cd "$2"
+  definition=$(declare -f terax_record_directory_metadata)
+  eval "${definition/terax_record_directory_metadata/terax_original_directory_metadata}"
+  terax_record_directory_metadata() {
+    terax_original_directory_metadata "$@"
+    if [ "$1" = target/m ]; then
+      printf concurrent > target/a
+      touch -d @30 target/a
+    fi
+  }
+  trap terax_rollback EXIT
+  terax_reconcile merge_newer stage target backup
+  terax_apply_directory_metadata
+  trap - EXIT
+  [ "$(cat target/a)" = concurrent ]
+  [ "$(cat target/m/file)" = source ]
+  [ ! -e backup/a ]
+' -- "$script" "$directory"
 printf 'batch reconciliation checks passed\n'

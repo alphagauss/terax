@@ -53,11 +53,26 @@ export type TransferStage =
   | "finished";
 
 export type EnqueueTransferRequest = {
+  sync?: {
+    excludes: string[];
+    excludeDirectories: string[];
+    respectGitignore: boolean;
+  };
   destinationName?: string;
   direction: TransferDirection;
   strategy: TransferStrategy;
   sources: string[];
   destination: string;
+};
+
+export type SyncPreview = {
+  added: number;
+  updated: number;
+  skipped: number;
+  conflicts: number;
+  bytes: number;
+  items: { path: string; action: "add" | "update" | "skip" | "conflict" }[];
+  truncated: boolean;
 };
 
 export type TransferEntryKind = "file" | "directory" | "other";

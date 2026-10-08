@@ -635,6 +635,7 @@ impl TransferManager {
         };
         let destination = retry_destination_parent(&workspace, &failure.destination_path)?;
         let request = EnqueueTransferRequest {
+            sync: None,
             destination_name: if direction == TransferDirection::Download {
                 std::path::Path::new(&failure.destination_path)
                     .file_name()
@@ -820,7 +821,9 @@ impl TransferManager {
             let mut prepared =
                 planner::prepare(&workspace, &request, &id, request.strategy, &mut context).await?;
             let _reservation = self.scheduler.reserve(prepared.target_keys())?;
-            if conflicts::resolve(&mut prepared, request.strategy, &mut context).await? {
+            if request.sync.is_none()
+                && conflicts::resolve(&mut prepared, request.strategy, &mut context).await?
+            {
                 prepared.publish_totals(&mut context).await?;
             }
             let _permit = self.scheduler.acquire(&control).await?;
@@ -1624,6 +1627,7 @@ mod tests {
                 updated_at: created_at,
             },
             request: EnqueueTransferRequest {
+                sync: None,
                 destination_name: None,
                 direction: TransferDirection::Upload,
                 strategy: TransferStrategy::Direct,

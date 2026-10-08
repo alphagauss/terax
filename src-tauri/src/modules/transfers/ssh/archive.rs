@@ -161,8 +161,24 @@ pub(crate) async fn execute_download(
             command.push(' ');
             command.push_str(&shell_quote(&format!("./{relative}")));
         }
-        let (archive_size, archive_sha256) =
-            create_remote_archive(&plan.workspace, &command, &archive_path, context).await?;
+        let (archive_size, archive_sha256) = if let Some(selection) = &plan.sync {
+            let mut script = selection.pack_script(&plan.roots[0].source_path, &archive_path);
+            script.push_str(&format!(
+                "wc -c < {}; {}\n",
+                shell_quote(&archive_path),
+                remote_checksum_command(&shell_quote(&archive_path))
+            ));
+            let output = run_sync_script(
+                &plan.workspace,
+                script,
+                context.control(),
+                COMMAND_OUTPUT_LIMIT,
+            )
+            .await?;
+            parse_remote_archive_info(&output)?
+        } else {
+            create_remote_archive(&plan.workspace, &command, &archive_path, context).await?
+        };
         context.set_stage(TransferStage::Verifying).await;
         verify_remote_download_sources(&plan, context).await?;
         context.set_archive_size(archive_size).await?;
@@ -392,6 +408,47 @@ async fn run_remote(
     control: Arc<TaskControl>,
     timeout: Duration,
 ) -> RunResult<ExecOutput> {
+    run_remote_with_input(
+        workspace,
+        command,
+        control,
+        timeout,
+        None,
+        COMMAND_OUTPUT_LIMIT,
+    )
+    .await
+}
+
+/// 同步脚本复用归档命令控制，不为每个文件新建请求。
+pub(crate) async fn run_sync_script(
+    workspace: &Arc<RemoteWorkspace>,
+    script: String,
+    control: Arc<TaskControl>,
+    output_limit: usize,
+) -> RunResult<Vec<u8>> {
+    let output = run_remote_with_input(
+        workspace,
+        "bash -s",
+        control,
+        COMMAND_TIMEOUT,
+        Some(script.into_bytes()),
+        output_limit,
+    )
+    .await?;
+    if output.exit_code != Some(0) || output.timed_out || output.truncated {
+        return Err(remote_command_error("sync script", &output));
+    }
+    Ok(output.stdout)
+}
+
+async fn run_remote_with_input(
+    workspace: &Arc<RemoteWorkspace>,
+    command: &str,
+    control: Arc<TaskControl>,
+    timeout: Duration,
+    input: Option<Vec<u8>>,
+    output_limit: usize,
+) -> RunResult<ExecOutput> {
     let mut channel = workspace
         .handle
         .channel_open_session()
@@ -402,6 +459,27 @@ async fn run_remote(
         .await
         .map_err(|error| message(format!("start archive command: {error}")))?;
     let deadline = tokio::time::Instant::now() + timeout;
+    if let Some(input) = input {
+        let send = async {
+            channel
+                .data_bytes(input)
+                .await
+                .map_err(|error| message(format!("write sync input: {error}")))?;
+            channel
+                .eof()
+                .await
+                .map_err(|error| message(format!("finish sync input: {error}")))
+        };
+        let result = tokio::select! {
+            result = tokio::time::timeout_at(deadline, send) => result.unwrap_or_else(|_| Err(message("sync input timed out"))),
+            _ = control.cancelled() => Err(TransferRunError::Canceled),
+        };
+        if let Err(error) = result {
+            let _ = channel.signal(Sig::KILL).await;
+            let _ = channel.close().await;
+            return Err(error);
+        }
+    }
     let mut output = ExecOutput::default();
     let mut remote_paused = false;
     loop {
@@ -424,10 +502,10 @@ async fn run_remote(
             message = tokio::time::timeout_at(deadline, channel.wait()) => {
                 match message {
                     Ok(Some(ChannelMsg::Data { data })) => {
-                        append_output(&mut output.stdout, &data, &mut output.truncated);
+                        append_output(&mut output.stdout, &data, &mut output.truncated, output_limit);
                     }
                     Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                        append_output(&mut output.stderr, &data, &mut output.truncated);
+                        append_output(&mut output.stderr, &data, &mut output.truncated, COMMAND_OUTPUT_LIMIT);
                     }
                     Ok(Some(ChannelMsg::ExitStatus { exit_status })) => {
                         output.exit_code = Some(exit_status as i32);
@@ -442,6 +520,11 @@ async fn run_remote(
                     }
                 }
             }
+        }
+        if output.truncated {
+            let _ = channel.signal(Sig::KILL).await;
+            let _ = channel.close().await;
+            return Ok(output);
         }
     }
 }
@@ -689,8 +772,8 @@ fn remote_command_error(action: &str, output: &ExecOutput) -> TransferRunError {
     TransferRunError::failed(code, format!("{action}: {reason}"))
 }
 
-fn append_output(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool) {
-    let remaining = COMMAND_OUTPUT_LIMIT.saturating_sub(target.len());
+fn append_output(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool, limit: usize) {
+    let remaining = limit.saturating_sub(target.len());
     if remaining < data.len() {
         *truncated = true;
     }

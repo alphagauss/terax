@@ -70,6 +70,8 @@ pub enum TransferStage {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnqueueTransferRequest {
+    /// 指定时同步单个目录的内容，仅新增及更新修改时间更晚的文件。
+    pub sync: Option<FolderSyncOptions>,
     pub direction: TransferDirection,
     pub strategy: TransferStrategy,
     pub sources: Vec<String>,
@@ -81,6 +83,43 @@ pub struct EnqueueTransferRequest {
 impl EnqueueTransferRequest {
     /// 校验不依赖文件系统的请求边界，并保留路径首尾的合法空格。
     pub fn normalize(mut self) -> Result<Self, TransferFailure> {
+        if let Some(options) = &self.sync {
+            if self.strategy != TransferStrategy::Archive
+                || self.sources.len() != 1
+                || self.destination_name.is_some()
+            {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::InvalidRequest,
+                    "folder sync requires one directory and archive strategy",
+                ));
+            }
+            options.validate()?;
+            let remote = match self.direction {
+                TransferDirection::Upload => &mut self.destination,
+                TransferDirection::Download => &mut self.sources[0],
+            };
+            // 同步目标映射到目录本身，先消除尾斜杠和当前目录段，避免 WSL 同级 staging 多套一层。
+            if !remote.starts_with('/')
+                || remote.chars().any(char::is_control)
+                || remote.split('/').any(|part| part == "..")
+            {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::InvalidRequest,
+                    "invalid sync root",
+                ));
+            }
+            let parts: Vec<_> = remote
+                .split('/')
+                .filter(|part| !part.is_empty() && *part != ".")
+                .collect();
+            if parts.is_empty() {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::InvalidRequest,
+                    "cannot sync a filesystem root",
+                ));
+            }
+            *remote = format!("/{}", parts.join("/"));
+        }
         self.sources.retain(|source| !source.trim().is_empty());
         if self.sources.is_empty() {
             return Err(TransferFailure::new(
@@ -130,6 +169,40 @@ impl EnqueueTransferRequest {
             }
         }
         Ok(self)
+    }
+}
+
+/// 显式名称排除优先于源端目录内的 .gitignore；目录排除项不匹配同名文件。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSyncOptions {
+    pub excludes: Vec<String>,
+    pub exclude_directories: Vec<String>,
+    pub respect_gitignore: bool,
+}
+
+impl FolderSyncOptions {
+    pub(crate) fn validate(&self) -> Result<(), TransferFailure> {
+        if self.excludes.len() + self.exclude_directories.len() > 128
+            || self
+                .excludes
+                .iter()
+                .chain(&self.exclude_directories)
+                .any(|name| {
+                    name.is_empty()
+                        || name == "."
+                        || name == ".."
+                        || name.len() > 255
+                        || name.contains(['/', '\\'])
+                        || name.chars().any(char::is_control)
+                })
+        {
+            return Err(TransferFailure::new(
+                TransferErrorCode::InvalidRequest,
+                "invalid sync exclusions",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -234,8 +307,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sync_normalizes_remote_directory_components_before_staging_mapping() {
+        let request = EnqueueTransferRequest {
+            sync: Some(FolderSyncOptions::default()),
+            direction: TransferDirection::Upload,
+            strategy: TransferStrategy::Archive,
+            sources: vec!["C:/local".into()],
+            destination: "//home//project/./".into(),
+            destination_name: None,
+        };
+        assert_eq!(
+            request.clone().normalize().unwrap().destination,
+            "/home/project"
+        );
+        let mut download = request.clone();
+        download.direction = TransferDirection::Download;
+        download.sources = vec!["/home/project/./".into()];
+        download.destination = "C:/local".into();
+        assert_eq!(download.normalize().unwrap().sources, ["/home/project"]);
+        for path in ["/", "/./", "/home/../project", "relative"] {
+            let mut invalid = request.clone();
+            invalid.destination = path.into();
+            assert!(invalid.normalize().is_err());
+        }
+    }
+
+    #[test]
     fn save_as_name_is_limited_to_single_file_direct_downloads() {
         let request = EnqueueTransferRequest {
+            sync: None,
             direction: TransferDirection::Download,
             strategy: TransferStrategy::Direct,
             sources: vec!["/home/file.txt".into()],
@@ -267,6 +367,7 @@ mod tests {
     #[test]
     fn normalize_rejects_empty_requests_without_rewriting_paths() {
         let normalized = EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
@@ -279,6 +380,7 @@ mod tests {
         assert_eq!(normalized.destination, " /tmp ");
 
         assert!(EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Download,
             strategy: TransferStrategy::Archive,
@@ -303,6 +405,7 @@ mod tests {
     #[test]
     fn normalize_caps_untrusted_request_size() {
         let error = EnqueueTransferRequest {
+            sync: None,
             destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
