@@ -941,11 +941,21 @@ mod tests {
             .unwrap();
             assert!(preview.items.iter().any(|item| item.path == "code.rs"));
             assert!(!preview.items.iter().any(|item| item.path == "drop.skip"));
-            let commit = format!("set -e\n{}\ncd {root}\nmkdir -p stage/nested\nprintf source > stage/nested/file\nprintf source > stage/equal\nprintf source > stage/new\ntouch -d @20 stage/nested/file stage/equal\ntouch -d @30 target/nested/file\nidentity=$(stat -c %i target)\ntrap terax_rollback EXIT\nterax_reconcile merge_newer stage target backup\nterax_apply_directory_metadata\ntrap - EXIT\n[ \"$(stat -c %i target)\" = \"$identity\" ]\n[ \"$(cat target/nested/file)\" = old ]\n[ \"$(cat target/equal)\" = target ]\n[ \"$(cat target/new)\" = source ]\n[ \"$(cat target/old-name)\" = keep ]\n", include_str!("ssh/reconcile.sh").replace('\r', ""));
+            let (transaction, _) =
+                super::super::commit::remote_commit_command(&[super::super::commit::RemoteRoot {
+                    source_path: source.clone(),
+                    stage: format!("{root}/stage"),
+                    final_path: target.clone(),
+                    kind: super::super::models::TransferEntryKind::Directory,
+                    destination_kind: Some(super::super::models::TransferEntryKind::Directory),
+                    mode: super::super::commit::RootCommitMode::MergeNewer,
+                    merge_preconditions: Vec::new(),
+                }]);
+            let commit = format!("set -e\ncd {root}\nmkdir -p stage/nested\nprintf source > stage/nested/file\nprintf source > stage/equal\nprintf source > stage/new\ntouch -d @20 stage/nested/file stage/equal\ntouch -d @30 target/nested/file\nidentity=$(stat -c %i target)\n{transaction}\n[ \"$(stat -c %i target)\" = \"$identity\" ]\n[ \"$(cat target/nested/file)\" = old ]\n[ \"$(cat target/equal)\" = target ]\n[ \"$(cat target/new)\" = source ]\n[ \"$(cat target/old-name)\" = keep ]\n");
             run_script(&env, commit, control.clone()).await.unwrap();
-            let reconciliation = include_str!("ssh/reconcile.sh").replace('\r', "");
-            let regression = include_str!("ssh/reconcile.test.sh").replace('\r', "");
-            let script = format!("set -e\nprintf '%s' {} > {root}/reconcile.sh\nmkdir {root}/regression\nbash -c {} terax-reconcile-test {root}/reconcile.sh {root}/regression\n", shell_quote(&reconciliation), shell_quote(&regression));
+            let reconciliation = super::super::commit::remote_commit_command(&[]).0;
+            let regression = include_str!("ssh/reconcile.test.sh");
+            let script = format!("set -e\nprintf '%s' {} > {root}/reconcile.sh\nmkdir {root}/regression\nbash -c {} terax-reconcile-test {root}/reconcile.sh {root}/regression\n", shell_quote(&reconciliation), shell_quote(regression));
             run_script(&env, script, control.clone()).await.unwrap();
 
             run_script(

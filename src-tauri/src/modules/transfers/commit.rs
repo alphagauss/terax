@@ -366,7 +366,7 @@ pub(crate) async fn commit_remote_roots_tracked(
 /// 为 SSH 或 WSL 目标构建一次服务器本地提交及其受限清理集合。
 pub(crate) fn remote_commit_command(roots: &[RemoteRoot]) -> (String, Vec<String>) {
     let cleanup_paths = remote_commit_cleanup_paths(roots);
-    let command = remote_transaction_command(roots, &cleanup_paths);
+    let command = remote_transaction_command(roots, &cleanup_paths, REMOTE_RECONCILE_SCRIPT);
     (command, cleanup_paths)
 }
 
@@ -386,8 +386,13 @@ fn remote_commit_cleanup_paths(roots: &[RemoteRoot]) -> Vec<String> {
 }
 
 /// 生成可单元测试的 SSH 原位目录提交与反向回滚脚本。
-fn remote_transaction_command(roots: &[RemoteRoot], cleanup_paths: &[String]) -> String {
-    let mut command = String::from(REMOTE_RECONCILE_SCRIPT);
+fn remote_transaction_command(
+    roots: &[RemoteRoot],
+    cleanup_paths: &[String],
+    script: &str,
+) -> String {
+    // 嵌入脚本可能由 Windows 编辑器写入 CRLF，必须在追加路径参数前统一换行。
+    let mut command = script.replace("\r\n", "\n");
     for root in roots {
         command.push_str(&remote_precondition(root));
         if root.mode != RootCommitMode::Create {
@@ -1502,7 +1507,7 @@ mod tests {
         ];
 
         let cleanup_paths = remote_commit_cleanup_paths(&roots);
-        let command = remote_transaction_command(&roots, &cleanup_paths);
+        let command = remote_transaction_command(&roots, &cleanup_paths, REMOTE_RECONCILE_SCRIPT);
 
         assert!(command.contains("transfer destination changed after conflict approval"));
         assert!(command
@@ -1520,6 +1525,18 @@ mod tests {
         assert!(command.ends_with("fi\n"));
         assert!(!command.contains("rm -rf -- '/target/.terax-part-task-1.backup'"));
         assert!(!command.contains("rm -rf -- '/target/.terax-part-task-2.backup'"));
+
+        let lf = REMOTE_RECONCILE_SCRIPT.replace("\r\n", "\n");
+        let expected = remote_transaction_command(&roots, &cleanup_paths, &lf);
+        assert_eq!(remote_commit_command(&roots).0, expected);
+        for script in [
+            lf.clone(),
+            lf.replace('\n', "\r\n"),
+            lf.replacen('\n', "\r\n", 4),
+        ] {
+            let command = remote_transaction_command(&roots, &cleanup_paths, &script);
+            assert_eq!(command, expected);
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -1527,7 +1544,7 @@ mod tests {
     fn remote_file_batches_preserve_directories_and_rollback_partial_moves() {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("reconcile.sh");
-        std::fs::write(&script, REMOTE_RECONCILE_SCRIPT).unwrap();
+        std::fs::write(&script, remote_commit_command(&[]).0).unwrap();
         let output = std::process::Command::new("bash")
             .arg("-c")
             .arg(include_str!("ssh/reconcile.test.sh"))
@@ -1569,7 +1586,11 @@ mod tests {
         let cleanup_paths = remote_commit_cleanup_paths(std::slice::from_ref(&root));
         let output = std::process::Command::new("bash")
             .arg("-c")
-            .arg(remote_transaction_command(&[root], &cleanup_paths))
+            .arg(remote_transaction_command(
+                &[root],
+                &cleanup_paths,
+                REMOTE_RECONCILE_SCRIPT,
+            ))
             .output()
             .unwrap();
 
@@ -1626,7 +1647,11 @@ mod tests {
 
         let output = std::process::Command::new("bash")
             .arg("-c")
-            .arg(remote_transaction_command(&[root], &cleanup_paths))
+            .arg(remote_transaction_command(
+                &[root],
+                &cleanup_paths,
+                REMOTE_RECONCILE_SCRIPT,
+            ))
             .output()
             .unwrap();
 
