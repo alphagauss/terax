@@ -161,6 +161,41 @@ fn quick_diff_baseline_uses_empty_content_for_files_added_after_head() {
 }
 
 #[test]
+fn quick_diff_baseline_excludes_ignored_files_but_preserves_tracked_files() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file(".gitignore", "logs/\n");
+    fx.write_file("logs/app.log", "log entry\n");
+    let path = to_canon(fx.repo_path.join("logs/app.log"));
+
+    // 忽略规则在首次提交前后都生效；强制加入索引后仍应提供新增基线。
+    for committed in [false, true] {
+        if committed {
+            fx.run_git(&["add", ".gitignore"]);
+            fx.run_git(&["commit", "-q", "-m", "seed"]);
+        }
+        let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+            .expect("ignored baseline");
+        assert!(matches!(baseline, GitQuickDiffBaseline::Ignored));
+    }
+
+    fx.run_git(&["add", "-f", "logs/app.log"]);
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("staged baseline");
+    assert!(matches!(baseline, GitQuickDiffBaseline::Text { content, .. } if content.is_empty()));
+
+    fx.run_git(&["commit", "-q", "-m", "track log"]);
+    fx.write_file("logs/app.log", "log entry\nnew entry\n");
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("tracked baseline");
+    assert!(
+        matches!(baseline, GitQuickDiffBaseline::Text { content, .. } if content == "log entry\n")
+    );
+}
+
+#[test]
 fn quick_diff_baseline_rejects_untracked_binary_and_oversized_files() {
     if skip_if_no_git() {
         return;

@@ -85,6 +85,7 @@ type GitBaselineResult =
       headSha: string | null;
       content: string;
     }
+  | { kind: "ignored" }
   | { kind: "unsupported" };
 
 type Listener = () => void;
@@ -98,9 +99,13 @@ const REMOTE_DIGEST_POLL_COUNT = Math.ceil(
   REMOTE_DIGEST_POLL_MS / REMOTE_POLL_MS,
 );
 
-/** 组合 Quick Diff 基线的仓库与提交身份，避免相同 SHA 的不同仓库共享缓存。 */
-function gitBaselineKey(repoRoot: string, headSha: string | null): string {
-  return `${repoRoot}\0${headSha ?? ""}`;
+/** 将文件在变更列表中的可见性纳入基线缓存，忽略规则变化无需等待 HEAD 更新。 */
+function gitBaselineKey(
+  repoRoot: string,
+  headSha: string | null,
+  visibility: string,
+): string {
+  return `${repoRoot}\0${headSha ?? ""}\0${visibility}`;
 }
 
 const models = new Map<string, SharedDocumentModel>();
@@ -350,9 +355,13 @@ class SharedDocumentModel {
     void this.loadInitial(true);
   };
 
-  /** 仓库或 HEAD 变化时刷新共享 Quick Diff 基线，相同资源版本不重复执行 IPC。 */
-  syncGitBaseline = (repoRoot: string, headSha: string | null): void => {
-    const requestedKey = gitBaselineKey(repoRoot, headSha);
+  /** 仓库、HEAD 或变更列表可见性变化时刷新基线，稳定状态不重复执行 IPC。 */
+  syncGitBaseline = (
+    repoRoot: string,
+    headSha: string | null,
+    visibility = "absent",
+  ): void => {
+    const requestedKey = gitBaselineKey(repoRoot, headSha, visibility);
     if (this.gitBaselineLoadedKey === requestedKey) return;
     if (
       this.gitBaselinePromise &&
@@ -368,9 +377,11 @@ class SharedDocumentModel {
       gitBaseline: null,
     });
     this.gitBaselineRequestedKey = requestedKey;
-    const pending = this.loadGitBaseline().finally(() => {
-      if (this.gitBaselinePromise === pending) this.gitBaselinePromise = null;
-    });
+    const pending = this.loadGitBaseline(requestedKey, visibility).finally(
+      () => {
+        if (this.gitBaselinePromise === pending) this.gitBaselinePromise = null;
+      },
+    );
     this.gitBaselinePromise = pending;
   };
 
@@ -444,7 +455,10 @@ class SharedDocumentModel {
   }
 
   /** 读取当前文档唯一的 HEAD 文本基线，并丢弃过期请求。 */
-  private async loadGitBaseline(): Promise<void> {
+  private async loadGitBaseline(
+    requestedKey: string,
+    visibility: string,
+  ): Promise<void> {
     const generation = ++this.gitBaselineGeneration;
     try {
       const result = await invoke<GitBaselineResult>(
@@ -454,8 +468,10 @@ class SharedDocumentModel {
       if (generation !== this.gitBaselineGeneration) return;
       this.gitBaselineLoadedKey =
         result.kind === "text"
-          ? gitBaselineKey(result.repoRoot, result.headSha)
-          : null;
+          ? gitBaselineKey(result.repoRoot, result.headSha, visibility)
+          : result.kind === "ignored"
+            ? requestedKey
+            : null;
       this.publish({
         doc: this.snapshot.doc,
         dirty: this.snapshot.dirty,

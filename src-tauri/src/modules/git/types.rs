@@ -107,6 +107,7 @@ pub enum GitQuickDiffBaseline {
         head_sha: Option<String>,
         content: String,
     },
+    Ignored,
     Unsupported,
 }
 

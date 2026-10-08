@@ -346,7 +346,7 @@ pub fn diff(
 
 /// 读取文件在当前 HEAD 中的文本基线。
 ///
-/// HEAD 中尚不存在的文本文件返回空基线，使新增文件显示为整文件新增。
+/// 被 Git 忽略的文件不提供基线；HEAD 中尚不存在的其他文本文件返回空基线。
 pub fn quick_diff_baseline(
     registry: &WorkspaceRegistry,
     path: &str,
@@ -374,6 +374,17 @@ pub fn quick_diff_baseline(
     let relative_path = relative_git_path(&repo_root.git_path, &file_path, repo_root.remote)?;
     let relative_path =
         pathspec_from_input(&repo_root.local_path, &relative_path, repo_root.remote)?;
+    // 保留 Git 默认的索引检查，匹配忽略规则但已跟踪的文件仍需显示变更。
+    let ignored = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["check-ignore", "-q", "--", &relative_path],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if ignored.timed_out || ignored.exit_code != Some(1) {
+        ensure_success(&ignored, "git check-ignore failed")?;
+        return Ok(GitQuickDiffBaseline::Ignored);
+    }
     // 后续始终读取已解析出的 SHA，避免 HEAD 在多条 Git 命令之间移动后返回错配内容。
     let content = if let Some(head_sha) = revision.as_deref() {
         let object = format!("{head_sha}:{relative_path}");

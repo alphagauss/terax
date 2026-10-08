@@ -67,24 +67,38 @@ export function useDocument({ path, active = true, onDirtyChange }: Options) {
     ) {
       return;
     }
+    const repoRoot = repository.repo.repoRoot;
     const fileIdentity = documentPathIdentity(workspace, path);
-    const rootIdentity = documentPathIdentity(
-      workspace,
-      repository.repo.repoRoot,
-    ).replace(/\/$/, "");
+    const rootIdentity = documentPathIdentity(workspace, repoRoot).replace(
+      /\/$/,
+      "",
+    );
     if (
       fileIdentity === rootIdentity ||
       fileIdentity.startsWith(`${rootIdentity}/`)
     ) {
+      const changed = repository.status.changedFiles.some(
+        (file) =>
+          documentPathIdentity(workspace, `${repoRoot}/${file.path}`) ===
+          fileIdentity,
+      );
+      // 列表缺项不等于被忽略，交由原生接口确认；截断时随刷新重新检查。
+      const visibility = repository.status.truncated
+        ? `incomplete:${repository.revision}`
+        : changed
+          ? "changed"
+          : "absent";
       model.syncGitBaseline(
         repository.repo.repoRoot,
         repository.status.headSha,
+        visibility,
       );
     }
   }, [
     model,
     path,
     repository.repo,
+    repository.revision,
     repository.status,
     snapshot.doc.status,
     workspace,

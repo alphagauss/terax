@@ -45,7 +45,7 @@ vi.mock("sonner", () => ({
 import { resetSharedDocumentModelsForTests } from "./documentModel";
 import { useDocument } from "./useDocument";
 
-const controller: RepositoryController = {
+const controller = {
   repo: {
     repoRoot: "C:/work",
     branch: "main",
@@ -77,7 +77,7 @@ const controller: RepositoryController = {
   graphRevision: null,
   refresh: vi.fn(),
   runRemoteAction: vi.fn(),
-};
+} satisfies RepositoryController;
 
 let root: Root | null = null;
 
@@ -92,6 +92,106 @@ afterEach(async () => {
 });
 
 describe("useDocument", () => {
+  it("refreshes ignore eligibility in both directions without polling unchanged baselines", async () => {
+    let ignored = true;
+    let reads = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") {
+        return {
+          kind: "text",
+          content: "log\n",
+          size: 4,
+          mtime: 1,
+          revision: "disk",
+        };
+      }
+      if (command === "fs_file_version") {
+        return { revision: "disk", size: 4, mtime: 1 };
+      }
+      if (command === "git_quick_diff_baseline") {
+        reads += 1;
+        return ignored
+          ? { kind: "ignored" }
+          : {
+              kind: "text",
+              repoRoot: "C:/work",
+              relativePath: "logs/app.log",
+              headSha: "head",
+              content: "",
+            };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    function Probe() {
+      const state = useDocument({ path: "C:/work/logs/app.log" });
+      return <span>{state.gitBaseline === null ? "disabled" : "enabled"}</span>;
+    }
+    let revision = 0;
+    const refresh = async (truncated = false, clean = false) => {
+      await act(async () =>
+        root?.render(
+          <RepositoryProvider
+            controller={{
+              ...controller,
+              revision: ++revision,
+              status: {
+                ...controller.status,
+                truncated,
+                changedFiles:
+                  ignored || truncated || clean
+                    ? []
+                    : [
+                        {
+                          path: "logs/app.log",
+                          indexStatus: "?",
+                          worktreeStatus: "?",
+                          originalPath: null,
+                          staged: false,
+                          unstaged: false,
+                          untracked: true,
+                          statusLabel: "untracked",
+                        },
+                      ],
+              },
+            }}
+          >
+            <Probe />
+          </RepositoryProvider>,
+        ),
+      );
+    };
+    await refresh();
+    expect(reads).toBe(1);
+    await refresh();
+    expect(reads).toBe(1);
+    ignored = false;
+    await refresh();
+    expect(container.textContent).toBe("enabled");
+    expect(reads).toBe(2);
+    await refresh();
+    expect(reads).toBe(2);
+    ignored = true;
+    await refresh();
+    expect(container.textContent).toBe("disabled");
+    expect(reads).toBe(3);
+    await refresh();
+    expect(reads).toBe(3);
+    // 截断列表不能证明文件仍被忽略，需允许重新查询。
+    ignored = false;
+    await refresh(true);
+    expect(container.textContent).toBe("enabled");
+    expect(reads).toBe(4);
+    // 已跟踪文件恢复干净后也会从列表消失，但仍需保留基线以显示未保存编辑。
+    await refresh(false, true);
+    expect(container.textContent).toBe("enabled");
+    expect(reads).toBe(5);
+    await refresh(false, true);
+    expect(reads).toBe(5);
+  });
+
   it("publishes the repository HEAD baseline after loading a text document", async () => {
     mocks.invoke.mockImplementation(async (command: string) => {
       if (command === "fs_read_file") {
