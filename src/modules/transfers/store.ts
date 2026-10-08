@@ -4,6 +4,8 @@
  */
 
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { create } from "zustand";
 import { transferNative } from "./native";
 import type { TransferTask } from "./types";
@@ -135,6 +137,29 @@ export function requestTransferPanel(id: string): void {
 
 /** 在状态栏挂载期间订阅传输事件，并在订阅建立后读取完整快照。 */
 export function useTransferBridge(): void {
+  const { t } = useTranslation("explorer");
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void transferNative
+      .onSyncSaveFailed(() => {
+        if (active) toast.error(t("sync.saveFailed"));
+      })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((error) =>
+        console.error(
+          "[transfers] failed to listen for sync settings errors",
+          error,
+        ),
+      );
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [t]);
   useEffect(() => {
     let active = true;
     let initialized = false;

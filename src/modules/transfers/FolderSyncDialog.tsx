@@ -1,5 +1,12 @@
 /** 选择目录内容同步方向，预览只读差异，并交给原生后台任务执行。 */
-import { useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { HelpCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -22,6 +29,7 @@ import { transferNative } from "@/modules/transfers/native";
 import { requestTransferPanel } from "@/modules/transfers/store";
 import type {
   EnqueueTransferRequest,
+  FolderSyncSettings,
   SyncPreview,
   TransferDirection,
 } from "@/modules/transfers/types";
@@ -72,15 +80,46 @@ export function FolderSyncDialog({
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [previewGroup, setPreviewGroup] =
     useState<(typeof PREVIEW_GROUPS)[number]>("transfer");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
-  useEffect(
-    () => () => {
+  const applySettings = useCallback((settings: FolderSyncSettings | null) => {
+    setLocalPath(settings?.localPath ?? "");
+    setDirection(settings?.direction ?? "upload");
+    setRespectGitignore(settings?.respectGitignore ?? true);
+    setExcludeGit(settings?.excludeGit ?? true);
+    setExcludeDirectories(settings?.excludeDirectories ?? []);
+    setExcludes(settings?.excludes ?? []);
+    setDraftExclude("");
+    setExcludeError("");
+    setPreview(null);
+    setPreviewGroup("transfer");
+    setError("");
+  }, []);
+  const reportSettingsLoadFailure = useEffectEvent(() => {
+    applySettings(null);
+    setError(t("sync.loadFailed"));
+  });
+  useEffect(() => {
+    const current = ++generation.current;
+    setBusy(true);
+    void transferNative
+      .syncSettings(remotePath)
+      .then((settings) => {
+        if (current === generation.current) applySettings(settings);
+      })
+      .catch(() => {
+        if (current === generation.current) {
+          reportSettingsLoadFailure();
+        }
+      })
+      .finally(() => {
+        if (current === generation.current) setBusy(false);
+      });
+    return () => {
       generation.current += 1;
-    },
-    [],
-  );
+    };
+  }, [remotePath, applySettings]);
   const invalidate = () => {
     generation.current += 1;
     setPreview(null);
@@ -92,7 +131,8 @@ export function FolderSyncDialog({
     sources: [direction === "upload" ? localPath : remotePath],
     destination: direction === "upload" ? remotePath : localPath,
     sync: {
-      excludes: [...new Set([...(excludeGit ? [".git"] : []), ...excludes])],
+      excludeGit,
+      excludes,
       excludeDirectories,
       respectGitignore,
     },
@@ -456,26 +496,40 @@ export function FolderSyncDialog({
             </p>
           )}
         </div>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            disabled={busy || !localPath || !!draftExclude.trim()}
-            onClick={() => void run(false)}
-          >
-            {busy ? t("sync.working") : t("sync.preview")}
-          </Button>
-          <Button
-            disabled={
-              busy ||
-              !!draftExclude.trim() ||
-              !preview ||
-              preview.conflicts > 0 ||
-              preview.added + preview.updated === 0
-            }
-            onClick={() => void run(true)}
-          >
-            {t("sync.start")}
-          </Button>
+        <DialogFooter className="justify-between">
+          <Hint content={t("sync.resetHint")}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                invalidate();
+                applySettings(null);
+              }}
+            >
+              {t("sync.reset")}
+            </Button>
+          </Hint>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={busy || !localPath || !!draftExclude.trim()}
+              onClick={() => void run(false)}
+            >
+              {busy ? t("sync.working") : t("sync.preview")}
+            </Button>
+            <Button
+              disabled={
+                busy ||
+                !!draftExclude.trim() ||
+                !preview ||
+                preview.conflicts > 0 ||
+                preview.added + preview.updated === 0
+              }
+              onClick={() => void run(true)}
+            >
+              {t("sync.start")}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

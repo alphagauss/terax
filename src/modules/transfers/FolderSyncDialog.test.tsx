@@ -10,20 +10,23 @@ const mocks = vi.hoisted(() => ({
   pick: vi.fn(),
   panel: vi.fn(),
   close: vi.fn(),
+  settings: vi.fn(),
 }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: { count?: number; bytes?: string }) => {
-      if (key === "sync.summary")
-        return `${key} ${values?.count} ${values?.bytes}`;
-      if (key.startsWith("sync.previewGroups."))
-        return `${key} ${values?.count}`;
-      return key;
-    },
-  }),
-}));
+vi.mock("react-i18next", () => {
+  const t = (key: string, values?: { count?: number; bytes?: string }) => {
+    if (key === "sync.summary")
+      return `${key} ${values?.count} ${values?.bytes}`;
+    if (key.startsWith("sync.previewGroups.")) return `${key} ${values?.count}`;
+    return key;
+  };
+  return { useTranslation: () => ({ t }) };
+});
 vi.mock("@/modules/transfers/native", () => ({
-  transferNative: { syncPreview: mocks.preview, enqueue: mocks.enqueue },
+  transferNative: {
+    syncPreview: mocks.preview,
+    enqueue: mocks.enqueue,
+    syncSettings: mocks.settings,
+  },
 }));
 vi.mock("@/modules/transfers/dialogs", () => ({
   pickDownloadDirectory: mocks.pick,
@@ -48,6 +51,7 @@ let container: HTMLDivElement;
 let root: Root;
 beforeEach(async () => {
   vi.clearAllMocks();
+  mocks.settings.mockResolvedValue(null);
   mocks.pick.mockResolvedValue("C:/local/project");
   mocks.preview.mockResolvedValue({
     added: 1,
@@ -91,6 +95,126 @@ it("does not let a closed dialog's enqueue completion close a later dialog", asy
   expect(mocks.close).not.toHaveBeenCalled();
   expect(container.textContent).toContain("/srv/other");
 });
+
+it("loads successful settings by environment directory and resets only the current form", async () => {
+  const saved = {
+    localPath: "D:/saved/project",
+    direction: "download",
+    respectGitignore: false,
+    excludeGit: false,
+    excludeDirectories: ["target", "dist"],
+    excludes: [".git", ".cache"],
+  };
+  mocks.settings.mockResolvedValue(saved);
+  await act(async () => root.render(null));
+  await act(async () =>
+    root.render(
+      <FolderSyncDialog remotePath="/srv/project/" onClose={mocks.close} />,
+    ),
+  );
+  expect(mocks.settings).toHaveBeenLastCalledWith("/srv/project/");
+  expect(container.textContent).toContain(saved.localPath);
+  expect(button("sync.download").getAttribute("aria-pressed")).toBe("true");
+  expect(button("sync.start").disabled).toBe(true);
+  await click("sync.preview");
+  expect(mocks.preview).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      direction: "download",
+      sources: ["/srv/project/"],
+      destination: saved.localPath,
+      sync: {
+        excludeGit: false,
+        respectGitignore: false,
+        excludeDirectories: saved.excludeDirectories,
+        excludes: saved.excludes,
+      },
+    }),
+  );
+  await click("sync.reset");
+  expect(container.textContent).not.toContain(saved.localPath);
+  expect(container.textContent).not.toContain(".cache ×");
+  expect(button("sync.upload").getAttribute("aria-pressed")).toBe("true");
+  expect(button("sync.preview").disabled).toBe(true);
+  expect(button("sync.start").disabled).toBe(true);
+  expect(
+    container.querySelector('button[id$="-git"]')?.getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(
+    container
+      .querySelector('button[id$="-target"]')
+      ?.getAttribute("aria-checked"),
+  ).toBe("false");
+  expect(mocks.enqueue).not.toHaveBeenCalled();
+  await click("sync.chooseDirectory");
+  await click("sync.preview");
+  expect(mocks.preview).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sync: {
+        excludeGit: true,
+        respectGitignore: true,
+        excludeDirectories: [],
+        excludes: [],
+      },
+    }),
+  );
+  await act(async () => root.render(null));
+  await act(async () =>
+    root.render(
+      <FolderSyncDialog remotePath="/srv/project/" onClose={mocks.close} />,
+    ),
+  );
+  expect(container.textContent).toContain(saved.localPath);
+  expect(button("sync.download").getAttribute("aria-pressed")).toBe("true");
+});
+
+it("ignores a closed dialog's pending settings load", async () => {
+  let complete: (value: unknown) => void = () => {};
+  mocks.settings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  await act(async () => root.render(null));
+  await act(async () =>
+    root.render(
+      <FolderSyncDialog remotePath="/srv/old" onClose={mocks.close} />,
+    ),
+  );
+  expect(button("sync.reset").disabled).toBe(true);
+  await act(async () => root.render(null));
+  await act(async () =>
+    root.render(
+      <FolderSyncDialog remotePath="/srv/new" onClose={mocks.close} />,
+    ),
+  );
+  await act(async () =>
+    complete({
+      localPath: "D:/old/project",
+      direction: "download",
+      respectGitignore: false,
+      excludeGit: false,
+      excludeDirectories: [],
+      excludes: [],
+    }),
+  );
+  expect(container.textContent).not.toContain("D:/old/project");
+  expect(button("sync.upload").getAttribute("aria-pressed")).toBe("true");
+});
+
+it("reports saved settings read failures without blocking fresh configuration", async () => {
+  mocks.settings.mockRejectedValueOnce(new Error("read failed"));
+  await act(async () => root.render(null));
+  await act(async () =>
+    root.render(
+      <FolderSyncDialog remotePath="/srv/project" onClose={mocks.close} />,
+    ),
+  );
+  expect(container.textContent).toContain("sync.loadFailed");
+  expect(button("sync.chooseDirectory").disabled).toBe(false);
+  await click("sync.reset");
+  expect(container.textContent).not.toContain("sync.loadFailed");
+});
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
@@ -116,7 +240,8 @@ it("requires a current preview and maps folder contents in the chosen direction"
     sources: ["C:/local/project"],
     destination: "/srv/project",
     sync: {
-      excludes: [".git"],
+      excludeGit: true,
+      excludes: [],
       excludeDirectories: [],
       respectGitignore: true,
     },
@@ -132,7 +257,8 @@ it("requires a current preview and maps folder contents in the chosen direction"
     sources: ["/srv/project"],
     destination: "C:/local/project",
     sync: {
-      excludes: [".git"],
+      excludeGit: true,
+      excludes: [],
       excludeDirectories: [],
       respectGitignore: true,
     },
@@ -250,7 +376,8 @@ it("invalidates previews when presets change and keeps directory exclusions sepa
   expect(mocks.preview).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sync: {
-        excludes: [".git"],
+        excludeGit: true,
+        excludes: [],
         excludeDirectories: ["target"],
         respectGitignore: true,
       },
@@ -266,7 +393,8 @@ it("invalidates previews when presets change and keeps directory exclusions sepa
   expect(mocks.preview).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sync: {
-        excludes: [".git"],
+        excludeGit: true,
+        excludes: [],
         excludeDirectories: ["target"],
         respectGitignore: false,
       },
@@ -303,7 +431,8 @@ it("validates individual custom tags and prevents previews with an unadded draft
   expect(mocks.preview).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sync: {
-        excludes: [".git", ".cache"],
+        excludeGit: true,
+        excludes: [".cache"],
         excludeDirectories: [],
         respectGitignore: true,
       },
@@ -322,7 +451,8 @@ it("validates individual custom tags and prevents previews with an unadded draft
   expect(mocks.preview).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sync: {
-        excludes: [".git"],
+        excludeGit: true,
+        excludes: [],
         excludeDirectories: [],
         respectGitignore: true,
       },

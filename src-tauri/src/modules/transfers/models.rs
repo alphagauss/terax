@@ -99,26 +99,7 @@ impl EnqueueTransferRequest {
                 TransferDirection::Download => &mut self.sources[0],
             };
             // 同步目标映射到目录本身，先消除尾斜杠和当前目录段，避免 WSL 同级 staging 多套一层。
-            if !remote.starts_with('/')
-                || remote.chars().any(char::is_control)
-                || remote.split('/').any(|part| part == "..")
-            {
-                return Err(TransferFailure::new(
-                    TransferErrorCode::InvalidRequest,
-                    "invalid sync root",
-                ));
-            }
-            let parts: Vec<_> = remote
-                .split('/')
-                .filter(|part| !part.is_empty() && *part != ".")
-                .collect();
-            if parts.is_empty() {
-                return Err(TransferFailure::new(
-                    TransferErrorCode::InvalidRequest,
-                    "cannot sync a filesystem root",
-                ));
-            }
-            *remote = format!("/{}", parts.join("/"));
+            *remote = normalize_sync_root(remote)?;
         }
         self.sources.retain(|source| !source.trim().is_empty());
         if self.sources.is_empty() {
@@ -176,14 +157,22 @@ impl EnqueueTransferRequest {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderSyncOptions {
+    pub exclude_git: bool,
     pub excludes: Vec<String>,
     pub exclude_directories: Vec<String>,
     pub respect_gitignore: bool,
 }
 
 impl FolderSyncOptions {
+    /// 保留 .git 预设与自定义名称的独立状态，并统一扫描时的名称匹配。
+    pub(crate) fn excludes_name(&self, name: &str) -> bool {
+        (self.exclude_git && name == ".git") || self.excludes.iter().any(|value| value == name)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), TransferFailure> {
-        if self.excludes.len() + self.exclude_directories.len() > 128
+        let git_preset_count =
+            usize::from(self.exclude_git && !self.excludes.iter().any(|name| name == ".git"));
+        if self.excludes.len() + self.exclude_directories.len() + git_preset_count > 128
             || self
                 .excludes
                 .iter()
@@ -204,6 +193,30 @@ impl FolderSyncOptions {
         }
         Ok(())
     }
+}
+
+/// 同步记录与任务共用环境目录规范化规则，不解析链接或改变大小写。
+pub(crate) fn normalize_sync_root(path: &str) -> Result<String, TransferFailure> {
+    if !path.starts_with('/')
+        || path.chars().any(char::is_control)
+        || path.split('/').any(|part| part == "..")
+    {
+        return Err(TransferFailure::new(
+            TransferErrorCode::InvalidRequest,
+            "invalid sync root",
+        ));
+    }
+    let parts: Vec<_> = path
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    if parts.is_empty() {
+        return Err(TransferFailure::new(
+            TransferErrorCode::InvalidRequest,
+            "cannot sync a filesystem root",
+        ));
+    }
+    Ok(format!("/{}", parts.join("/")))
 }
 
 /// 冲突目标和来源的条目类型。
@@ -305,6 +318,22 @@ pub struct TransferTaskSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_preset_keeps_the_effective_exclusion_limit() {
+        let mut options = FolderSyncOptions {
+            exclude_git: true,
+            excludes: (0..128).map(|index| format!("name-{index}")).collect(),
+            ..Default::default()
+        };
+        assert!(options.validate().is_err());
+        options.excludes.pop();
+        assert!(options.validate().is_ok());
+        options.excludes.push(".git".into());
+        assert!(options.validate().is_ok());
+        options.exclude_directories.push("target".into());
+        assert!(options.validate().is_err());
+    }
 
     #[test]
     fn sync_normalizes_remote_directory_components_before_staging_mapping() {

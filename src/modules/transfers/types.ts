@@ -54,6 +54,7 @@ export type TransferStage =
 
 export type EnqueueTransferRequest = {
   sync?: {
+    excludeGit: boolean;
     excludes: string[];
     excludeDirectories: string[];
     respectGitignore: boolean;
@@ -63,6 +64,11 @@ export type EnqueueTransferRequest = {
   strategy: TransferStrategy;
   sources: string[];
   destination: string;
+};
+
+export type FolderSyncSettings = NonNullable<EnqueueTransferRequest["sync"]> & {
+  localPath: string;
+  direction: TransferDirection;
 };
 
 export type SyncPreview = {

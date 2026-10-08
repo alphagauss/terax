@@ -74,6 +74,10 @@
     "working": "处理中…",
     "preview": "预览差异",
     "start": "开始同步",
+    "reset": "重置",
+    "resetHint": "恢复当前对话框的默认设置，仅在同步成功后保存。",
+    "loadFailed": "无法读取已保存的同步设置，请重新选择目录和设置。",
+    "saveFailed": "同步成功，但未能保存同步设置。",
     "actions": {
       "add": "新增",
       "update": "更新",

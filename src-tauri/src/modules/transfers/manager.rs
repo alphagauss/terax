@@ -340,6 +340,18 @@ struct ManagedTask {
 }
 
 impl TransferManager {
+    /// 等待终态持久化完成，避免成功事件到达后立即重开仍读到旧设置。
+    pub(crate) async fn sync_settings(
+        &self,
+        app: AppHandle,
+        remote_path: String,
+    ) -> Result<Option<super::sync_settings::FolderSyncSettings>, String> {
+        let _operation = self.history_operations.lock().await;
+        tokio::task::spawn_blocking(move || super::sync_settings::read(&app, &remote_path))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
     /// 创建具有固定并发上限的进程内任务管理器。
     fn new(concurrency: usize) -> Self {
         Self {
@@ -1002,6 +1014,24 @@ impl TransferManager {
                         task.speed_bytes_per_second = 0;
                     })
                     .await;
+            } else if snapshot.status == TransferStatus::Completed {
+                let request = self
+                    .tasks
+                    .read()
+                    .await
+                    .get(id)
+                    .map(|task| task.request.clone());
+                if let Some(request) = request.filter(|request| request.sync.is_some()) {
+                    let handle = app.clone();
+                    let saved = tokio::task::spawn_blocking(move || {
+                        super::sync_settings::save(&handle, &request, TransferStatus::Completed)
+                    })
+                    .await;
+                    if !matches!(saved, Ok(Ok(()))) {
+                        log::warn!("failed to save folder sync settings for task {id}: {saved:?}");
+                        let _ = app.emit("terax://folder-sync-save-failed", id);
+                    }
+                }
             }
         }
         if let Some(task) = self.tasks.write().await.get_mut(id) {

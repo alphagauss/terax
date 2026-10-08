@@ -11,6 +11,16 @@ use super::errors::TransferFailure;
 use super::models::{EnqueueTransferRequest, ResolveTransferConflictRequest, TransferTaskSnapshot};
 use super::TransferState;
 
+/// 读取当前 Workspace 中这个环境目录最近成功同步的设置。
+#[tauri::command]
+pub async fn transfer_sync_settings(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+    remote_path: String,
+) -> Result<Option<super::sync_settings::FolderSyncSettings>, String> {
+    state.manager().sync_settings(app, remote_path).await
+}
+
 /// 只读比较目录内容；实际入队后重新比较，不复用过期覆盖决定。
 #[tauri::command]
 pub async fn transfer_sync_preview(

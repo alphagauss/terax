@@ -10,6 +10,7 @@ import type {
   ResolveTransferConflictRequest,
   TransferTask,
   SyncPreview,
+  FolderSyncSettings,
 } from "@/modules/transfers/types";
 
 const TRANSFER_EVENT = "terax://transfer-updated";
@@ -17,6 +18,10 @@ const TRANSFER_REMOVED_EVENT = "terax://transfer-removed";
 
 /** 文件传输命令与增量事件的原生适配器。 */
 export const transferNative = {
+  syncSettings: (remotePath: string) =>
+    invoke<FolderSyncSettings | null>("transfer_sync_settings", { remotePath }),
+  onSyncSaveFailed: (handler: () => void): Promise<UnlistenFn> =>
+    listen("terax://folder-sync-save-failed", handler),
   syncPreview: (request: EnqueueTransferRequest) =>
     invoke<SyncPreview>("transfer_sync_preview", { request }),
   enqueue: (request: EnqueueTransferRequest) =>

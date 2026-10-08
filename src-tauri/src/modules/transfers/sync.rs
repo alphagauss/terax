@@ -40,10 +40,7 @@ fn filter_source(
             return true;
         }
         let name = path.rsplit('/').next().unwrap_or(path);
-        let excluded_name = options
-            .excludes
-            .iter()
-            .any(|excluded| path.split('/').any(|part| part == excluded));
+        let excluded_name = path.split('/').any(|part| options.excludes_name(part));
         let excluded_directory = entry.kind == 'd'
             && options
                 .exclude_directories
@@ -274,7 +271,7 @@ fn local_scan(
                     .file_name()
                     .into_string()
                     .map_err(|_| failure("sync requires UTF-8 filenames"))?;
-                if options.excludes.contains(&name)
+                if options.excludes_name(&name)
                     && !(options.respect_gitignore && name == ".gitignore")
                 {
                     continue;
@@ -337,7 +334,12 @@ fn scan_script(root: &str, options: &FolderSyncOptions) -> String {
             .collect();
         shell_quote(&literal)
     };
-    for name in &options.excludes {
+    for name in options
+        .excludes
+        .iter()
+        .map(String::as_str)
+        .chain(options.exclude_git.then_some(".git"))
+    {
         if options.respect_gitignore && name == ".gitignore" {
             continue;
         }
@@ -712,6 +714,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn git_preset_prunes_files_and_directories_at_every_depth() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".git")).unwrap();
+        std::fs::create_dir_all(root.path().join("sub")).unwrap();
+        std::fs::write(root.path().join(".git/config"), b"git").unwrap();
+        std::fs::write(root.path().join("sub/.git"), b"git file").unwrap();
+        std::fs::write(root.path().join("sub/code.rs"), b"code").unwrap();
+        let mut options = FolderSyncOptions {
+            exclude_git: true,
+            ..Default::default()
+        };
+        let entries = filter_source(
+            local_scan(root.path(), &options, &TaskControl::new()).unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert!(!entries.contains_key(".git"));
+        assert!(!entries.contains_key(".git/config"));
+        assert!(!entries.contains_key("sub/.git"));
+        assert!(entries.contains_key("sub/code.rs"));
+        assert!(scan_script("/srv/project", &options).contains("-name '.git' -prune -o"));
+        options.exclude_git = false;
+        let entries = filter_source(
+            local_scan(root.path(), &options, &TaskControl::new()).unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert!(entries.contains_key(".git/config"));
+        assert!(entries.contains_key("sub/.git"));
+    }
+
+    #[test]
     fn source_gitignore_honors_nested_rules_exceptions_and_root_anchors_without_git() {
         let root = tempfile::tempdir().unwrap();
         for path in ["target", "sub/target", "ignored", "explicit", "sub/nested"] {
@@ -846,6 +880,7 @@ mod tests {
             .unwrap();
             run_script(&env, format!("set -e\nmkdir -p {source}/target {source}/deep/target\nprintf data > {source}/target/file\nprintf data > {source}/deep/target/file\nprintf data > {source}/nested/target\nprintf data > {source}/drop.skip\nprintf data > {source}/keep.skip\nprintf data > {source}/nested/child.skip\nprintf data > {source}/code.rs\nprintf '*.skip\\n!keep.skip\\n!target/\\n' > {source}/.gitignore\nprintf '!child.skip\\n' > {source}/nested/.gitignore\n"), control.clone()).await.unwrap();
             let options = FolderSyncOptions {
+                exclude_git: false,
                 excludes: vec!["excluded".into()],
                 exclude_directories: vec!["target".into()],
                 respect_gitignore: true,

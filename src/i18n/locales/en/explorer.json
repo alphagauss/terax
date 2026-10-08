@@ -74,6 +74,10 @@
     "working": "Working…",
     "preview": "Preview changes",
     "start": "Start sync",
+    "reset": "Reset",
+    "resetHint": "Restore defaults for this dialog. Settings are saved only after a successful sync.",
+    "loadFailed": "Could not load saved sync settings. Choose the directory and settings again.",
+    "saveFailed": "Sync succeeded, but its settings could not be saved.",
     "actions": {
       "add": "Add",
       "update": "Update",
