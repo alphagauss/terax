@@ -12,7 +12,15 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(),
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, values?: { count?: number; bytes?: string }) => {
+      if (key === "sync.summary")
+        return `${key} ${values?.count} ${values?.bytes}`;
+      if (key.startsWith("sync.previewGroups."))
+        return `${key} ${values?.count}`;
+      return key;
+    },
+  }),
 }));
 vi.mock("@/modules/transfers/native", () => ({
   transferNative: { syncPreview: mocks.preview, enqueue: mocks.enqueue },
@@ -158,6 +166,75 @@ it("does not start when the preview contains conflicts or no changes", async () 
   await click("sync.preview");
   expect(button("sync.start").disabled).toBe(true);
   expect(mocks.enqueue).not.toHaveBeenCalled();
+});
+
+it("shows transfer changes by default and separates skipped entries and conflicts", async () => {
+  await click("sync.chooseDirectory");
+  mocks.preview.mockResolvedValue({
+    added: 1,
+    updated: 1,
+    skipped: 2500,
+    conflicts: 1,
+    bytes: 1536,
+    items: [
+      { path: "unchanged.txt", action: "skip" },
+      { path: "type-conflict", action: "conflict" },
+      { path: "new.txt", action: "add" },
+      { path: "updated.txt", action: "update" },
+    ],
+    truncated: true,
+  });
+  await click("sync.preview");
+  expect(container.textContent).toContain("sync.summary 2 1.5 KB");
+  expect(
+    button("sync.previewGroups.transfer 2").getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(container.querySelector("ul")?.textContent).toContain("new.txt");
+  expect(container.querySelector("ul")?.textContent).toContain("updated.txt");
+  expect(container.querySelector("ul")?.textContent).not.toContain(
+    "unchanged.txt",
+  );
+  expect(container.querySelector("ul")?.textContent).not.toContain(
+    "type-conflict",
+  );
+  expect(container.textContent).toContain("sync.truncated");
+  expect(button("sync.start").disabled).toBe(true);
+
+  await click("sync.previewGroups.skip 2500");
+  expect(container.querySelectorAll("li")).toHaveLength(1);
+  expect(container.querySelector("ul")?.textContent).toContain("unchanged.txt");
+  await click("sync.viewConflicts");
+  expect(
+    button("sync.previewGroups.conflict 1").getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(container.querySelectorAll("li")).toHaveLength(1);
+  expect(container.querySelector("ul")?.textContent).toContain("type-conflict");
+
+  await click("sync.preview");
+  expect(
+    button("sync.previewGroups.transfer 2").getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(container.querySelector("ul")?.textContent).toContain("new.txt");
+});
+
+it("distinguishes an empty category from details omitted by preview truncation", async () => {
+  await click("sync.chooseDirectory");
+  mocks.preview.mockResolvedValueOnce({
+    added: 1,
+    updated: 0,
+    skipped: 2000,
+    conflicts: 0,
+    bytes: 10,
+    items: [{ path: "new.txt", action: "add" }],
+    truncated: true,
+  });
+  await click("sync.preview");
+  await click("sync.previewGroups.skip 2000");
+  expect(container.textContent).toContain("sync.omittedPreviewItems");
+  expect(container.textContent).not.toContain("sync.emptyPreviewGroup");
+  await click("sync.previewGroups.conflict 0");
+  expect(container.textContent).toContain("sync.emptyPreviewGroup");
+  expect(container.textContent).not.toContain("sync.omittedPreviewItems");
 });
 
 it("invalidates previews when presets change and keeps directory exclusions separate", async () => {

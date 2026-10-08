@@ -49,6 +49,7 @@ import {
   formatTransferFailure,
 } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
+import { formatBytes } from "@/modules/transfers/format";
 import { useTransferBridge, useTransferStore } from "@/modules/transfers/store";
 import {
   hasExpandableTransferFailures,
@@ -743,18 +744,6 @@ export function transferProgress(task: TransferTask): number {
     0,
     Math.min(100, (task.transferredBytes / task.totalBytes) * 100),
   );
-}
-
-/** 将非负字节数格式化为紧凑的二进制单位文本。 */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(
-    units.length - 1,
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-  );
-  const value = bytes / 1024 ** index;
-  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
 }
 
 function basename(path: string): string {

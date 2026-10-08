@@ -17,6 +17,7 @@ import {
 } from "@/components/controls/dialog";
 import { pickDownloadDirectory } from "@/modules/transfers/dialogs";
 import { formatTransferError } from "@/modules/transfers/errors";
+import { formatBytes } from "@/modules/transfers/format";
 import { transferNative } from "@/modules/transfers/native";
 import { requestTransferPanel } from "@/modules/transfers/store";
 import type {
@@ -32,6 +33,14 @@ const DIRECTORY_PRESETS = [
   "dist",
   "build",
 ] as const;
+
+const PREVIEW_GROUPS = ["transfer", "skip", "conflict"] as const;
+const ACTION_COLORS = {
+  add: "text-success",
+  update: "text-primary",
+  skip: "text-muted-foreground",
+  conflict: "text-destructive",
+} as const;
 
 function SyncHelp({ content }: { content: string }) {
   return (
@@ -61,6 +70,8 @@ export function FolderSyncDialog({
   const [draftExclude, setDraftExclude] = useState("");
   const [excludeError, setExcludeError] = useState("");
   const [preview, setPreview] = useState<SyncPreview | null>(null);
+  const [previewGroup, setPreviewGroup] =
+    useState<(typeof PREVIEW_GROUPS)[number]>("transfer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
@@ -119,7 +130,10 @@ export function FolderSyncDialog({
         if (current === generation.current) onClose();
       } else {
         const result = await transferNative.syncPreview(request());
-        if (current === generation.current) setPreview(result);
+        if (current === generation.current) {
+          setPreview(result);
+          setPreviewGroup("transfer");
+        }
       }
     } catch (error) {
       if (current === generation.current)
@@ -128,6 +142,16 @@ export function FolderSyncDialog({
       if (current === generation.current) setBusy(false);
     }
   };
+  const previewCounts = {
+    transfer: (preview?.added ?? 0) + (preview?.updated ?? 0),
+    skip: preview?.skipped ?? 0,
+    conflict: preview?.conflicts ?? 0,
+  };
+  const visibleItems = preview?.items.filter((item) =>
+    previewGroup === "transfer"
+      ? item.action === "add" || item.action === "update"
+      : item.action === previewGroup,
+  );
   return (
     <Dialog
       open
@@ -331,27 +355,99 @@ export function FolderSyncDialog({
             <div className="space-y-2" aria-live="polite">
               <p>
                 {t("sync.summary", {
-                  ...preview,
-                  bytes: preview.bytes,
+                  count: previewCounts.transfer,
+                  bytes: formatBytes(preview.bytes),
+                })}
+              </p>
+              <p className="text-muted-foreground">
+                {t("sync.changeSummary", {
+                  added: preview.added,
+                  updated: preview.updated,
                 })}
               </p>
               {preview.conflicts > 0 && (
-                <p className="text-destructive">{t("sync.conflictsHint")}</p>
-              )}
-              <details>
-                <summary>{t("sync.details")}</summary>
-                <div className="mt-2 max-h-48 overflow-auto">
-                  {preview.items.map((item) => (
-                    <div key={item.path} className="flex gap-3">
-                      <span className="shrink-0 text-muted-foreground">
-                        {t(`sync.actions.${item.action}`)}
-                      </span>
-                      <span className="break-all">{item.path}</span>
-                    </div>
-                  ))}
-                  {preview.truncated && <p>{t("sync.truncated")}</p>}
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-destructive">{t("sync.conflictsHint")}</p>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setPreviewGroup("conflict")}
+                  >
+                    {t("sync.viewConflicts")}
+                  </Button>
                 </div>
-              </details>
+              )}
+              <fieldset
+                aria-label={t("sync.previewCategories")}
+                className="flex flex-wrap gap-2"
+              >
+                {PREVIEW_GROUPS.map((group) => (
+                  <Button
+                    key={group}
+                    variant={previewGroup === group ? "secondary" : "outline"}
+                    size="sm"
+                    aria-pressed={previewGroup === group}
+                    onClick={() => setPreviewGroup(group)}
+                  >
+                    <span
+                      className={
+                        group === "conflict" && preview.conflicts > 0
+                          ? "text-destructive"
+                          : undefined
+                      }
+                    >
+                      {t(`sync.previewGroups.${group}`, {
+                        count: previewCounts[group],
+                      })}
+                    </span>
+                  </Button>
+                ))}
+              </fieldset>
+              <div
+                key={previewGroup}
+                className="max-h-48 overflow-auto overscroll-y-contain"
+              >
+                {visibleItems?.length ? (
+                  <ul className="divide-y divide-border">
+                    {visibleItems.map((item) => (
+                      <li
+                        key={item.path}
+                        className="flex items-center gap-3 py-1.5"
+                      >
+                        <span
+                          className={`w-16 shrink-0 ${ACTION_COLORS[item.action]}`}
+                        >
+                          {t(`sync.actions.${item.action}`)}
+                        </span>
+                        <Hint
+                          content={
+                            <span className="min-w-0 break-all">
+                              {item.path}
+                            </span>
+                          }
+                        >
+                          <span
+                            className={`min-w-0 truncate ${item.action === "skip" ? "text-muted-foreground" : ""}`}
+                          >
+                            {item.path}
+                          </span>
+                        </Hint>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="py-2 text-muted-foreground">
+                    {t(
+                      previewCounts[previewGroup] > 0
+                        ? "sync.omittedPreviewItems"
+                        : "sync.emptyPreviewGroup",
+                    )}
+                  </p>
+                )}
+              </div>
+              {preview.truncated && (
+                <p className="text-muted-foreground">{t("sync.truncated")}</p>
+              )}
             </div>
           )}
           {error && (
