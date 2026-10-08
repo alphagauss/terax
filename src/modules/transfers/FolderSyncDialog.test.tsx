@@ -203,6 +203,7 @@ it("validates individual custom tags and prevents previews with an unadded draft
     "input:not([type=checkbox])",
   );
   if (!input) throw new Error("Missing exclusion input");
+  expect(input.closest("details")).toBeNull();
   const type = async (value: string) => {
     await act(async () => {
       Object.getOwnPropertyDescriptor(
@@ -213,11 +214,14 @@ it("validates individual custom tags and prevents previews with an unadded draft
     });
   };
   await type("a/b");
+  expect(container.textContent).toContain("sync.pendingExcludeHint");
   await click("sync.addExclude");
   expect(container.textContent).toContain("sync.invalidExclude");
+  expect(container.textContent).not.toContain("sync.pendingExcludeHint");
   expect(button("sync.preview").disabled).toBe(true);
   await type(".cache");
   await click("sync.addExclude");
+  expect(container.textContent).not.toContain("sync.pendingExcludeHint");
   await click("sync.preview");
   expect(mocks.preview).toHaveBeenLastCalledWith(
     expect.objectContaining({

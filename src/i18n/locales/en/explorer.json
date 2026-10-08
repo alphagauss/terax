@@ -46,7 +46,7 @@
     "pasteFailed": "Could not paste files: {{error}}"
   },
   "sync": {
-    "title": "Sync folder contents…",
+    "title": "Sync folder contents",
     "description": "Recursively sync directory contents without nesting the source folder.",
     "remote": "SSH / WSL directory",
     "local": "Local directory",
@@ -55,7 +55,8 @@
     "upload": "Local → SSH / WSL",
     "download": "SSH / WSL → Local",
     "excludes": "Additional excluded names",
-    "excludesHint": "Add one exact file or directory name at a time, at every level. Wildcards are not interpreted. Add or clear the input before previewing.",
+    "excludesHint": "Add one exact file or directory name at a time, matching at every level. Paths and wildcards are not supported.",
+    "pendingExcludeHint": "Add or clear the name before previewing changes.",
     "rule": "Copy missing files and files newer on the source, comparing modification times in seconds. Skip equal or newer targets. Keep destination-only files; do not merge file contents. Transfer a changes-only archive and compare again when executing.",
     "summary": "Add {{added}}, update {{updated}}, skip {{skipped}}, conflicts {{conflicts}}; {{bytes}} file bytes to transfer.",
     "conflictsHint": "Resolve or exclude type conflicts and unsupported entries, then preview again.",
@@ -71,11 +72,11 @@
       "conflict": "Conflict"
     },
     "excludeOptions": "Exclusions",
+    "excludeOptionsHint": "Preset exclusions match exact names at every level. .git excludes both files and directories; the other presets exclude directories only.",
     "respectGitignore": "Respect source .gitignore",
-    "excludeGit": "Exclude .git files and directories at every level",
-    "excludeDirectory": "Exclude {{name}} directories at every level",
+    "excludeGit": ".git files and directories",
+    "excludeDirectory": "{{name}} directories",
     "gitignoreHint": "Use .gitignore files in the selected source directory and its subdirectories, including ! exceptions. Destination and global rules are not used. Explicit exclusions take precedence; matching tracked files are excluded too.",
-    "excludeName": "File or directory name",
     "excludePlaceholder": "For example, .cache",
     "addExclude": "Add",
     "removeExclude": "Remove exclusion {{name}}",

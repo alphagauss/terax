@@ -1,7 +1,10 @@
 /** 选择目录内容同步方向，预览只读差异，并交给原生后台任务执行。 */
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HelpCircleIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/controls/button";
+import { Hint } from "@/components/controls/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/controls/input";
 import {
@@ -29,6 +32,16 @@ const DIRECTORY_PRESETS = [
   "dist",
   "build",
 ] as const;
+
+function SyncHelp({ content }: { content: string }) {
+  return (
+    <Hint content={content}>
+      <Button type="button" variant="ghost" size="icon-xs" aria-label={content}>
+        <HugeiconsIcon icon={HelpCircleIcon} size={14} strokeWidth={2} />
+      </Button>
+    </Hint>
+  );
+}
 
 export function FolderSyncDialog({
   remotePath,
@@ -127,8 +140,13 @@ export function FolderSyncDialog({
     >
       <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t("sync.title")}</DialogTitle>
-          <DialogDescription>{t("sync.description")}</DialogDescription>
+          <div className="flex items-center gap-1">
+            <DialogTitle>{t("sync.title")}</DialogTitle>
+            <SyncHelp content={t("sync.description")} />
+          </div>
+          <DialogDescription className="sr-only">
+            {t("sync.description")}
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="space-y-1">
@@ -169,7 +187,10 @@ export function FolderSyncDialog({
               </Button>
             </div>
           </div>
-          <fieldset className="flex gap-2" aria-label={t("sync.direction")}>
+          <fieldset
+            className="flex flex-wrap items-center gap-2"
+            aria-label={t("sync.direction")}
+          >
             {(["upload", "download"] as const).map((value) => (
               <Button
                 key={value}
@@ -184,9 +205,15 @@ export function FolderSyncDialog({
                 {t(`sync.${value}`)}
               </Button>
             ))}
+            <SyncHelp content={t("sync.rule")} />
           </fieldset>
           <fieldset className="space-y-2">
-            <legend className="mb-2">{t("sync.excludeOptions")}</legend>
+            <legend className="mb-2">
+              <span className="inline-flex items-center gap-1">
+                {t("sync.excludeOptions")}
+                <SyncHelp content={t("sync.excludeOptionsHint")} />
+              </span>
+            </legend>
             <div className="divide-y divide-border">
               <div className="flex items-center gap-2 py-2">
                 <Checkbox
@@ -201,6 +228,7 @@ export function FolderSyncDialog({
                 <label htmlFor={`${excludesId}-ignore`}>
                   {t("sync.respectGitignore")}
                 </label>
+                <SyncHelp content={t("sync.gitignoreHint")} />
               </div>
               <div className="flex items-center gap-2 py-2">
                 <Checkbox
@@ -239,37 +267,38 @@ export function FolderSyncDialog({
                 </div>
               ))}
             </div>
-            <p className="text-muted-foreground">{t("sync.gitignoreHint")}</p>
           </fieldset>
-          <details>
-            <summary>{t("sync.excludes")}</summary>
-            <div className="mt-2 space-y-2">
-              <label htmlFor={excludesId}>{t("sync.excludeName")}</label>
-              <div className="flex gap-2">
-                <Input
-                  id={excludesId}
-                  value={draftExclude}
-                  disabled={busy}
-                  placeholder={t("sync.excludePlaceholder")}
-                  onChange={(event) => {
-                    setDraftExclude(event.target.value);
-                    setExcludeError("");
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addExclude();
-                    }
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  disabled={busy || !draftExclude.trim()}
-                  onClick={addExclude}
-                >
-                  {t("sync.addExclude")}
-                </Button>
-              </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-1">
+              <label htmlFor={excludesId}>{t("sync.excludes")}</label>
+              <SyncHelp content={t("sync.excludesHint")} />
+            </div>
+            <div className="flex gap-2">
+              <Input
+                id={excludesId}
+                value={draftExclude}
+                disabled={busy}
+                placeholder={t("sync.excludePlaceholder")}
+                onChange={(event) => {
+                  setDraftExclude(event.target.value);
+                  setExcludeError("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addExclude();
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                disabled={busy || !draftExclude.trim()}
+                onClick={addExclude}
+              >
+                {t("sync.addExclude")}
+              </Button>
+            </div>
+            {excludes.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {excludes.map((name) => (
                   <Button
@@ -286,15 +315,18 @@ export function FolderSyncDialog({
                   </Button>
                 ))}
               </div>
-              <p className="text-muted-foreground">{t("sync.excludesHint")}</p>
-              {excludeError && (
-                <p role="alert" className="text-destructive">
-                  {excludeError}
-                </p>
-              )}
-            </div>
-          </details>
-          <p className="text-muted-foreground">{t("sync.rule")}</p>
+            )}
+            {!!draftExclude.trim() && !excludeError && (
+              <p className="text-muted-foreground">
+                {t("sync.pendingExcludeHint")}
+              </p>
+            )}
+            {excludeError && (
+              <p role="alert" className="text-destructive">
+                {excludeError}
+              </p>
+            )}
+          </div>
           {preview && (
             <div className="space-y-2" aria-live="polite">
               <p>

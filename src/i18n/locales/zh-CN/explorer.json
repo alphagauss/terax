@@ -46,7 +46,7 @@
     "pasteFailed": "粘贴文件失败：{{error}}"
   },
   "sync": {
-    "title": "同步文件夹内容…",
+    "title": "同步文件夹内容",
     "description": "递归同步两个目录的内容，不额外嵌套来源文件夹。",
     "remote": "SSH / WSL 目录",
     "local": "本机目录",
@@ -55,7 +55,8 @@
     "upload": "本机 → SSH / WSL",
     "download": "SSH / WSL → 本机",
     "excludes": "其他排除名称",
-    "excludesHint": "每次添加一个名称，在所有层级精确匹配文件和目录，不解释通配符。添加或清空输入后可以预览。",
+    "excludesHint": "每次添加一个名称，在所有层级精确匹配文件和目录，不支持路径或通配符。",
+    "pendingExcludeHint": "请先添加或清空名称，再预览差异。",
     "rule": "仅新增和源端较新的文件，按秒比较修改时间，相同或目标较新时跳过。保留目标独有文件，不合并文件内容。使用差异归档传输，执行时重新比较。",
     "summary": "新增 {{added}}，更新 {{updated}}，跳过 {{skipped}}，冲突 {{conflicts}}；待传文件 {{bytes}} 字节。",
     "conflictsHint": "存在类型冲突或不支持的条目，请处理或排除后重新预览。",
@@ -71,11 +72,11 @@
       "conflict": "冲突"
     },
     "excludeOptions": "排除设置",
+    "excludeOptionsHint": "预设排除项在所有层级按名称精确匹配。.git 排除同名文件和目录，其余预设只排除目录。",
     "respectGitignore": "遵循源端 .gitignore",
-    "excludeGit": "排除所有层级的 .git 文件和目录",
-    "excludeDirectory": "排除所有层级的 {{name}} 目录",
+    "excludeGit": ".git 文件和目录",
+    "excludeDirectory": "{{name}} 目录",
     "gitignoreHint": "仅使用所选源目录及子目录的 .gitignore，支持 ! 例外，不读取目标端或全局规则。显式排除项优先；匹配忽略规则的已跟踪文件也不进入清单。",
-    "excludeName": "文件或目录名称",
     "excludePlaceholder": "例如 .cache",
     "addExclude": "添加",
     "removeExclude": "移除排除项 {{name}}",
