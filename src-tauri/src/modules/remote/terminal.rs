@@ -18,6 +18,7 @@ pub const TRANSPORT_CLOSED_EXIT_CODE: i32 = -255;
 
 /// 一条远端交互式 PTY channel 的输入、尺寸和关闭控制句柄。
 pub struct RemoteTerminalHandle {
+    pub(crate) workspace: std::sync::Arc<RemoteWorkspace>,
     input: mpsc::Sender<Vec<u8>>,
     resize: watch::Sender<(u16, u16)>,
     close: std::sync::Mutex<Option<oneshot::Sender<()>>>,
@@ -268,6 +269,7 @@ fn bridge(
     });
 
     RemoteTerminalHandle {
+        workspace,
         input: input_tx,
         resize: resize_tx,
         close: std::sync::Mutex::new(Some(close_tx)),

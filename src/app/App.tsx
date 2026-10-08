@@ -106,7 +106,7 @@ import {
   disposeSession,
   navigateFocusedBlocks,
   type TerminalPaneHandle,
-  terminalHasForegroundProcess,
+  terminalNeedsCloseConfirmation,
   useTerminalFileDrop,
   writeToSession,
 } from "@/modules/terminal";
@@ -1393,9 +1393,7 @@ export default function App() {
       );
       const busyTerminal = (
         await Promise.all(
-          terminalTabs.map((tab) =>
-            terminalHasForegroundProcess(tab.id).catch(() => true),
-          ),
+          terminalTabs.map((tab) => terminalNeedsCloseConfirmation(tab.id)),
         )
       ).some(Boolean);
       const { dirtyDocuments } = spaceDeleteDocuments(

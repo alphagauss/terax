@@ -17,6 +17,7 @@
 if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
   __TERAX_HOOKS_LOADED=1
   autoload -Uz add-zsh-hook 2>/dev/null
+  zmodload zsh/parameter 2>/dev/null
 
   # URL-encode $PWD byte-wise so multi-byte paths stay valid in the `file://`
   # URI emitted via OSC 7. `no_multibyte` forces ${s[i]} to index bytes (not
@@ -36,6 +37,15 @@ if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
 
   _terax_precmd() {
     local _terax_ret=$?
+    # zsh 的 jobs -p 仍包含展示文本，直接读取作业表中的进程身份。
+    local _terax_job _terax_process
+    local -a _terax_jobs
+    for _terax_job in "${(@v)jobstates}"; do
+      for _terax_process in ${(s.:.)_terax_job}; do
+        [[ "$_terax_process" == <->=* ]] && _terax_jobs+=("${_terax_process%%=*}")
+      done
+    done
+    printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$$" "${(j:,:)_terax_jobs}"
     printf '\e]133;D;%s\e\\' "$_terax_ret"
     printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_terax_urlencode "$PWD")"
     # In block mode the host renders its own input bar, so suppress the shell
@@ -61,6 +71,7 @@ if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
   }
 
   _terax_preexec() {
+    printf '\e]777;terax;tasks;%s;running;\e\\' "$$"
     # Mark that a real command ran, so the next prompt switches from one blank
     # row (first prompt, no block above) to two (end gap + header row).
     [[ -n "$TERAX_BLOCKS" ]] && _terax_block_seen=1

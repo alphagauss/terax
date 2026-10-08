@@ -1,3 +1,4 @@
+mod activity;
 mod agent_detect;
 mod da_filter;
 mod session;
@@ -254,26 +255,83 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// 在 PTY 所属宿主中核对后台作业；缺少远端 Shell 身份时返回未知。
 #[tauri::command]
-pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
-    if state.remote_sessions.read().unwrap().contains_key(&id) {
-        return Ok(false);
+pub async fn pty_has_running_tasks(
+    state: tauri::State<'_, PtyState>,
+    id: u32,
+    shell_pid: Option<u32>,
+    background_pids: Option<Vec<u32>>,
+) -> Result<Option<bool>, String> {
+    let remote = state.remote_sessions.read().unwrap().get(&id).cloned();
+    if let Some(remote) = remote {
+        let Some(pid) = shell_pid.filter(|pid| *pid > 0) else {
+            return Ok(None);
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            remote.workspace.exec(
+                activity::PROCESS_LIST_COMMAND,
+                None,
+                std::time::Duration::from_secs(2),
+            ),
+        )
+        .await
+        .map_err(|_| "terminal process check timed out".to_string())??;
+        if result.exit_code != Some(0) || result.timed_out || result.truncated {
+            return Err("terminal process check failed".into());
+        }
+        return activity::has_posix_tasks(
+            &String::from_utf8_lossy(&result.stdout),
+            pid,
+            background_pids.as_deref(),
+        )
+        .map(Some);
     }
-    let sessions = state.sessions.read().unwrap();
-    let session = sessions.get(&id).ok_or_else(|| {
-        log::warn!("pty_has_foreground_process: unknown session id={id}");
-        "no session".to_string()
-    })?;
-    let shell_pid = session.shell_pid;
-    if shell_pid == 0 {
-        return Ok(false);
+    let session = state
+        .sessions
+        .read()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or("no session")?;
+    #[cfg(windows)]
+    if let WorkspaceEnv::Wsl { distro } = &session.workspace {
+        let Some(pid) = shell_pid.filter(|pid| *pid > 0) else {
+            return Ok(None);
+        };
+        let mut command = tokio::process::Command::new("wsl.exe");
+        command.args(["-d", distro, "--exec", "ps"]);
+        return activity::query_posix_tasks(command, pid, background_pids.as_deref())
+            .await
+            .map(Some);
     }
-    Ok(shell_has_children(shell_pid))
+    if session.shell_pid == 0 {
+        return Ok(None);
+    }
+    #[cfg(unix)]
+    {
+        activity::query_posix_tasks(
+            tokio::process::Command::new("ps"),
+            session.shell_pid,
+            background_pids.as_deref(),
+        )
+        .await
+        .map(Some)
+    }
+    #[cfg(windows)]
+    {
+        // Git Bash 等入口可能先启动包装进程，集成报告的是实际 Shell 的原生 PID。
+        let pid = shell_pid
+            .filter(|pid| *pid > 0)
+            .unwrap_or(session.shell_pid);
+        tauri::async_runtime::spawn_blocking(move || shell_has_children(pid).map(Some))
+            .await
+            .map_err(|e| e.to_string())?
+    }
 }
 
-// Foreground-only check for the renderer hibernation path: true while a job
-// owns the tty (tcgetpgrp != shell pgid). Stricter and cheaper than
-// pty_has_foreground_process, which counts background children too.
+// renderer 休眠仅关心前台占用；关闭保护还包含后台作业。
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
     if state.remote_sessions.read().unwrap().contains_key(&id) {
@@ -295,48 +353,47 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
     }
     #[cfg(windows)]
     {
-        Ok(shell_has_children(shell_pid))
+        shell_has_children(shell_pid)
     }
 }
 
-// pgrep -P exits 0 when shell_pid has at least one child, 1 when none.
-#[cfg(unix)]
-fn shell_has_children(shell_pid: u32) -> bool {
-    std::process::Command::new("pgrep")
-        .args(["-P", &shell_pid.to_string()])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 #[cfg(windows)]
-fn shell_has_children(shell_pid: u32) -> bool {
+fn shell_has_children(shell_pid: u32) -> Result<bool, String> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
     };
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
-            return false;
+            return Err(std::io::Error::last_os_error().to_string());
         }
         let mut entry: PROCESSENTRY32 = zeroed();
         entry.dwSize = size_of::<PROCESSENTRY32>() as u32;
-        let mut found = false;
-        if Process32First(snapshot, &mut entry) != 0 {
-            loop {
-                if entry.th32ParentProcessID == shell_pid {
-                    found = true;
-                    break;
-                }
-                if Process32Next(snapshot, &mut entry) == 0 {
-                    break;
+        let mut has_entry = Process32First(snapshot, &mut entry);
+        let result = loop {
+            if has_entry == 0 {
+                let error = std::io::Error::last_os_error();
+                break if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+                    Ok(false)
+                } else {
+                    Err(error.to_string())
+                };
+            }
+            if entry.th32ParentProcessID == shell_pid {
+                let name = std::ffi::CStr::from_ptr(entry.szExeFile.as_ptr()).to_string_lossy();
+                // 控制台宿主不属于用户任务，cmd 等 Shell 也可能自行创建它。
+                if !name.eq_ignore_ascii_case("conhost.exe")
+                    && !name.eq_ignore_ascii_case("OpenConsole.exe")
+                {
+                    break Ok(true);
                 }
             }
-        }
+            has_entry = Process32Next(snapshot, &mut entry);
+        };
         CloseHandle(snapshot);
-        found
+        result
     }
 }
 

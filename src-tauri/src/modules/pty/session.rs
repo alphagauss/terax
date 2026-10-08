@@ -31,6 +31,8 @@ const OVERFLOW_NOTICE: &[u8] =
     b"\x1bc\x1b[2m[terax: dropped output due to backpressure]\x1b[0m\r\n";
 
 pub struct Session {
+    #[cfg(windows)]
+    pub workspace: WorkspaceEnv,
     // Field drop order is intentional. Rust drops fields top-to-bottom:
     //   1. `_job` — on Windows, closing the Job HANDLE fires
     //      KILL_ON_JOB_CLOSE, terminating the pwsh tree before the master
@@ -44,7 +46,7 @@ pub struct Session {
     //      is dead and conhost has nothing left to drain.
     #[cfg(windows)]
     _job: Option<crate::modules::proc::job::ProcessJob>,
-    /// PID of the shell process. 0 means unknown; callers must skip checks when 0.
+    /// PTY 直接启动进程的 PID，可能是 WSL 或 Git Bash 包装器；0 表示未知。
     pub shell_pid: u32,
     pub killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -125,7 +127,7 @@ pub fn spawn(
     };
     let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
-    let cmd = shell_init::build_command(cwd, workspace, blocks, shell)?;
+    let cmd = shell_init::build_command(cwd, workspace.clone(), blocks, shell)?;
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
@@ -156,6 +158,8 @@ pub fn spawn(
     let exited = Arc::new(AtomicBool::new(false));
 
     let session = Arc::new(Session {
+        #[cfg(windows)]
+        workspace,
         #[cfg(windows)]
         _job: job,
         shell_pid,

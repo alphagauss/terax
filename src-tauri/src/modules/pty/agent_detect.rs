@@ -179,6 +179,10 @@ impl AgentDetector {
     }
 
     fn handle_osc777<F: FnMut(Transition)>(&mut self, pt: &[u8], emit: &mut F) {
+        // Shell 关闭保护的状态报告不是通知，不能改变 Agent 的工作状态。
+        if pt.starts_with(b"terax;tasks;") {
+            return;
+        }
         if let Some(tail) = pt.strip_prefix(TERAX_MARKER) {
             // PTY output is untrusted: only self-arm for known agents.
             let (agent, event) = match tail.iter().position(|&c| c == b';') {
@@ -348,6 +352,18 @@ mod tests {
         run(&mut d, &osc("133;C;claude"));
         assert!(run(&mut d, &[BEL]).is_empty());
         assert!(run(&mut d, b"thinking...\x07more").is_empty());
+    }
+
+    #[test]
+    fn shell_task_reports_do_not_trigger_agent_attention() {
+        let mut detector = AgentDetector::new();
+        run(&mut detector, &osc("133;C;codex"));
+        assert!(run(&mut detector, &osc("777;terax;tasks;10;idle;")).is_empty());
+        assert!(run(&mut detector, &osc("777;terax;tasks;20;running;")).is_empty());
+        assert_eq!(
+            run(&mut detector, &osc("133;D;0")),
+            vec![Transition::Exited]
+        );
     }
 
     #[test]

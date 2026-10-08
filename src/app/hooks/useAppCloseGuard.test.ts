@@ -18,7 +18,7 @@ import {
 const closeMocks = vi.hoisted(() => ({
   close: vi.fn(),
   countDirtyDocuments: vi.fn(),
-  terminalHasForegroundProcess: vi.fn(),
+  terminalNeedsCloseConfirmation: vi.fn(),
   listener: undefined as
     | ((event: { preventDefault: () => void }) => void)
     | undefined,
@@ -29,7 +29,7 @@ vi.mock("@/modules/editor", () => ({
 }));
 
 vi.mock("@/modules/terminal", () => ({
-  terminalHasForegroundProcess: closeMocks.terminalHasForegroundProcess,
+  terminalNeedsCloseConfirmation: closeMocks.terminalNeedsCloseConfirmation,
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -84,10 +84,11 @@ describe("useAppCloseGuard", () => {
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    tabsRef.current = [];
     closeMocks.listener = undefined;
     closeMocks.close.mockResolvedValue(undefined);
     closeMocks.countDirtyDocuments.mockReturnValue(0);
-    closeMocks.terminalHasForegroundProcess.mockResolvedValue(false);
+    closeMocks.terminalNeedsCloseConfirmation.mockResolvedValue(false);
     root = createRoot(document.createElement("div"));
   });
 
@@ -136,6 +137,41 @@ describe("useAppCloseGuard", () => {
     await vi.waitFor(() => expect(closeMocks.close).toHaveBeenCalledOnce());
     expect(calls).toEqual(["documents", "state"]);
   });
+
+  it.each([false, true])(
+    "终端关闭保护结果为 %s 时保持退出确认一致",
+    async (needsConfirmation) => {
+      tabsRef.current = [
+        {
+          id: 7,
+          kind: "terminal",
+          spaceId: "default",
+          title: "Terminal",
+        } as Tab,
+      ];
+      closeMocks.terminalNeedsCloseConfirmation.mockResolvedValue(
+        needsConfirmation,
+      );
+      await renderHarness(
+        async () => {},
+        async () => false,
+      );
+      await requestClose();
+      expect(
+        closeMocks.terminalNeedsCloseConfirmation.mock.calls[0]?.[0],
+      ).toBe(7);
+      if (needsConfirmation) {
+        expect(latest?.pendingAppClose).toEqual({
+          kind: "blocker",
+          dirtyEditors: 0,
+          busyTerminal: true,
+        });
+        expect(closeMocks.close).not.toHaveBeenCalled();
+      } else {
+        expect(closeMocks.close).toHaveBeenCalledOnce();
+      }
+    },
+  );
 
   it("保存超过三秒时允许取消关闭等待", async () => {
     let releaseSave: (() => void) | undefined;

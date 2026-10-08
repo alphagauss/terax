@@ -1,10 +1,10 @@
 /**
- * 本文件管理标签关闭前的脏文档和前台终端确认流程。
+ * 本文件管理标签关闭前的脏文档和终端任务确认流程。
  * 普通标签包括 Space 的最后一个标签都直接交给 Workbench 关闭。
  */
 
 import { hasOtherDocumentView, isDocumentTab } from "@/modules/editor";
-import { terminalHasForegroundProcess } from "@/modules/terminal";
+import { terminalNeedsCloseConfirmation } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { useCallback, useState } from "react";
 
@@ -34,7 +34,7 @@ export function useTabCloseGuards({ tabs, disposeTab }: Params) {
         }
       }
       if (t?.kind === "terminal") {
-        if (await terminalHasForegroundProcess(t.id)) {
+        if (await terminalNeedsCloseConfirmation(t.id)) {
           setPendingTerminalCloseTab(id);
           return;
         }

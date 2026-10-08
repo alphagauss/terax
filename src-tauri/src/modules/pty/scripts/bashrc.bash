@@ -37,6 +37,12 @@ if [ -z "$__TERAX_HOOKS_LOADED" ]; then
 
   _terax_precmd() {
     local _terax_ret=$?
+    if [ -n "$__TERAX_TASK_TRACKING" ]; then
+      # 只报告 Shell 作业，提示符辅助进程不属于用户后台任务。
+      local _terax_jobs
+      _terax_jobs=$(jobs -pr; jobs -ps)
+      printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$__TERAX_TASK_PID" "${_terax_jobs//$'\n'/,}"
+    fi
     printf '\e]133;D;%s\e\\' "$_terax_ret"
     printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_terax_urlencode "$PWD")"
     if [ -n "$TERAX_BLOCKS" ]; then
@@ -64,12 +70,18 @@ if [ -z "$__TERAX_HOOKS_LOADED" ]; then
   # on every command including inside PROMPT_COMMAND.
   if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] \
      || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 4 ]; }; then
+    __TERAX_TASK_TRACKING=1
+    __TERAX_TASK_PID=$$
+    # Git Bash 的 MSYS PID 不能用于 Windows 进程快照，需报告原生 Shell 身份。
+    if [ -r "/proc/$$/winpid" ]; then
+      __TERAX_TASK_PID=$(<"/proc/$$/winpid")
+    fi
     if [ -n "$TERAX_BLOCKS" ]; then
       # PS0 only expands, never executes: the arithmetic inside the array
       # subscript sets the seen flag while the unset array expands to nothing.
-      PS0='\[\e]133;C\e\\\]${_terax_noop[$((_terax_block_seen=1))]}'"${PS0:-}"
+      PS0='\[\e]777;terax;tasks;${__TERAX_TASK_PID};running;\e\\\]\[\e]133;C\e\\\]${_terax_noop[$((_terax_block_seen=1))]}'"${PS0:-}"
     else
-      PS0='\[\e]133;C\e\\\]'"${PS0:-}"
+      PS0='\[\e]777;terax;tasks;${__TERAX_TASK_PID};running;\e\\\]\[\e]133;C\e\\\]'"${PS0:-}"
     fi
   fi
 

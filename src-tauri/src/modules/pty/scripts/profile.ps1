@@ -58,6 +58,7 @@ function global:__terax_install_readline {
             if ($line -is [string] -and $line.Trim().Length -gt 0) {
                 $global:__terax_block_seen = $true
                 $esc = [char]27
+                [Console]::Write("$esc]777;terax;tasks;$PID;running;?$esc\")
                 $cmd = $line -replace '[\x00-\x1F\x7F]', ' '
                 if ($cmd.Length -gt 256) { $cmd = $cmd.Substring(0, 256) }
                 [Console]::Write("$esc]133;C;$cmd$esc\")
@@ -72,6 +73,8 @@ function global:prompt {
     $lec = $LASTEXITCODE
     if ($null -eq $lec) { $lec = if ($?) { 0 } else { 1 } }
     $esc = [char]27
+
+    [Console]::Write("$esc]777;terax;tasks;$PID;idle;?$esc\")
 
     $oscD = "$esc]133;D;$lec$esc\"
     $oscA = "$esc]133;A$esc\"

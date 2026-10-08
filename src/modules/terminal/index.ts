@@ -13,7 +13,7 @@ export {
   clearFocusedTerminal,
   disposeSession,
   executeCommandInSession,
-  terminalHasForegroundProcess,
+  terminalNeedsCloseConfirmation,
   terminalIdForPty,
   navigateFocusedBlocks,
   respawnSession,

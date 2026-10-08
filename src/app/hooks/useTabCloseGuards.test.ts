@@ -12,11 +12,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTabCloseGuards } from "./useTabCloseGuards";
 
 const terminal = vi.hoisted(() => ({
-  hasForegroundProcess: vi.fn(async () => false),
+  needsCloseConfirmation: vi.fn(async () => false),
 }));
 
 vi.mock("@/modules/terminal", () => ({
-  terminalHasForegroundProcess: terminal.hasForegroundProcess,
+  terminalNeedsCloseConfirmation: terminal.needsCloseConfirmation,
 }));
 
 type HarnessProps = {

@@ -200,7 +200,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_close,
             pty::pty_close_all,
-            pty::pty_has_foreground_process,
+            pty::pty_has_running_tasks,
             pty::pty_has_foreground_job,
             pty::pty_shell_name,
             pty::pty_list_shells,

@@ -5,7 +5,7 @@
  */
 
 import { countDirtyDocuments } from "@/modules/editor";
-import { terminalHasForegroundProcess } from "@/modules/terminal";
+import { terminalNeedsCloseConfirmation } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -22,7 +22,7 @@ async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
   );
   if (terminalIds.length === 0) return false;
   const checks = await Promise.all(
-    terminalIds.map(terminalHasForegroundProcess),
+    terminalIds.map(terminalNeedsCloseConfirmation),
   );
   return checks.some(Boolean);
 }

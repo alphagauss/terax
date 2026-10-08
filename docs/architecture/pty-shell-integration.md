@@ -17,6 +17,10 @@
 
 ## 生命周期限制
 
+关闭应用、终端标签和 Space 共用关闭保护。Shell 命令状态从 PTY 原始输出跟踪，不依赖 renderer 挂载；嵌套 Shell 的提示符不能结束外层命令。Unix Shell 报告后台作业身份，关闭时在 local、WSL 或 SSH 的实际执行环境中重新核对存活状态，避免仅因 WSL 启动包装器或提示符辅助进程存活就判定有用户任务。
+
+Windows 本机后台任务仍按实际 Shell 的原生 PID 核对子进程，排除控制台宿主；进程内线程作业不在该探测范围。本机缺少 Shell 集成时退回进程检测；WSL、SSH 缺少 Shell 身份或任一宿主查询失败时保留关闭确认，文案不承诺退出必然终止远端任务。用户已主动脱离 Shell 作业表的任务不属于 Unix 作业保护范围。
+
 ConPTY 的创建与关闭必须串行化，重叠调用会使新终端无法输出。Windows PTY 必须由 Job Object 清理完整子进程树；仅终止直接 Shell 会遗留其开发服务器等后代。锁、缓冲和具体协议实现以源码注释及测试为准。
 
 终端页面隐藏后仍接收 PTY 输出。运行中的 TUI 不能用旧快照加增量重绘恢复，详见 [renderer pool](terminal-renderer-pool.md)。`AiComposerProvider` 必须保持稳定挂载，不能因凭据加载条件改变而重挂载整棵应用树。

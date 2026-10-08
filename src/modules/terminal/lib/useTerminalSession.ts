@@ -992,25 +992,17 @@ export async function respawnSession(
   if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 }
 
-/** 查询终端是否仍有前台任务，查询失败时按无前台任务处理。 */
-export async function terminalHasForegroundProcess(
+/** 关闭保护包含前台命令和后台作业；无法确认时保留确认步骤。 */
+export async function terminalNeedsCloseConfirmation(
   terminalId: number,
 ): Promise<boolean> {
   const s = sessions.get(terminalId);
   if (!s?.pty || s.shellExited) return false;
-  try {
-    const result = await invoke<boolean>("pty_has_foreground_process", {
-      id: s.pty.id,
-    });
-    return result;
-  } catch (e) {
-    console.error(
-      "[terax] pty_has_foreground_process failed for terminal",
-      terminalId,
-      e,
-    );
-    return false;
-  }
+  const pty = s.pty;
+  const needsConfirmation = await pty.needsCloseConfirmation();
+  // 查询期间重连或重建时检查新会话，不能把旧 PTY 的退出当成新会话空闲。
+  if (s.pty !== pty) return terminalNeedsCloseConfirmation(terminalId);
+  return !s.shellExited && needsConfirmation;
 }
 
 export function disposeSession(terminalId: number): void {

@@ -71,6 +71,7 @@ function __terax_install_prompt
     end
     function fish_prompt
         set -l __terax_status $status
+        printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$fish_pid" (string join , (jobs --pid))
         printf '\e]133;D;%d\e\\' $__terax_status
         printf '\e]7;file://%s%s\e\\' "$__TERAX_HOST" (__terax_urlencode_path "$PWD")
         printf '\e]133;A\e\\'
@@ -97,6 +98,7 @@ end
 __terax_install_prompt
 
 function __terax_preexec --on-event fish_preexec
+    printf '\e]777;terax;tasks;%s;running;\e\\' "$fish_pid"
     set -g __terax_block_seen 1
     set -l cmd (string replace -ra '[\x00-\x1f\x7f]' ' ' -- "$argv")
     printf '\e]133;C;%s\e\\' (string sub -l 256 -- "$cmd")
