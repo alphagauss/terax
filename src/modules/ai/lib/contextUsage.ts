@@ -52,9 +52,10 @@ export async function createContextUsage(options: {
       ? previous
       : undefined;
   let baseline: { messages: string[]; input: number } | undefined;
+  let callId: string | undefined;
   let pending:
     | {
-        id: string;
+        callId: string;
         messages: ModelMessage[];
         input: number;
         outputChars: number;
@@ -108,7 +109,7 @@ export async function createContextUsage(options: {
       ),
     );
     recordUsage(options.sessionId, {
-      id: pending.id,
+      callId: pending.callId,
       turnId: options.turnId,
       taskId: options.taskId,
       ...(options.purpose ? { purpose: options.purpose } : {}),
@@ -140,6 +141,9 @@ export async function createContextUsage(options: {
     pending = undefined;
   }
   return {
+    get callId() {
+      return callId;
+    },
     async prepareStep({ messages }: { messages: ModelMessage[] }) {
       if (restored?.context) {
         const prefix = messages.slice(0, restored.context.messageCount);
@@ -154,8 +158,9 @@ export async function createContextUsage(options: {
         restored = undefined;
       }
       const input = estimate(messages);
+      callId = crypto.randomUUID();
       pending = {
-        id: crypto.randomUUID(),
+        callId,
         messages,
         input,
         outputChars: 0,

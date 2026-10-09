@@ -25,9 +25,9 @@ it("opens saved statistics on hover and excludes other turns and subagents", asy
       { turnId: "old", output: 9000, time: 2000, taskId: "child" },
     ].map((item, index) => ({
       role: "usage",
+      call_id: String(index),
       timestamp: "now",
       content: {
-        id: String(index),
         turnId: item.turnId,
         taskId: item.taskId,
         model: { providerId: "test", modelId: "test" },

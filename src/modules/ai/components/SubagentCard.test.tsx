@@ -89,9 +89,9 @@ describe("SubagentCard", () => {
     restoreUsage("subagent-usage-tab", [
       {
         role: "usage",
+        call_id: "child-call",
         timestamp: "now",
         content: {
-          id: "child-call",
           turnId: "turn",
           taskId: "task-1",
           model: { providerId: "test", modelId: "test" },

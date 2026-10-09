@@ -51,7 +51,7 @@ const id = "context-display";
 const container = document.createElement("div");
 let root = createRoot(container);
 const record = (patch: Partial<UsageRecord> = {}): UsageRecord => ({
-  id: "first",
+  callId: "first",
   turnId: "turn",
   model: { providerId: "test", modelId: "old" },
   contextWindow: 128000,
@@ -87,12 +87,12 @@ it("updates main context during a turn and preserves it across remounts without 
     id,
     [
       record({
-        id: "old-turn",
+        callId: "old-turn",
         turnId: "old-turn",
         values: { inputTokens: 1000, cacheReadTokens: 500, outputTokens: 777 },
       }),
       record({
-        id: "earlier-call",
+        callId: "earlier-call",
         values: {
           inputTokens: 10000,
           cacheReadTokens: 8000,
@@ -107,7 +107,7 @@ it("updates main context during a turn and preserves it across remounts without 
         },
       }),
       record({
-        id: "child",
+        callId: "child",
         taskId: "child",
         values: {
           inputTokens: 90000,
@@ -115,7 +115,12 @@ it("updates main context during a turn and preserves it across remounts without 
           outputTokens: 50,
         },
       }),
-    ].map((content) => ({ role: "usage", content, timestamp: "now" })),
+    ].map(({ callId, ...content }) => ({
+      role: "usage",
+      call_id: callId,
+      content,
+      timestamp: "now",
+    })),
   );
   await act(async () =>
     root.render(<ContextIndicator sessionId={id} isBusy messages={[]} />),
@@ -140,7 +145,7 @@ it("updates main context during a turn and preserves it across remounts without 
     recordUsage(
       id,
       record({
-        id: "next",
+        callId: "next",
         turnId: "next-turn",
         model: { providerId: "test", modelId: "new" },
         contextWindow: 64000,
@@ -161,7 +166,7 @@ it("updates main context during a turn and preserves it across remounts without 
     recordUsage(
       id,
       record({
-        id: "next-child",
+        callId: "next-child",
         turnId: "next-turn",
         taskId: "next-child",
         values: {
@@ -213,7 +218,7 @@ it("shows a cache regression beside the context indicator and keeps its history 
     id,
     [
       record({
-        id: "baseline-start",
+        callId: "baseline-start",
         values: {
           inputTokens: 10000,
           cacheReadTokens: 9000,
@@ -221,7 +226,7 @@ it("shows a cache regression beside the context indicator and keeps its history 
         },
       }),
       record({
-        id: "baseline",
+        callId: "baseline",
         values: {
           inputTokens: 12000,
           cacheReadTokens: 9000,
@@ -229,14 +234,19 @@ it("shows a cache regression beside the context indicator and keeps its history 
         },
       }),
       record({
-        id: "regressed",
+        callId: "regressed",
         values: {
           inputTokens: 13000,
           cacheReadTokens: 4000,
           outputTokens: 100,
         },
       }),
-    ].map((content) => ({ role: "usage", content, timestamp: "now" })),
+    ].map(({ callId, ...content }) => ({
+      role: "usage",
+      call_id: callId,
+      content,
+      timestamp: "now",
+    })),
   );
 
   await act(async () =>
@@ -259,7 +269,7 @@ it("shows a cache regression beside the context indicator and keeps its history 
     recordUsage(
       id,
       record({
-        id: "recovered",
+        callId: "recovered",
         values: {
           inputTokens: 14000,
           cacheReadTokens: 12500,

@@ -10,7 +10,7 @@ import {
 } from "./conversation";
 
 const record = (patch: Partial<UsageRecord>): UsageRecord => ({
-  id: "call",
+  callId: "call",
   turnId: "turn",
   model: { providerId: "test", modelId: "test" },
   values: { inputTokens: 0, outputTokens: 0 },

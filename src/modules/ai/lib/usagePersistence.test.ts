@@ -25,8 +25,8 @@ const session: SessionFile = {
   metadata: {},
   messages: [],
 };
-const record = (id: string): UsageRecord => ({
-  id,
+const record = (callId: string): UsageRecord => ({
+  callId,
   turnId: "turn",
   model: { providerId: "test", modelId: "model" },
   contextWindow: 10000,
@@ -44,6 +44,7 @@ describe("usage persistence", () => {
   it("retries failed saves and never appends checkpoint usage twice", async () => {
     const cursor = { persistedMessages: 0, committedParts: 0, turnId: "turn" };
     const saved: SessionMessage[] = [];
+    recordUsage(session.id, record("first"));
     recordUsage(session.id, record("first"));
     commit.mockRejectedValueOnce(new Error("disk full"));
     await expect(
@@ -68,6 +69,11 @@ describe("usage persistence", () => {
     await persistCompletedTurn(session, cursor, [], "cancelled", []);
     await persistCompletedTurn(session, cursor, [], "cancelled", []);
     expect(saved.filter((item) => item.role === "usage")).toHaveLength(2);
+    expect(
+      saved.filter((item) => item.role === "usage").map((item) => item.call_id),
+    ).toEqual(["first", "child"]);
+    expect(saved[0].content).not.toHaveProperty("id");
+    expect(saved[0].content).not.toHaveProperty("callId");
     expect(usageRecords(session.id, true)).toHaveLength(2);
     restoreUsage(session.id, JSON.parse(JSON.stringify(saved)));
     expect(usageRecords(session.id)).toHaveLength(2);

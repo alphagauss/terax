@@ -10,7 +10,7 @@ type UsageValues = {
   cacheReadTokens?: number;
 };
 export type UsageRecord = {
-  id: string;
+  callId: string;
   turnId: string;
   taskId?: string;
   purpose?: "compaction";

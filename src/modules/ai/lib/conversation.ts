@@ -61,6 +61,7 @@ export type SessionMessage = {
     }
   | {
       role: "assistant";
+      call_id?: string;
       message_id?: string;
       content: string;
       reasoning_content?: string;
@@ -82,9 +83,10 @@ export type SessionMessage = {
     }
   | { role: "delivery"; content: DeliveryRecord }
   | { role: "command"; content: CommandRecord }
-  | { role: "usage"; content: UsageRecord }
+  | { role: "usage"; call_id: string; content: Omit<UsageRecord, "callId"> }
   | {
       role: "model";
+      call_id?: string;
       content: ModelMessage[];
       message_id?: string;
       turn_status?: string;
@@ -123,6 +125,7 @@ type ToolPart = {
 };
 
 type AssistantBlock = {
+  callId?: string;
   model?: ModelMessage[];
   content: string[];
   reasoning: string[];
@@ -131,11 +134,21 @@ type AssistantBlock = {
   tools: ToolPart[];
 };
 
-/** 完整步骤的模型协议事实；展示片段不再参与该步骤的历史重建。 */
+/** 完整步骤的模型协议事实；调用身份只保存在内部 data part 的 ID，不改写模型消息。 */
 export function modelHistoryPart(
   messages: ModelMessage[],
+  callId?: string,
 ): UIMessage["parts"][number] {
-  return { type: "data-model-history", data: messages };
+  return {
+    type: "data-model-history",
+    data: messages,
+    ...(callId ? { id: callId } : {}),
+  };
+}
+
+/** 在输出开始时记录调用身份，使尚未形成完整步骤的中止片段仍可关联用量。 */
+export function modelCallPart(callId: string): UIMessage["parts"][number] {
+  return { type: "data-model-call", data: { callId } };
 }
 
 function modelHistory(
@@ -741,7 +754,7 @@ export function projectSessionMessages(
       const parts = ensureAssistant(index, record.turn_id, timestamp);
       parts.push({ type: "step-start" });
       modelDisplayParts(record.content, parts);
-      parts.push(modelHistoryPart(record.content));
+      parts.push(modelHistoryPart(record.content, record.call_id));
       if (record.reasoning_duration_ms !== undefined)
         parts.push({
           type: REASONING_DURATION_PART_TYPE,
@@ -855,6 +868,7 @@ export function projectSessionMessages(
       // 一轮中可能先请求工具再给出最终答复，消息底部应显示最后一段答复的时间。
       if (timestamp !== undefined) assistantTimestamp = timestamp;
       parts.push({ type: "step-start" });
+      if (record.call_id) parts.push(modelCallPart(record.call_id));
       if (record.reasoning_content) {
         parts.push({
           type: "reasoning",
@@ -1187,7 +1201,8 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
     if (
       current.content.length > 0 ||
       current.reasoning.length > 0 ||
-      current.tools.length > 0
+      current.tools.length > 0 ||
+      current.model?.length
     ) {
       blocks.push(current);
     }
@@ -1203,7 +1218,13 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
     const activityDurationMs = activityDurationFromPart(part);
     const history = modelHistory(part);
     if (history) {
+      const callId = "id" in part ? part.id : undefined;
+      // 审批响应和恢复指令不属于新模型调用，不能继承前一步的调用身份。
+      if (current.model && current.callId !== callId) flush();
+      current.callId = callId;
       current.model = [...(current.model ?? []), ...history];
+    } else if (part.type === "data-model-call") {
+      current.callId = (part.data as { callId: string }).callId;
     } else if (part.type === "step-start") {
       flush();
     } else if (part.type === "text") {
@@ -1233,7 +1254,7 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
       ];
 }
 
-/** 将一个 assistant 步骤写成 assistant 记录及其紧随的 tool 结果记录。 */
+/** 完整步骤写成模型记录；尚未完成的片段按助手和工具结果保存。 */
 function serializeAssistantBlock(
   block: AssistantBlock,
   options: AppendOptions,
@@ -1242,6 +1263,7 @@ function serializeAssistantBlock(
     return [
       {
         role: "model",
+        ...(block.callId ? { call_id: block.callId } : {}),
         content: block.model,
         message_id: options.messageId,
         timestamp: options.timestamp,
@@ -1264,6 +1286,7 @@ function serializeAssistantBlock(
   }));
   const assistant: SessionMessage = {
     role: "assistant",
+    ...(block.callId ? { call_id: block.callId } : {}),
     message_id: options.messageId,
     content: block.content.join(""),
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),

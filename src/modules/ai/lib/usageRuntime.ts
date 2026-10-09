@@ -37,29 +37,33 @@ export function recordUsage(id: string, record: UsageRecord) {
     settled: EMPTY,
     saved: 0,
   };
-  if (state.records.some((item) => item.id === record.id)) return;
+  if (state.records.some((item) => item.callId === record.callId)) return;
   state.records = [...state.records, record];
   sessions.set(id, state);
   publish(id);
 }
 export function restoreUsage(id: string, messages: readonly SessionMessage[]) {
-  const records = messages.flatMap((message) =>
-    message.role === "usage" ? [message.content] : [],
-  );
+  const records = messages.flatMap((message): UsageRecord[] => {
+    if (message.role !== "usage") return [];
+    return [{ ...message.content, callId: message.call_id }];
+  });
   const unique = [
-    ...new Map(records.map((record) => [record.id, record])).values(),
+    ...new Map(records.map((record) => [record.callId, record])).values(),
   ];
   sessions.set(id, { records: unique, settled: unique, saved: unique.length });
   publish(id);
 }
 export function pendingUsage(id: string, timestamp: string): SessionMessage[] {
   const state = sessions.get(id);
-  return (state?.records.slice(state.saved) ?? []).map((record) => ({
-    role: "usage",
-    content: record,
-    turn_id: record.turnId,
-    timestamp,
-  }));
+  return (state?.records.slice(state.saved) ?? []).map(
+    ({ callId, ...content }) => ({
+      role: "usage",
+      call_id: callId,
+      content,
+      turn_id: content.turnId,
+      timestamp,
+    }),
+  );
 }
 export function acknowledgeUsage(id: string, count: number) {
   const state = sessions.get(id);

@@ -46,6 +46,7 @@ import {
   convertToAgentModelMessages,
   expandConversationMessages,
   modelHistoryPart,
+  modelCallPart,
   REASONING_DURATION_PART_TYPE,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
@@ -529,6 +530,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
                       activityStartedAt ??= performance.now();
                     }
                     cycleWriter.write(chunk);
+                    if (chunk.type === "start-step" && contextUsage?.callId)
+                      cycleWriter.write(
+                        modelCallPart(contextUsage.callId) as UIMessageChunk,
+                      );
                     if (
                       chunk.type === "reasoning-end" &&
                       reasoningStartedAt !== undefined
@@ -548,6 +553,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   cycleWriter.write(
                     modelHistoryPart(
                       await result.responseMessages,
+                      contextUsage?.callId,
                     ) as UIMessageChunk,
                   );
                 },

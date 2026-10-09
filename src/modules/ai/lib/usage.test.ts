@@ -54,7 +54,7 @@ describe("request usage", () => {
       values: UsageRecord["values"],
       estimated: UsageRecord["estimated"] = [],
     ): UsageRecord => ({
-      id: crypto.randomUUID(),
+      callId: crypto.randomUUID(),
       turnId: "turn",
       model,
       contextWindow: 100_000,

@@ -152,7 +152,7 @@ function options(): RunAgentOptions {
 }
 function highUsage(opts: RunAgentOptions) {
   recordUsage(sessionId, {
-    id: "last",
+    callId: "last",
     turnId: "previous",
     model: opts.model,
     contextWindow: 200000,

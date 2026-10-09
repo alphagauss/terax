@@ -15,6 +15,7 @@ import {
   modelHistoryPart,
   projectSessionMessages,
   serializeSessionMessages,
+  type SessionMessage,
 } from "@/modules/ai/lib/conversation";
 import {
   getFileEditRuntime,
@@ -22,6 +23,7 @@ import {
 } from "@/modules/ai/lib/fileEditRuntime";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { type ModelMessage, readUIMessageStream } from "ai";
@@ -459,7 +461,7 @@ describe.sequential("Agent background subagents", () => {
                 signature: "approval-signature",
               },
             },
-            modelHistoryPart(canonical),
+            modelHistoryPart(canonical, "prior-call"),
           ],
         },
       ];
@@ -523,13 +525,23 @@ describe.sequential("Agent background subagents", () => {
         expect(streamed).toBeDefined();
         if (!streamed) throw new Error("Missing completed approval message");
         const live = await convertToAgentModelMessages([messages[0], streamed]);
-        const records = JSON.parse(
+        const records: SessionMessage[] = JSON.parse(
           JSON.stringify(
             serializeSessionMessages([messages[0], streamed], options),
           ),
         );
         const restored = await convertToAgentModelMessages(
           projectSessionMessages("approval-restored", records),
+        );
+        const calls = records.flatMap((record) =>
+          record.role === "model" &&
+          record.call_id &&
+          record.call_id !== "prior-call"
+            ? [record.call_id]
+            : [],
+        );
+        expect(calls).toEqual(
+          usageRecords("approval-session").slice(-2).map((record) => record.callId),
         );
         expect(restored).toEqual(JSON.parse(JSON.stringify(live)));
         expect(

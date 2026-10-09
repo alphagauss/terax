@@ -9,6 +9,7 @@ import { runAgentStream } from "@/modules/ai/lib/agent";
 import {
   activityDurationFromPart,
   reasoningDurationFromPart,
+  serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { usageRecords } from "@/modules/ai/lib/usageRuntime";
@@ -294,6 +295,19 @@ describe("Agent reasoning duration", () => {
     expect(records[0].estimated).toEqual([]);
     expect(records[1].estimated).toContain("outputTokens");
     expect(records[1].values.outputTokens).toBeGreaterThan(0);
+    if (!message) throw new Error("Missing interrupted assistant message");
+    const saved = serializeSessionMessages([message], {
+      timestamp: "now",
+      turnId: "turn",
+      turnStatus: "failed",
+    });
+    expect(
+      saved
+        .filter(
+          (record) => record.role === "model" || record.role === "assistant",
+        )
+        .map((record) => ("call_id" in record ? record.call_id : undefined)),
+    ).toEqual(records.map((record) => record.callId));
   });
 
   it("keeps activity boundaries stable across blank text and direct tools", async () => {
@@ -378,5 +392,19 @@ describe("Agent reasoning duration", () => {
     expect(activityIndexes[0]).toBeLessThan(terminalIndexes[1]);
     expect(terminalIndexes[1]).toBeLessThan(activityIndexes[1]);
     expect(textIndexes[1]).toBeLessThan(activityIndexes[1]);
+    if (!finalMessage) throw new Error("Missing completed assistant message");
+    const records = serializeSessionMessages([finalMessage], {
+      timestamp: "now",
+      turnId: "turn",
+    });
+    expect(
+      records
+        .filter((record) => record.role === "model")
+        .map((record) => record.call_id),
+    ).toEqual(
+      usageRecords("00000000-0000-4000-8000-000000000004").map(
+        (record) => record.callId,
+      ),
+    );
   });
 });

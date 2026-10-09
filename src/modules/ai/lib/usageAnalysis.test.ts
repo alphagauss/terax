@@ -3,13 +3,13 @@ import type { UsageRecord } from "./usage";
 import { analyzeCacheUsage } from "./usageAnalysis";
 
 function record(
-  id: string,
+  callId: string,
   inputTokens: number,
   cacheReadTokens: number | undefined,
   patch: Partial<UsageRecord> = {},
 ): UsageRecord {
   return {
-    id,
+    callId,
     turnId: "turn",
     model: { providerId: "provider", modelId: "model" },
     contextWindow: 128000,
@@ -45,8 +45,8 @@ it("detects a sharp cache regression from the learned healthy baseline", () => {
   expect(analysis.status).toBe("suspected");
   expect(analysis.incidents).toHaveLength(1);
   expect(analysis.incidents[0]).toMatchObject({
-    previousUsageId: "healthy",
-    currentUsageId: "regressed",
+    previousCallId: "healthy",
+    currentCallId: "regressed",
     baselineCoverage: 0.9,
     expectedTokens: 10800,
     prefixReuseCoverage: 1 / 3,
@@ -61,8 +61,8 @@ it("detects a sharp absolute cache drop before a baseline exists", () => {
 
   expect(analysis.status).toBe("suspected");
   expect(analysis.incidents[0]).toMatchObject({
-    previousUsageId: "first",
-    currentUsageId: "regressed",
+    previousCallId: "first",
+    currentCallId: "regressed",
     expectedTokens: 90000,
     cacheReadTokens: 30000,
   });

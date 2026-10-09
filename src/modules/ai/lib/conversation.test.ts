@@ -86,7 +86,13 @@ describe("AI session message conversion", () => {
       },
     ];
     const restored = projectSessionMessages("session", [
-      { role: "model", content: canonical, timestamp, turn_id: "turn" },
+      {
+        role: "model",
+        call_id: "first-call",
+        content: canonical,
+        timestamp,
+        turn_id: "turn",
+      },
     ]);
     const tool = restored[0].parts.find(
       (part) => "toolCallId" in part,
@@ -122,7 +128,15 @@ describe("AI session message conversion", () => {
     const records = jsonlRoundTrip(
       serializeSessionMessages(restored, { timestamp, turnId: "turn" }),
     );
+    expect(
+      records.map((record) =>
+        record.role === "model" ? record.call_id : undefined,
+      ),
+    ).toEqual(["first-call", undefined]);
     const projected = projectSessionMessages("restored", records);
+    expect(
+      serializeSessionMessages(projected, { timestamp, turnId: "turn" }),
+    ).toEqual(records);
     expect(await convertToAgentModelMessages(projected)).toEqual(
       JSON.parse(JSON.stringify(next)),
     );

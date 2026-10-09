@@ -9,8 +9,8 @@ const MAX_PREVIOUS_CACHE_RATIO = 0.8;
 const MIN_DEFICIT_TOKENS = 1024;
 
 export type CacheComparison = {
-  previousUsageId: string;
-  currentUsageId: string;
+  previousCallId: string;
+  currentCallId: string;
   turnId: string;
   previousInputTokens: number;
   currentInputTokens: number;
@@ -91,8 +91,8 @@ export function analyzeCacheUsage(
     const expected =
       baseline == null ? undefined : baseline * previous.values.inputTokens;
     latest = {
-      previousUsageId: previous.id,
-      currentUsageId: current.id,
+      previousCallId: previous.callId,
+      currentCallId: current.callId,
       turnId: current.turnId,
       previousInputTokens: previous.values.inputTokens,
       currentInputTokens: current.values.inputTokens,
@@ -133,8 +133,7 @@ export function analyzeCacheUsage(
 
   return {
     status: latest
-      ? incidents[incidents.length - 1]?.currentUsageId ===
-        latest.currentUsageId
+      ? incidents[incidents.length - 1]?.currentCallId === latest.currentCallId
         ? "suspected"
         : incidents.length
           ? "recovered"
