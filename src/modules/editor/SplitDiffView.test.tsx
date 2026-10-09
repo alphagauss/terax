@@ -47,6 +47,103 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+it("横向同步不把延迟回声写回新的输入，尺寸未变时不覆盖拖动位置", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const observers: { targets: Element[]; notify: () => void }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observer: (typeof observers)[number];
+      constructor(callback: () => void) {
+        this.observer = { targets: [], notify: callback };
+        observers.push(this.observer);
+      }
+      observe(target: Element) {
+        this.observer.targets.push(target);
+      }
+      disconnect() {}
+    },
+  );
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(() =>
+    root?.render(
+      <SplitDiffView
+        original="before"
+        modified="after"
+        path="file.txt"
+        wordWrap={false}
+      />,
+    ),
+  );
+  const editor = container.querySelector<HTMLElement>(".cm-scroller");
+  const scrollbar = container.querySelector<HTMLElement>(
+    ".split-diff-horizontal-scrollbar",
+  );
+  const observer = observers.find((item) =>
+    item.targets.some((target) => target.classList.contains("cm-content")),
+  );
+  if (!editor || !scrollbar || !observer) throw new Error("missing scrollbar");
+  let scrollWidth = 1000;
+  let editorLeft = 0;
+  let scrollbarLeft = 0;
+  Object.defineProperties(editor, {
+    scrollWidth: { get: () => scrollWidth },
+    clientWidth: { get: () => 100 },
+    scrollLeft: {
+      get: () => Math.min(editorLeft, scrollWidth - 100),
+      set: (value: number) => {
+        editorLeft = Math.min(value, scrollWidth - 100);
+      },
+    },
+  });
+  Object.defineProperty(scrollbar, "scrollLeft", {
+    get: () => Math.min(scrollbarLeft, scrollWidth - 100),
+    set: (value: number) => {
+      scrollbarLeft = Math.min(value, scrollWidth - 100);
+    },
+  });
+  observer.notify();
+  const scroll = (element: HTMLElement) =>
+    element.dispatchEvent(new Event("scroll"));
+
+  // 编辑器继续向前滚动时，前一次同步产生的滚动条事件不能拉回内容。
+  editorLeft = 100;
+  scroll(editor);
+  expect(scrollbar.scrollLeft).toBe(100);
+  editorLeft = 140;
+  scroll(scrollbar);
+  expect(editor.scrollLeft).toBe(140);
+  scroll(editor);
+  expect(scrollbar.scrollLeft).toBe(140);
+  scroll(scrollbar);
+
+  // 拖动继续向前时，编辑器的同步回声也不能拉回正在移动的滑块。
+  scrollbarLeft = 200;
+  scroll(scrollbar);
+  expect(editor.scrollLeft).toBe(200);
+  scrollbarLeft = 260;
+  scroll(editor);
+  expect(scrollbar.scrollLeft).toBe(260);
+  scroll(scrollbar);
+  expect(editor.scrollLeft).toBe(260);
+  scroll(editor);
+
+  scrollbarLeft = 320;
+  observer.notify();
+  expect(scrollbar.scrollLeft).toBe(320);
+  scroll(scrollbar);
+  scroll(editor);
+  scrollWidth = 350;
+  observer.notify();
+  expect(editor.scrollLeft).toBe(250);
+  expect(scrollbar.scrollLeft).toBe(250);
+  expect(scrollbar.firstElementChild?.getAttribute("style")).toContain(
+    "width: 350px",
+  );
+});
+
 it("分栏提交保留编辑器和内容，滚动条随比例对齐，容器变化保留比例，重新打开恢复等宽", async () => {
   let width = 1000;
   const observers: { target?: Element; notify: () => void }[] = [];

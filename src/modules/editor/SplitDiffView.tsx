@@ -70,19 +70,42 @@ function bindHorizontalScrollbar(
   scrollbar: HTMLDivElement,
   sizer: HTMLDivElement,
 ) {
+  let expectedEditorLeft: number | null = null;
+  let expectedScrollbarLeft: number | null = null;
+  let scrollWidth = -1;
+  let editorWidth = -1;
+  const syncScrollbar = () => {
+    const left = view.scrollDOM.scrollLeft;
+    if (scrollbar.scrollLeft === left) return;
+    scrollbar.scrollLeft = left;
+    expectedScrollbarLeft = scrollbar.scrollLeft;
+  };
   const syncSize = () => {
-    sizer.style.width = `${view.scrollDOM.scrollWidth}px`;
-    scrollbar.scrollLeft = view.scrollDOM.scrollLeft;
+    const nextScrollWidth = view.scrollDOM.scrollWidth;
+    const nextEditorWidth = view.scrollDOM.clientWidth;
+    if (nextScrollWidth === scrollWidth && nextEditorWidth === editorWidth)
+      return;
+    if (nextScrollWidth !== scrollWidth)
+      sizer.style.width = `${nextScrollWidth}px`;
+    scrollWidth = nextScrollWidth;
+    editorWidth = nextEditorWidth;
+    syncScrollbar();
   };
   const onScrollbarScroll = () => {
-    if (view.scrollDOM.scrollLeft !== scrollbar.scrollLeft) {
-      view.scrollDOM.scrollLeft = scrollbar.scrollLeft;
+    const left = scrollbar.scrollLeft;
+    const isEcho = left === expectedScrollbarLeft;
+    expectedScrollbarLeft = null;
+    if (isEcho) return;
+    if (view.scrollDOM.scrollLeft !== left) {
+      view.scrollDOM.scrollLeft = left;
+      expectedEditorLeft = view.scrollDOM.scrollLeft;
     }
   };
   const onEditorScroll = () => {
-    if (scrollbar.scrollLeft !== view.scrollDOM.scrollLeft) {
-      scrollbar.scrollLeft = view.scrollDOM.scrollLeft;
-    }
+    // scroll 事件异步合并；同步回声不能把另一端已经前进的新输入拉回旧位置。
+    const isEcho = view.scrollDOM.scrollLeft === expectedEditorLeft;
+    expectedEditorLeft = null;
+    if (!isEcho) syncScrollbar();
   };
   const observer = new ResizeObserver(syncSize);
   observer.observe(view.contentDOM);
