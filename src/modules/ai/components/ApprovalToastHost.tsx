@@ -3,6 +3,10 @@
  * Toast 只负责展示和操作，实际响应与文件预览仍由审批运行时持有。
  */
 
+import {
+  describeToolCall,
+  formatToolSummary,
+} from "@/modules/ai/lib/toolSummary";
 import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
@@ -38,31 +42,19 @@ export type ApprovalToastHostProps = {
   onResolved: (requestKey: string, status: "approved" | "rejected") => void;
 };
 
-const TOOL_META: Record<
-  string,
-  { labelKey: string; icon: typeof FilePlusIcon }
-> = {
-  read_file: { labelKey: "toolApproval.readFile", icon: ToolsIcon },
-  find_files: { labelKey: "toolApproval.findFiles", icon: ToolsIcon },
-  grep: { labelKey: "toolApproval.searchFiles", icon: ToolsIcon },
-  write_file: { labelKey: "toolApproval.writeFile", icon: FilePlusIcon },
-  apply_patch: { labelKey: "toolApproval.editFileBatch", icon: Edit02Icon },
-  file_operation: { labelKey: "toolApproval.fileOperation", icon: ToolsIcon },
+const TOOL_META: Record<string, { icon: typeof FilePlusIcon }> = {
+  read_file: { icon: ToolsIcon },
+  find_files: { icon: ToolsIcon },
+  grep: { icon: ToolsIcon },
+  write_file: { icon: FilePlusIcon },
+  apply_patch: { icon: Edit02Icon },
+  file_operation: { icon: ToolsIcon },
   shell_exec: {
-    labelKey: "toolApproval.runShellCommand",
     icon: TerminalIcon,
   },
   shell_process: {
-    labelKey: "toolApproval.writeShellInput",
     icon: TerminalIcon,
   },
-};
-
-const FILE_OPERATION_LABELS: Record<string, string> = {
-  move: "toolApproval.fileOperations.move",
-  copy: "toolApproval.fileOperations.copy",
-  delete: "toolApproval.fileOperations.delete",
-  create_directory: "toolApproval.fileOperations.createDirectory",
 };
 
 /** 将审批 store 中的每个请求同步为不可超时的稳定 toast。 */
@@ -159,8 +151,9 @@ function ApprovalToast({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
-          {meta ? t(meta.labelKey) : request.toolName}
+        <span className="shrink-0 text-[12px] font-medium">{request.toolName}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+          {formatToolSummary(describeToolCall(request.toolName, request.input), t)}
         </span>
         <Hint content={`${sessionTitle}: ${t("toolApproval.needsApproval")}`}>
           <span className="max-w-28 truncate text-[10px] text-muted-foreground">
@@ -258,16 +251,12 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
     );
   }
   if (request.toolName === "file_operation") {
-    const operation = String(request.input.operation ?? "");
     const destination =
       typeof request.input.destination === "string"
         ? request.input.destination
         : null;
     return (
       <div className="space-y-1">
-        <div className="text-[10.5px] font-medium text-foreground">
-          {t(FILE_OPERATION_LABELS[operation] ?? "toolApproval.fileOperation")}
-        </div>
         <div className="font-mono text-[11px] text-muted-foreground">
           {String(request.input.path ?? "")}
         </div>
@@ -276,7 +265,7 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
             {t("toolApproval.destination")}: {destination}
           </div>
         ) : null}
-        {request.input.recursive === true ? (
+        {request.input.operation === "delete" && request.input.recursive === true ? (
           <div className="text-[10.5px] text-muted-foreground">
             {t("toolApproval.recursiveDelete")}
           </div>

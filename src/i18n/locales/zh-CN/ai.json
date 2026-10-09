@@ -50,38 +50,16 @@
     }
   },
   "toolApproval": {
-    "readFile": "读取外部或敏感文件",
-    "findFiles": "浏览外部或敏感目录",
-    "searchFiles": "搜索外部或敏感目录",
-    "writeFile": "写入文件",
-    "editFileBatch": "编辑文件（批量）",
-    "fileOperation": "管理文件",
-    "fileOperations": {
-      "move": "移动",
-      "copy": "复制",
-      "delete": "删除",
-      "createDirectory": "创建空目录"
-    },
     "destination": "目标路径",
     "recursiveDelete": "删除目录及其中的全部内容",
     "fileCount_one": "{{count}} 个文件",
     "fileCount_other": "{{count}} 个文件",
-    "runShellCommand": "运行 shell 命令",
-    "writeShellInput": "写入 shell 输入",
     "needsApproval": "需要批准",
     "deny": "拒绝",
     "approve": "批准",
     "review": "查看 diff",
     "openDiffHint": "打开 diff 查看此项修改",
-    "preparingPreview": "正在准备安全的 diff 预览…",
-    "lines_one": "{{count}} 行",
-    "lines_other": "{{count}} 行",
-    "reviewInDiffTab": " · 在 diff 标签页中查看",
-    "replaceAll": " · 全部替换",
-    "diffLines_one": "−{{removed}} / +{{added}} 行",
-    "diffLines_other": "−{{removed}} / +{{added}} 行",
-    "edits_one": "{{count}} 处编辑 · 在 diff 标签页中查看",
-    "edits_other": "{{count}} 处编辑 · 在 diff 标签页中查看"
+    "preparingPreview": "正在准备安全的 diff 预览…"
   },
   "notifications": {
     "approvalTitle": "{{session}} 需要批准",
@@ -179,6 +157,43 @@
     "emptyTitle": "向 Terax 提问",
     "emptyDescription": "解释命令输出、修复错误、生成片段或运行任务。",
     "thinking": "思考中…",
+    "toolSummary": {
+      "list": "列举目录",
+      "recursive": "递归查找",
+      "hidden": "包含隐藏项",
+      "directories": "包含目录",
+      "filesOnly": "仅文件",
+      "create": "创建",
+      "rewrite": "重写",
+      "move": "移动",
+      "copy": "复制",
+      "delete": "删除",
+      "deleteRecursive": "递归删除",
+      "createDirectory": "创建目录",
+      "poll": "轮询",
+      "writeInput": "写入输入",
+      "closeStdin": "关闭输入",
+      "terminate": "终止",
+      "exited": "包含已退出进程",
+      "literal": "字面匹配",
+      "files": "匹配文件",
+      "counts": "匹配计数",
+      "caseInsensitive": "忽略大小写",
+      "wait": "等待",
+      "background": "后台",
+      "send": "发送",
+      "attachments": "附件",
+      "moreFiles_one": "另 {{count}} 个文件",
+      "moreFiles_other": "另 {{count}} 个文件",
+      "moreAttachments_one": "另 {{count}} 个附件",
+      "moreAttachments_other": "另 {{count}} 个附件",
+      "lines": "最近 {{count}} 行",
+      "lineRange": "第 {{start}}–{{end}} 行",
+      "fromLine": "从第 {{start}} 行开始"
+    },
+    "toolDetails": {
+      "error": "错误"
+    },
     "toolDenied": "用户已拒绝此操作。",
     "reasoning": {
       "thinking": "正在思考",
@@ -186,19 +201,6 @@
       "completedWithDuration": "已思考 {{duration}} 秒"
     },
     "activity": {
-      "fileOperation": {
-        "move": "正在移动",
-        "copy": "正在复制",
-        "delete": "正在删除",
-        "createDirectory": "正在创建目录"
-      },
-      "activeTerminal": "正在读取活动终端",
-      "process": {
-        "poll": "正在等待进程",
-        "write": "正在写入进程",
-        "closeStdin": "正在关闭进程输入",
-        "terminate": "正在终止进程"
-      },
       "thinkingWithDuration": "正在思考 {{duration}} 秒",
       "completed": "已处理",
       "completedWithDuration": "已处理 {{duration}} 秒"
@@ -218,11 +220,7 @@
     "continue": "继续",
     "copy": "复制消息",
     "copied": "已复制",
-    "read": "读取",
-    "readFiles_one": "{{count}} 个文件",
-    "readFiles_other": "{{count}} 个文件",
     "subagent": {
-      "label": "Subagent",
       "task": "任务",
       "process": "过程 {{count}}",
       "result": "结果",
@@ -241,32 +239,7 @@
       "emptyTask": "任务内容不可用。",
       "noToolCalls": "没有工具调用。",
       "expand": "展开",
-      "collapse": "收起",
-      "actions": {
-        "read": "正在读取",
-        "find": "正在查找",
-        "search": "正在搜索",
-        "write": "正在写入",
-        "edit": "正在编辑",
-        "manage": "正在管理",
-        "run": "正在运行",
-        "process": "正在控制进程",
-        "listProcesses": "正在检查进程",
-        "terminal": "正在读取终端",
-        "tool": "正在调用 {{toolName}}"
-      },
-      "tools": {
-        "read": "读取",
-        "find": "查找",
-        "search": "搜索",
-        "write": "写入",
-        "edit": "编辑",
-        "manage": "管理",
-        "run": "运行",
-        "process": "进程",
-        "processes": "进程列表",
-        "terminal": "终端"
-      }
+      "collapse": "收起"
     },
     "recentUserMessages": "最近的用户消息",
     "scrollNavigation": "会话导航",

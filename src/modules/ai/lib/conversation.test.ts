@@ -831,7 +831,7 @@ describe("AI session message conversion", () => {
 
   it("restores display-only subagent progress without changing provider messages", async () => {
     const snapshot = {
-      version: 1 as const,
+      version: 2 as const,
       taskId: "task-1",
       toolCallId: "call-1",
       label: "Inspector",
@@ -841,7 +841,7 @@ describe("AI session message conversion", () => {
         {
           id: "child-call-1",
           toolName: "grep",
-          summary: "subagent_result",
+          summary: ["subagent_result"],
           status: "completed" as const,
         },
       ],
@@ -992,7 +992,7 @@ describe("AI session message conversion", () => {
       type: "data-subagent-display",
       data: {
         snapshot: {
-          version: 1,
+          version: 2,
           taskId: "child",
           toolCallId: "spawn",
           label: "inspect",

@@ -4,7 +4,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { summarizeSubagentToolInput } from "@/modules/ai/agents/subagentDisplay";
+import {
+  describeToolCall,
+  formatToolSummary,
+} from "@/modules/ai/lib/toolSummary";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { FileEditIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -41,14 +44,12 @@ export function FileEditTool({
           className="shrink-0 text-muted-foreground"
         />
         <span className="shrink-0 font-medium">
-          {t(
-            toolName === "write_file"
-              ? "chat.subagent.tools.write"
-              : "chat.subagent.tools.edit",
-          )}
+          {toolName}
         </span>
         <span className="min-w-0 truncate font-mono text-muted-foreground">
-          {summarizeSubagentToolInput(toolName, input)}
+          {formatToolSummary(
+            describeToolCall(toolName, input, state !== "input-streaming"), t,
+          )}
         </span>
         {!denied && (
           <FileEditStats

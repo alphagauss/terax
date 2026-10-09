@@ -357,7 +357,7 @@ describe.sequential("Agent background subagents", () => {
           {
             id: "child-edit",
             toolName: "write_file",
-            summary: "a.txt",
+            summary: ["a.txt"],
             status: "running",
           },
         ],

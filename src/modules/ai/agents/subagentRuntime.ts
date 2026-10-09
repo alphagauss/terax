@@ -7,6 +7,7 @@ import type {
   SubagentDisplayState,
   SubagentDisplayStep,
 } from "@/modules/ai/agents/subagentDisplay";
+import type { ToolSummary } from "@/modules/ai/lib/toolSummary";
 import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 
 export type SubagentTaskResult = {
@@ -45,7 +46,7 @@ type SubagentProgressEvent =
       type: "tool-start";
       id: string;
       toolName: string;
-      summary?: string;
+      summary?: ToolSummary;
     }
   | {
       type: "tool-finish";
@@ -300,7 +301,7 @@ function reduceDisplayProgress(
     const step: SubagentDisplayStep = {
       id: event.id,
       toolName: event.toolName,
-      ...(event.summary ? { summary: event.summary } : {}),
+      ...(event.summary?.length ? { summary: event.summary } : {}),
       status: "running",
     };
     const index = state.steps.findIndex((item) => item.id === event.id);

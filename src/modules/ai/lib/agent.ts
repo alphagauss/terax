@@ -6,7 +6,6 @@
 import {
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
-  summarizeSubagentToolInput,
 } from "@/modules/ai/agents/subagentDisplay";
 import {
   type AgentTurnCoordinator,
@@ -51,6 +50,7 @@ import {
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
+import { describeToolCall } from "@/modules/ai/lib/toolSummary";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
@@ -748,7 +748,7 @@ function buildSubagentTaskRunner({
             type: "tool-start",
             id,
             toolName,
-            summary: summarizeSubagentToolInput(toolName, input),
+            summary: describeToolCall(toolName, input, false),
           });
         },
       },
@@ -793,7 +793,7 @@ function buildSubagentTaskRunner({
           type: "tool-start",
           id: toolCall.toolCallId,
           toolName: toolCall.toolName,
-          summary: summarizeSubagentToolInput(
+          summary: describeToolCall(
             toolCall.toolName,
             toolCall.input,
           ),

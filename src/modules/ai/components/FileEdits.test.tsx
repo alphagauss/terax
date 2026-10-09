@@ -145,7 +145,7 @@ describe("文件改动展示", async () => {
         {
           id: "edit",
           toolName: "apply_patch",
-          summary: "a.ts",
+          summary: ["a.ts"],
           status: "running" as const,
         },
       ],

@@ -10,7 +10,6 @@ import {
   isSubagentDisplaySnapshot,
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
-  summarizeSubagentToolInput,
   toSubagentDisplaySnapshot,
 } from "./subagentDisplay";
 
@@ -25,23 +24,13 @@ const runningDisplay: SubagentDisplayState = {
     {
       id: "child-call-1",
       toolName: "read_file",
-      summary: "src/file.ts",
+      summary: ["src/file.ts"],
       status: "running",
     },
   ],
 };
 
 describe("Subagent display data", () => {
-  it("redacts and bounds persisted tool summaries", () => {
-    const summary = summarizeSubagentToolInput("shell_exec", {
-      command: `API_KEY=super-secret-value ${"x".repeat(200)}`,
-    });
-
-    expect(summary).toContain("API_KEY=<REDACTED>");
-    expect(summary).not.toContain("super-secret-value");
-    expect(summary?.length).toBeLessThanOrEqual(160);
-  });
-
   it("treats structured tool error outputs as failed progress", () => {
     expect(isSubagentToolErrorOutput({ error: "permission denied" })).toBe(
       true,

@@ -13,7 +13,14 @@ describe("AI collapsible details", () => {
     const props = {
       toolName: "find_files",
       state: "output-available" as const,
-      input: { path: "/workspace" },
+      input: {
+        path: "/workspace",
+        glob: "**/*.rs",
+        recursive: true,
+        include_hidden: false,
+        offset: 0,
+        limit: 2000,
+      },
       output: {
         entries: [{ rel: "lazy-detail.txt", kind: "file" }],
       },
@@ -22,9 +29,14 @@ describe("AI collapsible details", () => {
     const closed = renderToStaticMarkup(<Tool {...props} />);
     const open = renderToStaticMarkup(<Tool {...props} defaultOpen />);
 
-    expect(closed).toContain("Find");
+    expect(closed).toContain("find_files");
     expect(closed).not.toContain("lazy-detail.txt");
     expect(open).toContain("lazy-detail.txt");
+    expect(closed).not.toContain("**/*.rs");
+    const inputJson = open
+      .match(/<pre[^>]*>([\s\S]*?)<\/pre>/)?.[1]
+      .replace(/&quot;/g, '"');
+    expect(JSON.parse(inputJson ?? "null")).toEqual(props.input);
   });
 
   it("keeps error details folded by default", () => {

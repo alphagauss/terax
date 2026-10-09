@@ -32,11 +32,11 @@ describe("activity headline summaries", () => {
   it("shows the tool action before meaningful fields and then adds the summary", () => {
     expect(headline("shell_exec", {})).toMatchObject({
       kind: "tool",
-      text: "Running",
+      text: "shell_exec",
     });
     expect(headline("shell_exec", { command: " \n " })).toMatchObject({
       kind: "tool",
-      text: "Running",
+      text: "shell_exec",
     });
     expect(headline("shell_exec", { command: "Get-Date" })?.text).toBe(
       "Get-Date",
@@ -46,29 +46,29 @@ describe("activity headline summaries", () => {
     );
     expect(headline("apply_patch", { files: [{}] })).toMatchObject({
       kind: "tool",
-      text: "Editing",
+      text: "apply_patch",
     });
     expect(headline("apply_patch", { files: [{ path: "a.ts" }] })?.text).toBe(
       "a.ts",
     );
     expect(headline("find_files", {})).toMatchObject({
       kind: "tool",
-      text: "Finding",
+      text: "find_files",
     });
-    expect(headline("find_files", {}, "input-available")?.text).toBe(".");
+    expect(headline("find_files", {}, "input-available")?.text).toBe("List directory · .");
   });
 
   it("uses search conditions and process actions instead of opaque IDs", () => {
     expect(headline("shell_exec", { command: "pnpm test" })).toMatchObject({
-      action: "Running",
+      action: "shell_exec",
       text: "pnpm test",
     });
     expect(headline("read_file", { path: "a.ts" })).toMatchObject({
-      action: "Reading",
+      action: "read_file",
       text: "a.ts",
     });
     expect(headline("write_file", { path: "a.ts" })).toMatchObject({
-      action: "Writing",
+      action: "write_file",
       text: "a.ts",
     });
     expect(
@@ -77,18 +77,18 @@ describe("activity headline summaries", () => {
         path: "a.ts",
         destination: "b.ts",
       }),
-    ).toMatchObject({ action: "Moving", text: "a.ts → b.ts" });
+    ).toMatchObject({ action: "file_operation", text: "Move · a.ts → b.ts" });
     expect(
       headline("find_files", { glob: "**/*.tsx", path: "src" })?.text,
-    ).toBe("**/*.tsx · src");
+    ).toBe("src · **/*.tsx");
     expect(
       headline("shell_process", {
         action: "terminate",
         process_id: "opaque-id",
       })?.text,
-    ).toBe("Terminating process");
+    ).toBe("Terminate · opaque-id");
     expect(headline("get_terminal_output", {})?.text).toBe(
-      "Reading active terminal",
+      "get_terminal_output",
     );
   });
 

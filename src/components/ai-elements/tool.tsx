@@ -12,12 +12,9 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
-  Edit02Icon,
   File01Icon,
-  FilePlusIcon,
   FolderOpenIcon,
   GlobalSearchIcon,
-  RobotIcon,
   TerminalIcon,
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
@@ -25,20 +22,18 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, memo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
-const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
-  read_file: { label: "Read", icon: File01Icon },
-  find_files: { label: "Find", icon: FolderOpenIcon },
-  write_file: { label: "Write", icon: FilePlusIcon },
-  apply_patch: { label: "Edit", icon: Edit02Icon },
-  file_operation: { label: "Manage", icon: ToolsIcon },
-  shell_exec: { label: "Run", icon: TerminalIcon },
-  shell_process: { label: "Process", icon: TerminalIcon },
-  shell_list: { label: "Processes", icon: TerminalIcon },
-  grep: { label: "Search", icon: GlobalSearchIcon },
-  run_subagent: { label: "Subagent", icon: RobotIcon },
+const TOOL_META: Record<string, { icon: typeof File01Icon }> = {
+  read_file: { icon: File01Icon },
+  find_files: { icon: FolderOpenIcon },
+  file_operation: { icon: ToolsIcon },
+  shell_exec: { icon: TerminalIcon },
+  shell_process: { icon: TerminalIcon },
+  shell_list: { icon: TerminalIcon },
+  grep: { icon: GlobalSearchIcon },
 };
 
 const STATUS_DOT: Record<ToolPart["state"], string> = {
@@ -61,64 +56,20 @@ const STATUS_LABEL: Record<ToolPart["state"], string> = {
   "output-error": "error",
 };
 
-function deriveSummary(toolName: string, input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const i = input as Record<string, unknown>;
-  const str = (k: string) =>
-    typeof i[k] === "string" ? (i[k] as string) : null;
-
-  switch (toolName) {
-    case "read_file":
-    case "write_file":
-      return str("path");
-    case "file_operation": {
-      const operation = str("operation") ?? "manage";
-      const path = str("path") ?? "";
-      const destination = str("destination");
-      return `${operation} ${path}${destination ? ` → ${destination}` : ""}`;
-    }
-    case "find_files":
-      return str("path") ?? ".";
-    case "apply_patch": {
-      const files = Array.isArray(i.files) ? i.files : [];
-      return `${files.length} file${files.length === 1 ? "" : "s"}`;
-    }
-    case "shell_exec":
-      return str("command");
-    case "shell_process":
-      return str("process_id");
-    case "grep":
-      return str("pattern") ?? str("query");
-    case "run_subagent":
-      return str("agent") ?? str("task");
-    default:
-      return null;
-  }
-}
-
 export type ToolProps = ComponentProps<typeof Collapsible> & {
   toolName: string;
   state: ToolPart["state"];
+  summary?: string;
   input?: unknown;
   output?: unknown;
   errorText?: string;
 };
 
-// Tools whose `input` carries large/streaming content (file bodies, sub-
-// agent prompts). The AI diff tab is the canonical place to
-// view file changes; for the rest, the header summary + final output is
-// enough. Re-rendering streamed input on every token both stalls the UI
-// and duplicates information.
-const HEAVY_CONTENT_TOOLS = new Set([
-  "write_file",
-  "apply_patch",
-  "run_subagent",
-]);
-
 const ToolImpl = ({
   className,
   toolName,
   state,
+  summary,
   input,
   output,
   errorText,
@@ -127,21 +78,15 @@ const ToolImpl = ({
 }: ToolProps) => {
   const meta = TOOL_META[toolName];
   const Icon = meta?.icon ?? ToolsIcon;
-  const label = meta?.label ?? toolName;
-  const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
-  const open = defaultOpen ?? false;
-  const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
-  // For heavy tools, only show details on error — never the streamed input
-  // body, which is huge and re-renders per token.
-  const showInputBody = !isHeavy && Boolean(input);
-  const showOutputBody = !isHeavy && output !== undefined;
+  const showInputBody = input != null;
+  const showOutputBody = output != null;
   const hasDetails =
     showInputBody || showOutputBody || Boolean(errorText);
 
   return (
     <Collapsible
-      defaultOpen={open}
+      defaultOpen={defaultOpen}
       className={cn("group/tool not-prose w-full", className)}
       {...props}
     >
@@ -164,7 +109,7 @@ const ToolImpl = ({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium text-foreground">{label}</span>
+        <span className="shrink-0 font-medium text-foreground">{toolName}</span>
         {summary ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
             {summary}
@@ -183,16 +128,20 @@ const ToolImpl = ({
         <CollapsibleContent
           className={cn("terax-collapsible-content")}
         >
-          <div className="ml-3 mt-1 space-y-2 border-l border-border/60 pl-3 pb-1">
+          <div className="ml-3 mt-1 space-y-1 border-l border-border/60 pl-3 pb-1">
             {showInputBody ? (
-              <ToolInput toolName={toolName} input={input} />
+              <ToolInput input={input} />
             ) : null}
             {showOutputBody || errorText ? (
-              <ToolOutput
-                toolName={toolName}
-                output={showOutputBody ? output : undefined}
-                errorText={errorText}
-              />
+              <div
+                className={showInputBody ? "border-t border-border/60 pt-1" : undefined}
+              >
+                <ToolOutput
+                  toolName={toolName}
+                  output={showOutputBody ? output : undefined}
+                  errorText={errorText}
+                />
+              </div>
             ) : null}
           </div>
         </CollapsibleContent>
@@ -201,131 +150,12 @@ const ToolImpl = ({
   );
 };
 
-// For heavy tools, the only thing that should trigger a re-render is a
-// state transition or the path summary changing — NOT every input-content
-// token. We compare the cheap derived summary instead of the input ref.
-/**
- * 工具调用展示组件。
- *
- * 默认只渲染轻量标题；用户展开时才挂载输入输出，重型工具的流式正文
- * 始终不进入详情树，避免大参数随 token 重渲染。
- */
-export const Tool = memo(ToolImpl, (a, b) => {
-  if (a.toolName !== b.toolName || a.state !== b.state) return false;
-  if (a.errorText !== b.errorText) return false;
-  if (a.output !== b.output) return false;
-  if (a.className !== b.className) return false;
-  if (HEAVY_CONTENT_TOOLS.has(a.toolName)) {
-    return deriveSummary(a.toolName, a.input) ===
-      deriveSummary(b.toolName, b.input);
-  }
-  return a.input === b.input;
-});
+/** 工具详情按需挂载，状态行只显示宿主传入的轻量摘要。 */
+export const Tool = memo(ToolImpl);
 
-function ToolInput({ toolName, input }: { toolName: string; input: unknown }) {
+function ToolInput({ input }: { input: unknown }) {
   if (input == null) return null;
-  const preview = renderInputPreview(toolName, input);
-  if (preview) {
-    return (
-      <div className="space-y-1">
-        <div className="text-[10px] font-medium text-muted-foreground">
-          Input
-        </div>
-        {preview}
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-medium text-muted-foreground">Input</div>
-      <CodeBlockMini
-        code={
-          typeof input === "string" ? input : JSON.stringify(input, null, 2)
-        }
-        language="json"
-      />
-    </div>
-  );
-}
-
-function renderInputPreview(
-  toolName: string,
-  input: unknown,
-): ReactNode | null {
-  if (!input || typeof input !== "object") return null;
-  const i = input as Record<string, unknown>;
-  const str = (k: string) =>
-    typeof i[k] === "string" ? (i[k] as string) : null;
-
-  if (toolName === "shell_exec") {
-    const cmd = str("command");
-    const cwd = str("cwd");
-    if (!cmd) return null;
-    return (
-      <div className="space-y-1">
-        {cwd ? (
-          <div className="font-mono text-[10px] text-muted-foreground">
-            {cwd}
-          </div>
-        ) : null}
-        <pre className="overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
-          {cmd}
-        </pre>
-      </div>
-    );
-  }
-  if (toolName === "shell_process") {
-    const processId = str("process_id");
-    const action = str("action");
-    const value = str("input");
-    if (!processId || !action) return null;
-    return (
-      <div className="space-y-1 font-mono text-[11px]">
-        <div className="text-muted-foreground">
-          {action} · {processId}
-        </div>
-        {value ? (
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">
-            {value}
-          </pre>
-        ) : null}
-      </div>
-    );
-  }
-  if (toolName === "read_file" || toolName === "find_files") {
-    const path = str("path") ?? str("url");
-    if (!path) return null;
-    return (
-      <div className="font-mono text-[11px] text-muted-foreground">{path}</div>
-    );
-  }
-  if (toolName === "file_operation") {
-    const operation = str("operation");
-    const path = str("path");
-    const destination = str("destination");
-    if (!operation || !path) return null;
-    return (
-      <div className="space-y-0.5 font-mono text-[11px]">
-        <div className="text-foreground">{operation}</div>
-        <div className="text-muted-foreground">{path}</div>
-        {destination ? (
-          <div className="text-muted-foreground">→ {destination}</div>
-        ) : null}
-      </div>
-    );
-  }
-  if (toolName === "grep") {
-    const pat = str("pattern") ?? str("query");
-    const path = str("path") ?? str("root");
-    if (!pat) return null;
-    return (
-      <div className="space-y-0.5 font-mono text-[11px]">
-        <div className="text-foreground">{pat}</div>
-        {path ? <div className="text-muted-foreground">{path}</div> : null}
-      </div>
-    );
-  }
-  return null;
+  return <CodeBlockMini code={JSON.stringify(input, null, 2)} />;
 }
 
 function ToolOutput({
@@ -337,10 +167,13 @@ function ToolOutput({
   output: unknown;
   errorText?: string;
 }) {
+  const { t } = useTranslation("ai");
   if (errorText) {
     return (
       <div className="space-y-1">
-        <div className="text-[10px] font-medium text-destructive">Error</div>
+        <div className="text-[10px] font-medium text-destructive">
+          {t("chat.toolDetails.error")}
+        </div>
         <div className="rounded bg-destructive/10 px-2 py-1.5 font-mono text-[11px] text-destructive whitespace-pre-wrap">
           {errorText}
         </div>
@@ -351,26 +184,15 @@ function ToolOutput({
 
   const custom = renderToolOutput(toolName, output);
   if (custom) return custom;
-
-  let body: ReactNode;
   if (typeof output === "string") {
-    body = <CodeBlockMini code={output} language="text" />;
-  } else if (typeof output === "object" && !isValidElement(output)) {
-    body = (
-      <CodeBlockMini code={JSON.stringify(output, null, 2)} language="json" />
-    );
-  } else {
-    body = <div className="text-[12px]">{output as ReactNode}</div>;
+    return <CodeBlockMini code={output} />;
   }
-
-  return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-medium text-muted-foreground">
-        Output
-      </div>
-      {body}
-    </div>
-  );
+  if (typeof output === "object" && !isValidElement(output)) {
+    return (
+      <CodeBlockMini code={JSON.stringify(output, null, 2)} />
+    );
+  }
+  return <div className="text-[12px]">{output as ReactNode}</div>;
 }
 
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
@@ -559,46 +381,6 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "write_file" || toolName === "apply_patch") {
-    const files = Array.isArray(o.files)
-      ? (o.files as Array<{
-          path: string;
-          bytesWritten: number;
-          replacements: number;
-        }> )
-      : [];
-    return (
-      <div className="space-y-0.5 font-mono text-[11px]">
-        {files.map((file) => (
-          <div key={file.path} className="flex items-center gap-1.5">
-            <span className="text-emerald-600 dark:text-emerald-400">✓</span>
-            <span className="truncate text-muted-foreground">{file.path}</span>
-            <span className="shrink-0 text-muted-foreground">
-              {toolName === "apply_patch"
-                ? `${file.replacements} replacement${file.replacements === 1 ? "" : "s"}`
-                : formatBytes(file.bytesWritten)}
-            </span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (toolName === "file_operation" && o.ok === true) {
-    const operation = typeof o.operation === "string" ? o.operation : "updated";
-    const path = typeof o.path === "string" ? o.path : "";
-    const destination = typeof o.destination === "string" ? o.destination : null;
-    return (
-      <div className="flex items-center gap-1.5 font-mono text-[11px]">
-        <span className="text-emerald-600 dark:text-emerald-400">✓</span>
-        <span className="text-foreground">{operation}</span>
-        <span className="truncate text-muted-foreground">{path}</span>
-        {destination ? (
-          <span className="truncate text-muted-foreground">→ {destination}</span>
-        ) : null}
-      </div>
-    );
-  }
 
   return null;
 }
@@ -703,22 +485,11 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function CodeBlockMini({ code }: { code: string; language: string }) {
-  // Tool input/output is debug-grade detail — JSON arrives pre-formatted and
-  // file content is shown in the editor diff tab. Highlighting here is not
-  // worth the parser hop.
+function CodeBlockMini({ code }: { code: string }) {
+  // 参数和结果按纯文本呈现，避免详情展开时额外加载语法高亮。
   return (
     <pre className="max-h-60 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap">
       {code}
     </pre>
   );
 }
-
-// Compatibility re-exports — the previous API exposed these subcomponents,
-// but the new compact <Tool /> takes everything via props. Kept as no-ops
-// to avoid breaking accidental imports.
-export const ToolHeader = () => null;
-export const ToolContent = ({ children }: { children?: ReactNode }) => (
-  <>{children}</>
-);
-export { ToolInput, ToolOutput };

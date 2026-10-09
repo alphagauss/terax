@@ -3,7 +3,7 @@
  * 展示数据只记录工具生命周期摘要，不包含推理正文、完整工具输出或模型上下文。
  */
 
-import { redactSensitive } from "../lib/redact";
+import { isToolSummary, type ToolSummary } from "@/modules/ai/lib/toolSummary";
 
 export type SubagentDisplayStatus =
   | "running"
@@ -15,7 +15,7 @@ export type SubagentDisplayStatus =
 export type SubagentDisplayStep = {
   id: string;
   toolName: string;
-  summary?: string;
+  summary?: ToolSummary;
   status: SubagentDisplayStatus;
 };
 
@@ -42,13 +42,12 @@ export type SubagentDisplaySnapshot = Pick<
   SubagentDisplayState,
   "taskId" | "toolCallId" | "label"
 > & {
-  version: 1;
+  version: 2;
   status: Exclude<SubagentDisplayStatus, "running">;
   durationMs: number;
   steps: SubagentDisplaySnapshotStep[];
 };
 
-const SUMMARY_LIMIT = 160;
 const SNAPSHOT_KEYS = new Set([
   "version",
   "taskId",
@@ -59,70 +58,6 @@ const SNAPSHOT_KEYS = new Set([
   "steps",
 ]);
 const SNAPSHOT_STEP_KEYS = new Set(["id", "toolName", "summary", "status"]);
-
-/**
- * 从工具输入提取适合聊天标题和过程列表的短摘要。
- *
- * 摘要经过敏感信息遮盖和长度限制，不保存文件正文或工具输出。
- */
-export function summarizeSubagentToolInput(
-  toolName: string,
-  input: unknown,
-): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const value = input as Record<string, unknown>;
-  const text = (key: string) =>
-    typeof value[key] === "string" ? value[key] : undefined;
-  let summary: string | undefined;
-
-  switch (toolName) {
-    case "read_file":
-    case "write_file":
-      summary = text("path");
-      break;
-    case "find_files":
-      summary = [text("path") ?? ".", text("glob")].filter(Boolean).join(" ");
-      break;
-    case "grep":
-      summary = [text("pattern") ?? text("query"), text("path")]
-        .filter(Boolean)
-        .join(" ");
-      break;
-    case "apply_patch": {
-      const files = Array.isArray(value.files) ? value.files : [];
-      const paths = files
-        .map((file) =>
-          file && typeof file === "object" && "path" in file
-            ? String((file as { path?: unknown }).path ?? "")
-            : "",
-        )
-        .filter(Boolean);
-      summary = paths.join(", ") || undefined;
-      break;
-    }
-    case "file_operation": {
-      const operation = text("operation");
-      const path = text("path");
-      const destination = text("destination");
-      summary = [operation, path, destination].filter(Boolean).join(" ");
-      break;
-    }
-    case "shell_exec":
-      summary = text("command");
-      break;
-    case "shell_process":
-      summary = [text("action"), text("process_id")].filter(Boolean).join(" ");
-      break;
-    default:
-      summary = undefined;
-  }
-
-  const normalized = redactSensitive(summary?.trim() ?? "");
-  if (!normalized) return undefined;
-  return normalized.length > SUMMARY_LIMIT
-    ? `${normalized.slice(0, SUMMARY_LIMIT - 3)}...`
-    : normalized;
-}
 
 /** 判断工具虽正常返回，但输出是否使用统一 error 字段表达业务失败。 */
 export function isSubagentToolErrorOutput(output: unknown): boolean {
@@ -141,7 +76,7 @@ export function toSubagentDisplaySnapshot(
 ): SubagentDisplaySnapshot {
   const status = state.status === "running" ? interruptedStatus : state.status;
   return {
-    version: 1,
+    version: 2,
     taskId: state.taskId,
     toolCallId: state.toolCallId,
     label: state.label,
@@ -169,7 +104,7 @@ export function isSubagentDisplaySnapshot(
   const snapshot = value as Record<string, unknown>;
   if (
     Object.keys(snapshot).some((key) => !SNAPSHOT_KEYS.has(key)) ||
-    snapshot.version !== 1 ||
+    snapshot.version !== 2 ||
     !isBoundedText(snapshot.taskId, 128) ||
     !isBoundedText(snapshot.toolCallId, 256) ||
     !isBoundedText(snapshot.label, 60) ||
@@ -202,8 +137,7 @@ function isDisplayStep(value: unknown): value is SubagentDisplaySnapshotStep {
     isBoundedText(step.id, 256) &&
     isBoundedText(step.toolName, 128) &&
     (step.summary === undefined ||
-      (typeof step.summary === "string" &&
-        step.summary.length <= SUMMARY_LIMIT)) &&
+      isToolSummary(step.summary)) &&
     (step.status === "completed" ||
       step.status === "incomplete" ||
       step.status === "failed" ||

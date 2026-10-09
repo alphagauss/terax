@@ -130,7 +130,7 @@ describe("AgentTurnCoordinator", () => {
           type: "tool-start",
           id: "child-call",
           toolName: "grep",
-          summary: "subagent_result",
+          summary: ["subagent_result"],
         });
         onProgress({
           type: "tool-finish",

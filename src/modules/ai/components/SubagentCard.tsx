@@ -3,6 +3,11 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import {
+  describeToolCall,
+  formatToolSummary,
+  type ToolSummary,
+} from "@/modules/ai/lib/toolSummary";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { Shimmer } from "@/components/controls/shimmer";
@@ -52,7 +57,7 @@ type RunningAction =
       kind: "tool";
       key: string;
       toolName: string;
-      summary?: string;
+      summary?: ToolSummary;
     };
 
 type Headline =
@@ -77,8 +82,6 @@ export function SubagentCard({
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
   const task = stringValue(input?.task) ?? "";
-  const label =
-    display?.label || stringValue(input?.label) || compactTaskLabel(task);
   const status = resolveStatus(part, display, backgroundResult);
   const actualHeadline = useMemo(
     () => resolveHeadline(status, display),
@@ -116,10 +119,14 @@ export function SubagentCard({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="shrink-0 text-[12px] font-medium text-foreground">
-              {t("chat.subagent.label")}
+              run_subagent
             </span>
             <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-              {label}
+              {formatToolSummary(
+                describeToolCall("run_subagent", input ?? { label: display?.label },
+                  part.state !== "input-streaming"),
+                t,
+              )}
             </span>
             {!open &&
               headline.kind === "running" &&
@@ -273,11 +280,11 @@ function ProcessList({
         >
           <StepStatus status={step.status} />
           <span className="shrink-0 font-medium text-foreground/90">
-            {toolLabel(step.toolName, t)}
+            {step.toolName}
           </span>
           {step.summary ? (
             <span className="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground">
-              {step.summary}
+              {formatToolSummary(step.summary, t)}
             </span>
           ) : null}
           <FileEditStats
@@ -438,6 +445,14 @@ function useStableHeadline(actual: Headline): Headline {
     pendingRef.current = actual;
     const current = shownRef.current;
     if (sameHeadline(current, actual)) return;
+    // 同一调用补全摘要时立即更新，不能延长该工具动作的最短展示时间。
+    if (current.kind === "running" && actual.kind === "running" &&
+      current.action.kind === "tool" && actual.action.kind === "tool" &&
+      current.action.key === actual.action.key) {
+      shownRef.current = actual;
+      setShown(actual);
+      return;
+    }
     const elapsed = Date.now() - shownAtRef.current;
     const mustHold =
       current.kind === "running" &&
@@ -476,7 +491,7 @@ function sameHeadline(left: Headline, right: Headline): boolean {
     (left.action.kind !== "tool" ||
       right.action.kind !== "tool" ||
       (left.action.toolName === right.action.toolName &&
-        left.action.summary === right.action.summary))
+        JSON.stringify(left.action.summary) === JSON.stringify(right.action.summary)))
   );
 }
 
@@ -558,8 +573,9 @@ function runningActionLabel(
   t: ReturnType<typeof useTranslation<"ai">>["t"],
 ): string {
   if (action.kind === "thinking") return t("chat.subagent.thinking");
-  const label = toolActionLabel(action.toolName, t);
-  return action.summary ? `${label} ${action.summary}` : label;
+  const label = action.toolName;
+  const summary = formatToolSummary(action.summary, t);
+  return summary ? `${label} ${summary}` : label;
 }
 
 function terminalSummary(
@@ -580,44 +596,6 @@ function terminalSummary(
       });
 }
 
-function toolActionLabel(
-  toolName: string,
-  t: ReturnType<typeof useTranslation<"ai">>["t"],
-): string {
-  const labels: Record<string, string> = {
-    read_file: t("chat.subagent.actions.read"),
-    find_files: t("chat.subagent.actions.find"),
-    grep: t("chat.subagent.actions.search"),
-    write_file: t("chat.subagent.actions.write"),
-    apply_patch: t("chat.subagent.actions.edit"),
-    file_operation: t("chat.subagent.actions.manage"),
-    shell_exec: t("chat.subagent.actions.run"),
-    shell_process: t("chat.subagent.actions.process"),
-    shell_list: t("chat.subagent.actions.listProcesses"),
-    get_terminal_output: t("chat.subagent.actions.terminal"),
-  };
-  return labels[toolName] ?? t("chat.subagent.actions.tool", { toolName });
-}
-
-function toolLabel(
-  toolName: string,
-  t: ReturnType<typeof useTranslation<"ai">>["t"],
-): string {
-  const labels: Record<string, string> = {
-    read_file: t("chat.subagent.tools.read"),
-    find_files: t("chat.subagent.tools.find"),
-    grep: t("chat.subagent.tools.search"),
-    write_file: t("chat.subagent.tools.write"),
-    apply_patch: t("chat.subagent.tools.edit"),
-    file_operation: t("chat.subagent.tools.manage"),
-    shell_exec: t("chat.subagent.tools.run"),
-    shell_process: t("chat.subagent.tools.process"),
-    shell_list: t("chat.subagent.tools.processes"),
-    get_terminal_output: t("chat.subagent.tools.terminal"),
-  };
-  return labels[toolName] ?? toolName;
-}
-
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
@@ -626,12 +604,6 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
-}
-
-function compactTaskLabel(task: string): string {
-  const normalized = task.trim().replace(/\s+/g, " ");
-  if (!normalized) return "Subagent";
-  return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
 }
 
 function formatDuration(durationMs: number): string {

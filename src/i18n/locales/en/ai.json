@@ -50,38 +50,16 @@
     }
   },
   "toolApproval": {
-    "readFile": "Read external or sensitive file",
-    "findFiles": "Browse external or sensitive directory",
-    "searchFiles": "Search external or sensitive directory",
-    "writeFile": "Write file",
-    "editFileBatch": "Edit file (batch)",
-    "fileOperation": "Manage file",
-    "fileOperations": {
-      "move": "Move",
-      "copy": "Copy",
-      "delete": "Delete",
-      "createDirectory": "Create empty directory"
-    },
     "destination": "Destination",
     "recursiveDelete": "Delete the directory and all of its contents",
     "fileCount_one": "{{count}} file",
     "fileCount_other": "{{count}} files",
-    "runShellCommand": "Run shell command",
-    "writeShellInput": "Write shell input",
     "needsApproval": "needs approval",
     "deny": "Deny",
     "approve": "Approve",
     "review": "Review diff",
     "openDiffHint": "Open the diff to review this change",
-    "preparingPreview": "Preparing a safe diff preview…",
-    "lines_one": "{{count}} line",
-    "lines_other": "{{count}} lines",
-    "reviewInDiffTab": " · review in the diff tab",
-    "replaceAll": " · replace all",
-    "diffLines_one": "−{{removed}} / +{{added}} line",
-    "diffLines_other": "−{{removed}} / +{{added}} lines",
-    "edits_one": "{{count}} edit · review in the diff tab",
-    "edits_other": "{{count}} edits · review in the diff tab"
+    "preparingPreview": "Preparing a safe diff preview…"
   },
   "notifications": {
     "approvalTitle": "{{session}} needs your approval",
@@ -179,6 +157,43 @@
     "emptyTitle": "Ask Terax anything",
     "emptyDescription": "Explain command output, fix errors, generate snippets, or run a task.",
     "thinking": "Thinking…",
+    "toolSummary": {
+      "list": "List directory",
+      "recursive": "Recursive search",
+      "hidden": "Include hidden",
+      "directories": "Include directories",
+      "filesOnly": "Files only",
+      "create": "Create",
+      "rewrite": "Rewrite",
+      "move": "Move",
+      "copy": "Copy",
+      "delete": "Delete",
+      "deleteRecursive": "Delete recursively",
+      "createDirectory": "Create directory",
+      "poll": "Poll",
+      "writeInput": "Write input",
+      "closeStdin": "Close input",
+      "terminate": "Terminate",
+      "exited": "Include exited processes",
+      "literal": "Literal match",
+      "files": "Matching files",
+      "counts": "Match counts",
+      "caseInsensitive": "Ignore case",
+      "wait": "Wait",
+      "background": "Background",
+      "send": "Send",
+      "attachments": "Attachments",
+      "moreFiles_one": "{{count}} more file",
+      "moreFiles_other": "{{count}} more files",
+      "moreAttachments_one": "{{count}} more attachment",
+      "moreAttachments_other": "{{count}} more attachments",
+      "lines": "Last {{count}} lines",
+      "lineRange": "Lines {{start}}–{{end}}",
+      "fromLine": "From line {{start}}"
+    },
+    "toolDetails": {
+      "error": "Error"
+    },
     "toolDenied": "The user denied this action.",
     "reasoning": {
       "thinking": "Thinking",
@@ -186,19 +201,6 @@
       "completedWithDuration": "Reasoned for {{duration}}s"
     },
     "activity": {
-      "fileOperation": {
-        "move": "Moving",
-        "copy": "Copying",
-        "delete": "Deleting",
-        "createDirectory": "Creating directory"
-      },
-      "activeTerminal": "Reading active terminal",
-      "process": {
-        "poll": "Waiting for process",
-        "write": "Writing to process",
-        "closeStdin": "Closing process input",
-        "terminate": "Terminating process"
-      },
       "thinkingWithDuration": "Thinking {{duration}}s",
       "completed": "Processed",
       "completedWithDuration": "Processed for {{duration}}s"
@@ -218,11 +220,7 @@
     "continue": "Continue",
     "copy": "Copy message",
     "copied": "Copied",
-    "read": "Read",
-    "readFiles_one": "{{count}} file",
-    "readFiles_other": "{{count}} files",
     "subagent": {
-      "label": "Subagent",
       "task": "Task",
       "process": "Process {{count}}",
       "result": "Result",
@@ -241,32 +239,7 @@
       "emptyTask": "Task details are unavailable.",
       "noToolCalls": "No tool calls.",
       "expand": "Expand",
-      "collapse": "Collapse",
-      "actions": {
-        "read": "Reading",
-        "find": "Finding",
-        "search": "Searching",
-        "write": "Writing",
-        "edit": "Editing",
-        "manage": "Managing",
-        "run": "Running",
-        "process": "Controlling process",
-        "listProcesses": "Checking processes",
-        "terminal": "Reading terminal",
-        "tool": "Running {{toolName}}"
-      },
-      "tools": {
-        "read": "Read",
-        "find": "Find",
-        "search": "Search",
-        "write": "Write",
-        "edit": "Edit",
-        "manage": "Manage",
-        "run": "Run",
-        "process": "Process",
-        "processes": "Processes",
-        "terminal": "Terminal"
-      }
+      "collapse": "Collapse"
     },
     "recentUserMessages": "Recent user messages",
     "scrollNavigation": "Conversation navigation",

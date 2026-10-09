@@ -4,6 +4,10 @@
  * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
+import {
+  describeToolCall,
+  formatToolSummary,
+} from "@/modules/ai/lib/toolSummary";
 import { writeClipboardText } from "@/lib/clipboard";
 import { DeliveryCard } from "@/modules/channels/components/DeliveryCard";
 import {
@@ -1168,18 +1172,6 @@ function isActivityBoundary(part: AnyPart): boolean {
   return isBodyTextPart(part) || isSubagentToolPart(part);
 }
 
-const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
-  read_file: () => i18n.t("ai:chat.subagent.actions.read"),
-  find_files: () => i18n.t("ai:chat.subagent.actions.find"),
-  write_file: () => i18n.t("ai:chat.subagent.actions.write"),
-  apply_patch: () => i18n.t("ai:chat.subagent.actions.edit"),
-  file_operation: () => i18n.t("ai:chat.subagent.actions.manage"),
-  shell_exec: () => i18n.t("ai:chat.subagent.actions.run"),
-  shell_list: () => i18n.t("ai:chat.subagent.actions.listProcesses"),
-  grep: () => i18n.t("ai:chat.subagent.actions.search"),
-  get_terminal_output: () => i18n.t("ai:chat.activity.activeTerminal"),
-};
-
 /** 仅为展示压缩摘要；摘要尚未形成时回退到工具动作，不改写工具输入。 */
 export function activityHeadline(part: AnyPart): ChatActivityHeadline {
   if (partType(part) === "reasoning") {
@@ -1200,39 +1192,19 @@ export function activityHeadline(part: AnyPart): ChatActivityHeadline {
       text: compactActivityText(externalLabel),
     };
   }
-  let label = ACTIVITY_TOOL_LABELS[toolName]?.() ?? toolName;
-  if (toolName === "file_operation") {
-    const operations: Record<string, string> = {
-      move: i18n.t("ai:chat.activity.fileOperation.move"),
-      copy: i18n.t("ai:chat.activity.fileOperation.copy"),
-      delete: i18n.t("ai:chat.activity.fileOperation.delete"),
-      create_directory: i18n.t(
-        "ai:chat.activity.fileOperation.createDirectory",
-      ),
-    };
-    label =
-      operations[
-        objectStringValue((part as { input?: unknown }).input, "operation") ??
-          ""
-      ] ?? label;
-  }
-  const summary = activityToolSummary(
-    toolName,
-    (part as { input?: unknown }).input,
+  const summary = formatToolSummary(
+    describeToolCall(
+      toolName,
+      (part as { input?: unknown }).input,
+      (part as { state?: string }).state !== "input-streaming",
+    ),
+    i18n.getFixedT(null, "ai"),
   );
-  const readableSummary = summary?.trim() ? summary : null;
-  const defaultFind =
-    toolName === "find_files" &&
-    (part as { state?: string }).state !== "input-streaming";
-  const actionOnly =
-    toolName === "shell_process" || toolName === "get_terminal_output";
   return {
     kind: "tool",
     key: toolCallIdFromPart(part) || toolName,
-    text: compactActivityText(readableSummary || (defaultFind ? "." : label)),
-    ...(!actionOnly && (readableSummary || defaultFind)
-      ? { action: label }
-      : {}),
+    text: summary || toolName,
+    ...(summary ? { action: toolName } : {}),
   };
 }
 
@@ -1242,51 +1214,6 @@ function compactActivityText(text: string): string {
   return characters.length > 160
     ? `${characters.slice(0, 159).join("")}…`
     : normalized;
-}
-
-function activityToolSummary(toolName: string, input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const value = input as Record<string, unknown>;
-  const text = (key: string) =>
-    typeof value[key] === "string" ? (value[key] as string) : null;
-
-  switch (toolName) {
-    case "read_file":
-    case "write_file":
-      return text("path");
-    case "file_operation": {
-      const path = text("path");
-      if (!path) return null;
-      const destination = text("destination");
-      return `${path}${destination ? ` → ${destination}` : ""}`;
-    }
-    case "find_files":
-      return [text("glob"), text("path")].filter(Boolean).join(" · ") || null;
-    case "apply_patch": {
-      const files = Array.isArray(value.files) ? value.files : [];
-      const paths = files
-        .map((file) => objectStringValue(file, "path"))
-        .filter(Boolean);
-      return paths.join(", ") || null;
-    }
-    case "shell_exec":
-      return text("command");
-    case "shell_process": {
-      const actions: Record<string, string> = {
-        poll: i18n.t("ai:chat.activity.process.poll"),
-        write: i18n.t("ai:chat.activity.process.write"),
-        close_stdin: i18n.t("ai:chat.activity.process.closeStdin"),
-        terminate: i18n.t("ai:chat.activity.process.terminate"),
-      };
-      return actions[text("action") ?? ""] ?? null;
-    }
-    case "get_terminal_output":
-      return i18n.t("ai:chat.activity.activeTerminal");
-    case "grep":
-      return text("pattern") ?? text("query");
-    default:
-      return null;
-  }
 }
 
 /** 判断推理分段之后是否已经出现正文、工具或下一段推理。 */
@@ -1382,7 +1309,11 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
     return out;
   }, [parts]);
   const count = paths.length || parts.length;
-  const preview = paths.map(basename).join(", ");
+  const first = parts[0] as { input?: unknown; state?: string } | undefined;
+  const summary = formatToolSummary([
+    ...describeToolCall("read_file", first?.input, first?.state !== "input-streaming"),
+    ...(count > 1 ? [{ label: "moreFiles" as const, values: { count: count - 1 } }] : []),
+  ], t);
 
   return (
     <Collapsible className="group/read overflow-hidden rounded-md border border-border/50 bg-card/50">
@@ -1409,14 +1340,11 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           className="shrink-0 text-muted-foreground"
         />
         <span className="shrink-0 font-medium text-foreground">
-          {t("chat.read")}
-        </span>
-        <span className="shrink-0 text-[12px] text-muted-foreground">
-          {t("chat.readFiles", { count })}
+          read_file
         </span>
         {paths.length > 0 ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground group-data-[state=open]/read:invisible">
-            · {preview}
+            {summary}
           </span>
         ) : null}
       </CollapsibleTrigger>
@@ -1457,7 +1385,6 @@ const PartAppear = memo(function PartAppear({
 
 const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
   const { t } = useTranslation("ai");
-  const path = readPathFromPart(part);
   const state = (part as { state?: string }).state ?? "";
   const isError = state === "output-error";
   return (
@@ -1477,10 +1404,14 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
         className="shrink-0 text-muted-foreground"
       />
       <span className="shrink-0 font-medium text-foreground">
-        {t("chat.read")}
+        read_file
       </span>
       <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
-        {path ?? ""}
+        {formatToolSummary(
+          describeToolCall("read_file", (part as { input?: unknown }).input,
+            state !== "input-streaming"),
+          t,
+        )}
       </span>
     </div>
   );
@@ -1610,6 +1541,7 @@ const RenderedTool = memo(function RenderedTool({
 }: {
   part: AnyToolPart;
 }) {
+  const { t } = useTranslation("ai");
   const toolName =
     part.type === "dynamic-tool"
       ? part.toolName
@@ -1631,6 +1563,10 @@ const RenderedTool = memo(function RenderedTool({
         className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
         toolName={externalLabel ?? toolName}
         state={display.state}
+        summary={externalLabel ? undefined : formatToolSummary(
+          describeToolCall(toolName, part.input, part.state !== "input-streaming"),
+          t,
+        )}
         input={externalLabel ? undefined : part.input}
         output={"output" in part ? part.output : undefined}
         errorText={display.errorText}
