@@ -3,6 +3,8 @@
  * 终端会话由模块级池持有，视图隐藏时不会销毁 PTY。
  */
 
+import { cn } from "@/lib/utils";
+
 import {
   ContextMenu,
   ContextMenuContent,
@@ -44,6 +46,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { BlockOverlay } from "./block/BlockOverlay";
+import { isBlockClick } from "./lib/mouseRouting";
 import { BlockWatermark } from "./block/BlockWatermark";
 import {
   copyTerminalSelection,
@@ -121,7 +124,7 @@ export const TerminalPane = memo(
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const findWidgetRef = useRef<FindWidgetHandle>(null);
-    const downYRef = useRef<number | null>(null);
+    const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
     const [findOpen, setFindOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [findOptions, setFindOptions] =
@@ -323,16 +326,20 @@ export const TerminalPane = memo(
           {/* biome-ignore lint/a11y/noStaticElementInteractions: terminal surface; pointer selects command blocks */}
           <div
             ref={containerRef}
-            className="absolute inset-0 z-0"
+            className={cn(
+              "absolute inset-x-0 bottom-0 z-0",
+              session.blockMode === "alt" ? "top-0" : "top-7",
+            )}
             onMouseDown={(e) => {
-              downYRef.current = e.clientY;
+              pointerDownRef.current = { x: e.clientX, y: e.clientY };
             }}
             onMouseUp={(e) => {
-              const moved =
-                downYRef.current != null &&
-                Math.abs(e.clientY - downYRef.current) > 4;
-              downYRef.current = null;
-              if (!moved) session.selectBlockAt(e.clientY);
+              if (
+                session.blockMode !== "alt" &&
+                isBlockClick(pointerDownRef.current, e)
+              )
+                session.selectBlockAt(e.clientY);
+              pointerDownRef.current = null;
               if (session.blockMode === "prompt")
                 focusTerminalInput(terminalId);
             }}
@@ -342,6 +349,7 @@ export const TerminalPane = memo(
             subscribe={session.subscribeBlocks}
           />
           <BlockOverlay
+            hidden={session.blockMode === "alt"}
             subscribe={session.subscribeBlocks}
             getVisible={session.visibleBlocks}
             readOutput={(id) => session.readBlockId(id)?.output ?? null}

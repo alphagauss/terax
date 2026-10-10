@@ -10,14 +10,16 @@ import {
 import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import { resolveFontFamily } from "@/lib/fonts";
-import { fmtShortcut, IS_MAC, MOD_KEY } from "@/lib/platform";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   clearTerminalBlockSelection,
   getTerminalDraft,
   terminalGridSelection,
+  terminalUsesPowerShell,
   setTerminalDraft,
   setTerminalInputActivity,
   setTerminalInputFocus,
@@ -39,7 +41,7 @@ type Props = {
   focused: boolean;
   /** Changes when the active theme changes, so the editor re-themes. */
   themeKey: string;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string) => Promise<boolean>;
   onInterrupt: () => void;
   getCwd: () => string | null;
 };
@@ -54,6 +56,7 @@ export default function ShellInput({
   onInterrupt,
   getCwd,
 }: Props) {
+  const { t } = useTranslation("terminal");
   const hostRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<ShellEditorHandle | null>(null);
   const commandsRef = useRef<string[]>([]);
@@ -88,20 +91,23 @@ export default function ShellInput({
       parent: host,
       fontFamily: fontRef.current.fontFamily,
       fontSize: fontRef.current.fontSize,
-      placeholderText: `Run a command  -  ↑ history  ${fmtShortcut(MOD_KEY, "U")} switch to AI`,
       commandNames: () => commandsRef.current,
       getCwd: () => cbRef.current.getCwd(),
+      isPowerShell: () => terminalUsesPowerShell(terminalIdRef.current),
       onChange: (text) =>
         setTerminalInputActivity(terminalIdRef.current, text.length > 0),
       suggest: historySuggest,
       historyList,
-      onSubmit: (text) => {
+      onSubmit: async (text) => {
+        const id = terminalIdRef.current;
+        if (!(await cbRef.current.onSubmit(text))) return false;
         historyRecord(text);
         const first = text.trim().split(/\s+/)[0];
         if (first && !commandsRef.current.includes(first)) {
           commandsRef.current = [first, ...commandsRef.current];
         }
-        cbRef.current.onSubmit(text);
+        if (getTerminalDraft(id) === text) setTerminalDraft(id, "");
+        return terminalIdRef.current === id;
       },
       onInterrupt: () => cbRef.current.onInterrupt(),
       copySelectionOnCtrlC: () =>
@@ -109,7 +115,6 @@ export default function ShellInput({
       onEscape: () => clearTerminalBlockSelection(terminalIdRef.current),
     });
     handleRef.current = handle;
-    requestAnimationFrame(() => handleRef.current?.focus());
     return () => {
       handle.destroy();
       handleRef.current = null;
@@ -157,10 +162,14 @@ export default function ShellInput({
   }, [fontFamily, fontSize, themeKey]);
 
   useEffect(() => {
+    handleRef.current?.setPlaceholder(t("block.inputPlaceholder"));
+  }, [t]);
+
+  useEffect(() => {
     const handle = handleRef.current;
     if (!handle) return;
     handle.setEditable(atPrompt);
-    if (atPrompt) handle.focus();
+    if (atPrompt && focusableRef.current) handle.focus();
   }, [atPrompt]);
 
   useEffect(() => {

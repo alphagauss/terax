@@ -15,8 +15,7 @@ vi.mock("@/modules/terminal/lib/terminalClipboard", () => ({
 }));
 vi.mock("@/lib/fonts", () => ({ resolveFontFamily: () => "monospace" }));
 vi.mock("@/lib/platform", () => ({
-  fmtShortcut: () => "Ctrl+U",
-  MOD_KEY: "Ctrl",
+  IS_MAC: false,
 }));
 vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: (selector: (state: unknown) => unknown) =>
@@ -32,6 +31,7 @@ vi.mock("@/modules/terminal/lib/useTerminalSession", () => ({
   clearTerminalBlockSelection: vi.fn(),
   getTerminalDraft: () => "",
   terminalGridSelection: () => mocks.grid,
+  terminalUsesPowerShell: () => false,
   setTerminalDraft: vi.fn(),
   setTerminalInputActivity: vi.fn(),
   setTerminalInputFocus: vi.fn(),
@@ -57,6 +57,7 @@ vi.mock("@/modules/terminal/block/lib/shellEditor", () => ({
     getValue: () => "",
     retheme: vi.fn(),
     setEditable: vi.fn(),
+    setPlaceholder: vi.fn(),
   }),
 }));
 
@@ -73,7 +74,7 @@ it("输入框代复制网格选区使用原生入口，同时保留编辑器自�
           mode="prompt"
           focused
           themeKey="dark"
-          onSubmit={() => {}}
+          onSubmit={async () => true}
           onInterrupt={() => {}}
           getCwd={() => null}
         />,

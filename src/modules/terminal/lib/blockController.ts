@@ -15,7 +15,7 @@ import {
 
 export type BlockController = {
   blockMode: BlockMode;
-  submitCommand: (text: string) => void;
+  submitCommand: (text: string) => Promise<boolean>;
   interrupt: () => void;
   getCwd: () => string | null;
 };

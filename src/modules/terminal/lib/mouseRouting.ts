@@ -10,6 +10,31 @@ export type TerminalMouseTrackingMode =
   | "drag"
   | "any";
 
+/** 只有主键原地点击才选择整块，水平拖选和修饰键选择继续交给 xterm。 */
+export function isBlockClick(
+  start: { x: number; y: number } | null,
+  event: Pick<
+    MouseEvent,
+    | "clientX"
+    | "clientY"
+    | "button"
+    | "shiftKey"
+    | "altKey"
+    | "ctrlKey"
+    | "metaKey"
+  >,
+): boolean {
+  return (
+    !!start &&
+    event.button === 0 &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 4
+  );
+}
+
 export type TerminalMouseModifierEvent = Pick<
   MouseEvent,
   "altKey" | "shiftKey"

@@ -1,4 +1,5 @@
-# terax-shell-integration (PowerShell)
+﻿# terax-shell-integration (PowerShell)
+# 保留 UTF-8 BOM，Windows PowerShell 5.1 否则会按系统代码页错误解析中文注释。
 # Emits OSC 7 (cwd) + OSC 133 A/B/C/D so the host tracks cwd and prompt
 # boundaries. C comes from a PSConsoleHostReadLine wrapper (PowerShell has no
 # preexec hook).
@@ -45,6 +46,20 @@ function global:__terax_install_readline {
     # lands in its local scope and vanishes when it returns, leaving the
     # wrapper calling a missing command on every read (empty-input loop).
     Copy-Item Function:PSConsoleHostReadLine Function:global:__terax_user_readline -Force
+    # Blocks 专用输入协议：ASCII 载荷不会被逐行执行，恢复全文后交给原生解析器。
+    if ($env:TERAX_BLOCKS -and (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) {
+        Set-PSReadLineKeyHandler -Chord Ctrl+F12 -ScriptBlock {
+            $text = $null
+            $cursor = 0
+            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$text, [ref]$cursor)
+            if (-not $text.StartsWith('#terax:')) { return }
+            $command = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($text.Substring(7)))
+            [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+            [Microsoft.PowerShell.PSConsoleReadLine]::Insert($command)
+            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        }
+        $global:__terax_block_input = $true
+    }
     function global:PSConsoleHostReadLine {
         try {
             $line = __terax_user_readline
@@ -59,6 +74,16 @@ function global:__terax_install_readline {
                 $global:__terax_block_seen = $true
                 $esc = [char]27
                 [Console]::Write("$esc]777;terax;tasks;$PID;running;?$esc\")
+                # 完整命令另发 E 标记，短 C 标记继续服务原生执行状态与 Agent 检测。
+                if ($env:TERAX_BLOCKS) {
+                    # 宿主遇到 ParserError 不一定更新 $?，先记录解析结果供 prompt 使用。
+                    $parseTokens = $null
+                    $parseErrors = $null
+                    $null = [System.Management.Automation.Language.Parser]::ParseInput($line, [ref]$parseTokens, [ref]$parseErrors)
+                    $global:__terax_parse_failed = $parseErrors.Count -gt 0
+                    $encoded = __terax_urlencode $line
+                    [Console]::Write("$esc]133;E;$encoded$esc\")
+                }
                 $cmd = $line -replace '[\x00-\x1F\x7F]', ' '
                 if ($cmd.Length -gt 256) { $cmd = $cmd.Substring(0, 256) }
                 [Console]::Write("$esc]133;C;$cmd$esc\")
@@ -69,9 +94,12 @@ function global:__terax_install_readline {
 }
 
 function global:prompt {
+    # 必须在任何辅助调用前捕获状态，成功的 cmdlet 不继承旧的原生退出码。
+    $succeeded = $?
+    $nativeExit = $LASTEXITCODE
+    $lec = if ($global:__terax_parse_failed) { 1 } elseif ($succeeded) { 0 } elseif ($nativeExit) { $nativeExit } else { 1 }
+    $global:__terax_parse_failed = $false
     __terax_install_readline
-    $lec = $LASTEXITCODE
-    if ($null -eq $lec) { $lec = if ($?) { 0 } else { 1 } }
     $esc = [char]27
 
     [Console]::Write("$esc]777;terax;tasks;$PID;idle;?$esc\")
@@ -79,6 +107,7 @@ function global:prompt {
     $oscD = "$esc]133;D;$lec$esc\"
     $oscA = "$esc]133;A$esc\"
     $oscB = "$esc]133;B$esc\"
+    if ($global:__terax_block_input) { $oscB = "$esc]133;B;terax=powershell$esc\" }
 
     $loc = Get-Location
     $osc7 = ''
@@ -94,7 +123,7 @@ function global:prompt {
     # prompt (markers only) and reserve the header/gap rows in the prompt
     # itself -- same layout contract as the zsh integration.
     if ($env:TERAX_BLOCKS) {
-        $global:LASTEXITCODE = $lec
+        $global:LASTEXITCODE = $nativeExit
         $gap = if ($global:__terax_block_seen) { "`n`n" } else { "`n" }
         return "$oscD$oscA$osc7$gap$oscB"
     }
@@ -105,6 +134,6 @@ function global:prompt {
         "PS $((Get-Location).Path)> "
     }
 
-    $global:LASTEXITCODE = $lec
+    $global:LASTEXITCODE = $nativeExit
     "$oscD$oscA$osc7${original}${oscB}"
 }

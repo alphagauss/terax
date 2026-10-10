@@ -1,4 +1,5 @@
 import { buildTerminalTheme } from "@/styles/terminalTheme";
+import i18n from "@/i18n";
 import {
   acceptCompletion,
   autocompletion,
@@ -22,6 +23,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import {
   crosshairCursor,
@@ -39,13 +41,14 @@ import { inlineSuggestion } from "./inlineSuggest";
 import { pathCompletions } from "./pathComplete";
 
 const shellLanguage = StreamLanguage.define(shell);
+const powershellLanguage = StreamLanguage.define(powerShell);
 
 export type ShellEditorOptions = {
   parent: HTMLElement;
   fontFamily: string;
   fontSize: number;
   placeholderText?: string;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string) => Promise<boolean>;
   onInterrupt: () => void;
   /** 动态读取智能复制策略；有选区时允许浏览器触发编辑器复制。 */
   copySelectionOnCtrlC: () => boolean;
@@ -59,6 +62,7 @@ export type ShellEditorOptions = {
   historyList?: (query: string, limit: number) => Promise<string[]>;
   /** Live cwd of the terminal, for path completion in argument position. */
   getCwd?: () => string | null;
+  isPowerShell?: () => boolean;
   /** Fires on every edit with the current text (used to gate empty-state UI). */
   onChange?: (text: string) => void;
 };
@@ -70,6 +74,7 @@ export type ShellEditorHandle = {
   setValue(text: string): void;
   clear(): void;
   setEditable(editable: boolean): void;
+  setPlaceholder(text: string): void;
   retheme(fontFamily: string, fontSize: number): void;
   destroy(): void;
 };
@@ -198,9 +203,9 @@ const SHELL_COMMANDS = [
   "open",
 ];
 
-const WORD_RE = /[\w./+-]*/;
+const WORD_RE = /(?:'(?:[^']|'')*'?|[\w.:/\\+-]*)$/;
 const DOC_WORD_RE = /[A-Za-z_][\w./-]+/g;
-const VALID_FOR = /^[\w./+-]*$/;
+const VALID_FOR = /^[\w.:/\\+-]*$/;
 // Command position = start of a command segment: line start, or right after a
 // separator (; & | newline ( { ), so the 2nd command in `a; b` completes too.
 const SEGMENT_START = /(^|[\n;&|(){}])\s*$/;
@@ -208,17 +213,49 @@ const SEGMENT_START = /(^|[\n;&|(){}])\s*$/;
 function commandOptions(
   prefix: string,
   getCommands: () => string[],
+  powershell: boolean,
 ): Completion[] {
   const names = getCommands();
-  const src = names.length ? names : SHELL_COMMANDS;
+  const src = names.length
+    ? names
+    : powershell
+      ? [
+          "Get-ChildItem",
+          "Set-Location",
+          "Get-Content",
+          "Write-Output",
+          "Get-Command",
+          "Get-Help",
+          "Select-Object",
+          "Where-Object",
+          "ForEach-Object",
+          "curl.exe",
+        ]
+      : SHELL_COMMANDS;
   const out: Completion[] = [];
   for (const label of src) {
-    if (label.startsWith(prefix)) {
+    if (
+      powershell
+        ? label.toLowerCase().startsWith(prefix.toLowerCase())
+        : label.startsWith(prefix)
+    ) {
       out.push({ label, type: "function" });
       if (out.length >= 50) break;
     }
   }
-  for (const k of SHELL_KEYWORDS) {
+  for (const k of powershell
+    ? [
+        "if",
+        "else",
+        "elseif",
+        "foreach",
+        "while",
+        "function",
+        "return",
+        "try",
+        "catch",
+      ]
+    : SHELL_KEYWORDS) {
     if (k.startsWith(prefix)) out.push({ label: k, type: "keyword" });
   }
   return out;
@@ -237,11 +274,12 @@ function docWordOptions(ctx: CompletionContext, current: string): Completion[] {
   return out;
 }
 
-const PATH_VALID_FOR = /^[^/]*$/;
+const PATH_VALID_FOR = /^[\w.:-]*$/;
 
 function makeCompletionSource(
   getCommands: () => string[],
   getCwd: () => string | null,
+  isPowerShell: () => boolean,
 ) {
   return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
     if (historyOpen(ctx.state)) return null;
@@ -252,17 +290,17 @@ function makeCompletionSource(
     if (SEGMENT_START.test(before)) {
       return {
         from: word.from,
-        options: commandOptions(word.text, getCommands),
+        options: commandOptions(word.text, getCommands, isPowerShell()),
         validFor: VALID_FOR,
       };
     }
     const cwd = getCwd();
     if (cwd) {
-      const res = await pathCompletions(word.text, cwd);
-      if (res?.options.length) {
+      const options = await pathCompletions(word.text, cwd, isPowerShell());
+      if (options?.length) {
         return {
-          from: word.from + res.fromOffset,
-          options: res.options,
+          from: word.from,
+          options,
           validFor: PATH_VALID_FOR,
         };
       }
@@ -331,13 +369,7 @@ function baseTheme(fontFamily: string, fontSize: number) {
       overflow: "hidden",
       boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
     },
-    ".cm-tooltip-autocomplete > ul": { fontFamily, maxHeight: "16rem" },
-    ".cm-tooltip-autocomplete > ul > li": { padding: "2px 8px" },
-    ".cm-tooltip-autocomplete ul li[aria-selected]": {
-      backgroundColor: "var(--accent, rgba(127,127,127,0.2))",
-      color: "var(--accent-foreground, inherit)",
-    },
-    ".cm-completionIcon": { paddingRight: "0.6em", opacity: "0.7" },
+    ".cm-tooltip-autocomplete > ul": { fontFamily },
   });
 }
 
@@ -356,6 +388,10 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
   const themeComp = new Compartment();
   const highlightComp = new Compartment();
   const editableComp = new Compartment();
+  const placeholderComp = new Compartment();
+  const languageComp = new Compartment();
+  let submitting = false;
+  let destroyed = false;
 
   const clear = (view: EditorView) =>
     view.dispatch({
@@ -370,8 +406,17 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
           // Enter always runs the line (Tab is accept). Predictable shell UX.
           const text = view.state.doc.toString();
           if (!text.trim()) return true;
-          opts.onSubmit(text);
-          clear(view);
+          if (submitting || view.state.readOnly) return true;
+          submitting = true;
+          void opts
+            .onSubmit(text)
+            .then((accepted) => {
+              if (accepted && !destroyed && view.state.doc.toString() === text)
+                clear(view);
+            })
+            .finally(() => {
+              submitting = false;
+            });
           return true;
         },
       },
@@ -389,7 +434,8 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
           if (
             opts.copySelectionOnCtrlC() &&
             view.state.selection.ranges.some((range) => !range.empty)
-          ) return false;
+          )
+            return false;
           opts.onInterrupt();
           clear(view);
           return true;
@@ -408,13 +454,25 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
       EditorState.allowMultipleSelections.of(true),
       EditorView.lineWrapping,
       tooltips({ parent: document.body }),
-      shellLanguage,
+      languageComp.of(
+        opts.isPowerShell?.() ? powershellLanguage : shellLanguage,
+      ),
+      EditorView.domEventHandlers({
+        focus: (_event, view) => {
+          view.dispatch({
+            effects: languageComp.reconfigure(
+              opts.isPowerShell?.() ? powershellLanguage : shellLanguage,
+            ),
+          });
+        },
+      }),
       highlightComp.of(syntaxHighlighting(highlightStyle())),
       autocompletion({
         override: [
           makeCompletionSource(
             opts.commandNames ?? (() => []),
             opts.getCwd ?? (() => null),
+            opts.isPowerShell ?? (() => false),
           ),
         ],
         icons: false,
@@ -424,7 +482,11 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
       completionNav,
       ...(opts.suggest ? inlineSuggestion(opts.suggest) : []),
       ...(opts.historyList ? historyPopover(opts.historyList) : []),
-      placeholder(opts.placeholderText ?? "Run a command"),
+      placeholderComp.of(
+        placeholder(
+          opts.placeholderText ?? i18n.t("terminal:block.commandFallback"),
+        ),
+      ),
       ...(opts.onChange
         ? [
             EditorView.updateListener.of((u) => {
@@ -443,7 +505,10 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
             ),
           ]
         : []),
-      editableComp.of(EditorView.editable.of(true)),
+      editableComp.of([
+        EditorView.editable.of(true),
+        EditorState.readOnly.of(false),
+      ]),
       themeComp.of(baseTheme(opts.fontFamily, opts.fontSize)),
     ],
   });
@@ -462,7 +527,14 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
     clear: () => clear(view),
     setEditable: (editable) =>
       view.dispatch({
-        effects: editableComp.reconfigure(EditorView.editable.of(editable)),
+        effects: editableComp.reconfigure([
+          EditorView.editable.of(editable),
+          EditorState.readOnly.of(!editable),
+        ]),
+      }),
+    setPlaceholder: (text) =>
+      view.dispatch({
+        effects: placeholderComp.reconfigure(placeholder(text)),
       }),
     retheme: (fontFamily, fontSize) =>
       view.dispatch({
@@ -471,6 +543,9 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
           highlightComp.reconfigure(syntaxHighlighting(highlightStyle())),
         ],
       }),
-    destroy: () => view.destroy(),
+    destroy: () => {
+      destroyed = true;
+      view.destroy();
+    },
   };
 }

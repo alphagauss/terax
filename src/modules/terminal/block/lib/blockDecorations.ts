@@ -1,3 +1,4 @@
+/** 使用 Shell 边界关联命令原文、网格标记和展示装饰，不从回显行数猜测布局。 */
 import {
   createShellIntegrationState,
   registerCwdHandler,
@@ -12,6 +13,8 @@ import {
   reduceMode,
 } from "./modeMachine";
 import { readRangeText } from "./readBlock";
+import { searchRange, type BlockMatch } from "./searchBlock";
+export type { BlockMatch } from "./searchBlock";
 import type { BlockMeta } from "./types";
 
 const OK_RULER = "#5fb3b3";
@@ -27,6 +30,7 @@ type Entry = {
   finishedAt: number;
   startMarker: IMarker;
   endMarker: IMarker;
+  headerMarker: IMarker | null;
   deco: IDecoration | null;
 };
 
@@ -36,7 +40,7 @@ type LiveBlock = {
   cwd: string;
   startedAt: number;
   startMarker: IMarker;
-  usedAlt: boolean;
+  headerMarker: IMarker | null;
 };
 
 export type BlockContext = {
@@ -59,6 +63,7 @@ export type PositionedBlock = {
   bottom: number;
   // Pixel top of the header row (one line above the command, in the blank gap).
   headerTop: number;
+  headerHeight: number;
 };
 
 export type VisibleBlocks = {
@@ -66,12 +71,11 @@ export type VisibleBlocks = {
   sticky: PositionedBlock | null;
 };
 
-export type BlockMatch = { line: number; col: number; len: number };
-
 export type BlockDecorationsOptions = {
   onCwd?: (cwd: string) => void;
   onMode?: (mode: BlockMode) => void;
   onViewport?: () => void;
+  takeSubmittedCommand?: () => string | null;
 };
 
 export class BlockDecorations {
@@ -80,8 +84,11 @@ export class BlockDecorations {
   private cwd = "";
   private idSeq = 0;
   private selectedId: string | null = null;
-  private searchDeco: IDecoration | null = null;
-  private searchMarker: IMarker | null = null;
+  private searchResources: { dispose(): void }[] = [];
+  private promptMarker: IMarker | null = null;
+  private promptReady = false;
+  private reportedCommand: string | null = null;
+  powershellInput = false;
   private mode: ModeState = initialModeState();
   private lastMode: BlockMode = modeOf(initialModeState());
   private readonly shellState = createShellIntegrationState();
@@ -89,6 +96,7 @@ export class BlockDecorations {
   private readonly onCwd?: (cwd: string) => void;
   private readonly onMode?: (mode: BlockMode) => void;
   private readonly onViewport?: () => void;
+  private readonly takeSubmittedCommand?: () => string | null;
   private viewportRaf: number | null = null;
 
   constructor(
@@ -98,6 +106,7 @@ export class BlockDecorations {
     this.onCwd = opts?.onCwd;
     this.onMode = opts?.onMode;
     this.onViewport = opts?.onViewport;
+    this.takeSubmittedCommand = opts?.takeSubmittedCommand;
     this.term.options.cursorInactiveStyle = "none";
     const osc133 = term.parser.registerOscHandler(133, (data) => {
       this.onOsc133(data);
@@ -135,7 +144,6 @@ export class BlockDecorations {
     const alt = this.term.buffer.active.type === "alternate";
     if (alt === this.mode.altScreen) return;
     this.mode = reduceMode(this.mode, { type: "altScreen", active: alt });
-    if (alt && this.live) this.live.usedAlt = true;
     this.emitMode();
     this.scheduleViewport();
   }
@@ -157,19 +165,6 @@ export class BlockDecorations {
     return r ? this.toMeta(this.entries[i], r) : null;
   }
 
-  read(block: BlockMeta): BlockContext {
-    const e = this.entries.find((x) => x.id === block.id);
-    const r = e ? this.rangeOf(e) : null;
-    const start = r ? r.start : block.startLine;
-    const end = r ? r.end : block.endLine;
-    return {
-      command: block.command,
-      cwd: block.cwd,
-      exitCode: block.exitCode,
-      output: readRangeText(this.term, start, end),
-    };
-  }
-
   readById(id: string): BlockContext | null {
     const e = this.entries.find((x) => x.id === id);
     if (!e) return null;
@@ -188,21 +183,7 @@ export class BlockDecorations {
     if (!e || !query) return [];
     const r = this.rangeOf(e);
     if (!r) return [];
-    const q = query.toLowerCase();
-    const buf = this.term.buffer.active;
-    const last = Math.min(r.end, buf.length - 1);
-    const out: BlockMatch[] = [];
-    for (let i = r.start; i <= last && out.length < 500; i++) {
-      const lower = buf.getLine(i)?.translateToString(true).toLowerCase() ?? "";
-      let from = 0;
-      while (out.length < 500) {
-        const idx = lower.indexOf(q, from);
-        if (idx < 0) break;
-        out.push({ line: i, col: idx, len: query.length });
-        from = idx + Math.max(1, query.length);
-      }
-    }
-    return out;
+    return searchRange(this.term.buffer.active, r.start, r.end, query);
   }
 
   revealMatch(m: BlockMatch): void {
@@ -212,36 +193,42 @@ export class BlockDecorations {
       this.term.scrollToLine(
         Math.max(0, m.line - Math.floor(this.term.rows / 2)),
       );
-      const marker = this.term.registerMarker(
-        m.line - (buf.baseY + buf.cursorY),
-      );
-      if (!marker) return;
-      this.searchMarker = marker;
-      this.searchDeco =
-        this.term.registerDecoration({ marker, x: m.col, width: m.len }) ??
-        null;
-      this.searchDeco?.onRender((el) => el.classList.add("bt-match"));
+      for (const segment of m.segments) {
+        const marker = this.term.registerMarker(
+          segment.line - (buf.baseY + buf.cursorY),
+        );
+        if (!marker) continue;
+        this.searchResources.push(marker);
+        const deco = this.term.registerDecoration({
+          marker,
+          x: segment.col,
+          width: segment.len,
+        });
+        if (deco) {
+          this.searchResources.push(deco);
+          deco.onRender((el) => el.classList.add("bt-match"));
+        }
+      }
     } catch {}
   }
 
   clearSearch(): void {
-    try {
-      this.searchDeco?.dispose();
-    } catch {}
-    try {
-      this.searchMarker?.dispose();
-    } catch {}
-    this.searchDeco = null;
-    this.searchMarker = null;
+    for (const resource of this.searchResources.reverse()) resource.dispose();
+    this.searchResources = [];
   }
 
-  commandLines(): number[] {
-    const lines: number[] = [];
-    for (const e of this.entries) {
-      if (!e.startMarker.isDisposed && e.startMarker.line >= 0)
-        lines.push(e.startMarker.line);
-    }
-    return lines;
+  beginSubmission(): boolean {
+    if (!this.promptReady || modeOf(this.mode) !== "prompt") return false;
+    this.promptReady = false;
+    this.mode = reduceMode(this.mode, { type: "osc133", marker: "C" });
+    this.emitMode();
+    return true;
+  }
+
+  cancelSubmission(): void {
+    this.promptReady = true;
+    this.mode = reduceMode(this.mode, { type: "osc133", marker: "A" });
+    this.emitMode();
   }
 
   hasAnyBlock(): boolean {
@@ -268,11 +255,21 @@ export class BlockDecorations {
     let sticky: PositionedBlock | null = null;
 
     const consider = (
-      meta: Omit<PositionedBlock, "top" | "bottom" | "ok" | "headerTop">,
+      meta: Omit<
+        PositionedBlock,
+        "top" | "bottom" | "ok" | "headerTop" | "headerHeight"
+      >,
       startLine: number,
       endLine: number,
+      headerMarker: IMarker | null,
     ) => {
-      if (endLine < vpTop || startLine > vpBottom) return;
+      const headerLine =
+        headerMarker && !headerMarker.isDisposed ? headerMarker.line : -1;
+      if (
+        endLine < vpTop ||
+        (headerLine >= 0 ? headerLine : startLine) > vpBottom
+      )
+        return;
       const ok = meta.exitCode === 0 || meta.exitCode === null;
       const top = offset + (startLine - viewportY) * cellHeight;
       const bottom = offset + (endLine - viewportY + 1) * cellHeight;
@@ -281,9 +278,12 @@ export class BlockDecorations {
         ok,
         top,
         bottom,
-        // The C marker lands on the first output line, so the command echo is
-        // one row above `top` and the blank header gap is two rows above.
-        headerTop: top - 1.9 * cellHeight,
+        // B 标记前的预留行是标题锚点，不依赖命令回显的物理行数。
+        headerTop:
+          headerLine >= 0
+            ? offset + (headerLine - viewportY) * cellHeight
+            : -100,
+        headerHeight: cellHeight,
       };
       out.push(pb);
       if (startLine < vpTop && endLine >= vpTop) sticky = pb;
@@ -298,7 +298,6 @@ export class BlockDecorations {
       const e = this.entries[i];
       const r = this.rangeOf(e);
       if (!r) continue;
-      if (r.start > vpBottom) break;
       consider(
         {
           id: e.id,
@@ -311,6 +310,7 @@ export class BlockDecorations {
         },
         r.start,
         r.end,
+        e.headerMarker,
       );
     }
 
@@ -330,6 +330,7 @@ export class BlockDecorations {
         },
         start,
         end,
+        lb.headerMarker,
       );
     }
 
@@ -404,6 +405,8 @@ export class BlockDecorations {
     for (const e of this.entries) this.disposeEntry(e);
     this.entries.length = 0;
     this.live?.startMarker.dispose();
+    this.live?.headerMarker?.dispose();
+    this.promptMarker?.dispose();
     this.live = null;
     for (const d of this.disposers) {
       try {
@@ -455,17 +458,32 @@ export class BlockDecorations {
     const rest = data.length > 2 && data[1] === ";" ? data.slice(2) : "";
     switch (marker) {
       case "A":
+        this.reportedCommand = null;
+        this.promptReady = false;
+        this.takeSubmittedCommand?.();
         this.shellState.inCommand = false;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "A" });
         break;
       case "B":
+        this.promptReady = true;
+        this.powershellInput = rest === "terax=powershell";
+        this.promptMarker?.dispose();
+        this.promptMarker = this.term.registerMarker(-1) ?? null;
         this.shellState.inCommand = true;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "B" });
         break;
       case "C":
+        this.promptReady = false;
         this.shellState.inCommand = true;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "C" });
-        this.startBlock(rest);
+        this.startBlock();
+        break;
+      case "E":
+        try {
+          this.reportedCommand = decodeURIComponent(rest);
+        } catch {
+          this.reportedCommand = null;
+        }
         break;
       case "D":
         this.shellState.inCommand = false;
@@ -476,18 +494,24 @@ export class BlockDecorations {
     this.emitMode();
   }
 
-  private startBlock(commandFromMarker: string): void {
-    if (this.live) this.finishBlock("");
+  private startBlock(): void {
+    // Bash 的一次多行提交可在同一个 D 前产生多个 PS0/C，仍属于同一命令块。
+    if (this.live) {
+      this.reportedCommand = null;
+      return;
+    }
     const marker = this.term.registerMarker(0);
     if (!marker) return;
     this.live = {
       id: `b${++this.idSeq}`,
-      command: commandFromMarker,
+      command: this.takeSubmittedCommand?.() ?? this.reportedCommand ?? "",
       cwd: this.cwd,
       startedAt: Date.now(),
       startMarker: marker,
-      usedAlt: false,
+      headerMarker: this.promptMarker,
     };
+    this.promptMarker = null;
+    this.reportedCommand = null;
     this.scheduleViewport();
   }
 
@@ -500,6 +524,7 @@ export class BlockDecorations {
     const endMarker = this.term.registerMarker(0);
     if (!endMarker) {
       lb.startMarker.dispose();
+      lb.headerMarker?.dispose();
       return;
     }
     // Only the scrollbar overview mark; the visible divider is drawn full-width
@@ -519,6 +544,7 @@ export class BlockDecorations {
       finishedAt: Date.now(),
       startMarker: lb.startMarker,
       endMarker,
+      headerMarker: lb.headerMarker,
       deco,
     });
     while (this.entries.length > MAX_BLOCKS) {
@@ -529,6 +555,7 @@ export class BlockDecorations {
   }
 
   private disposeEntry(e: Entry): void {
+    e.headerMarker?.dispose();
     try {
       e.deco?.dispose();
     } catch {}

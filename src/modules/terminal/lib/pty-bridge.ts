@@ -12,7 +12,7 @@ export type PtyHandlers = {
 
 export type PtySession = {
   id: number;
-  write: (data: string) => Promise<void>;
+  write: (data: string, commandSubmitted?: boolean) => Promise<void>;
   resize: (cols: number, rows: number) => Promise<void>;
   close: () => Promise<void>;
   needsCloseConfirmation: () => Promise<boolean>;
@@ -105,13 +105,16 @@ export async function openPty(
       return knownCloseState() ?? true;
     },
     // Raw bytes + id header: no JSON round-trip on the per-keystroke path.
-    write: async (data) => {
+    write: async (data, commandSubmitted = false) => {
       const snapshot = activity.current;
       pendingWrites++;
       try {
         await invoke("pty_write", textEncoder.encode(data), { headers });
         // 写入成功但 Shell 尚未回传时保持保护；失败不改变原状态。
-        if (data.endsWith("\r") && activity.current === snapshot)
+        if (
+          (commandSubmitted || data.endsWith("\r")) &&
+          activity.current === snapshot
+        )
           activity.submitted();
       } finally {
         pendingWrites--;

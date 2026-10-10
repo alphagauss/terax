@@ -5,12 +5,30 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  isBlockClick,
   shouldUseLocalTerminalMouse,
   terminalMouseOverrideHeld,
   terminalWheelDeltaRows,
 } from "./mouseRouting";
 
 describe("terminal mouse routing", () => {
+  it("整块选择不覆盖水平拖选、右键和修饰键操作", () => {
+    const start = { x: 10, y: 20 };
+    const click = {
+      clientX: 10,
+      clientY: 20,
+      button: 0,
+      shiftKey: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+    };
+    expect(isBlockClick(start, click)).toBe(true);
+    expect(isBlockClick(start, { ...click, clientX: 40 })).toBe(false);
+    expect(isBlockClick(start, { ...click, button: 2 })).toBe(false);
+    expect(isBlockClick(start, { ...click, shiftKey: true })).toBe(false);
+    expect(isBlockClick(null, click)).toBe(false);
+  });
   it("uses local behavior when mouse tracking is disabled", () => {
     expect(
       shouldUseLocalTerminalMouse(

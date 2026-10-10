@@ -13,6 +13,7 @@ import {
 } from "@codemirror/view";
 import { Clock01Icon } from "@hugeicons/core-free-icons";
 import { hugeIcon } from "./completionIcons";
+import i18n from "@/i18n";
 
 type Fetcher = (query: string, limit: number) => Promise<string[]>;
 
@@ -75,7 +76,11 @@ function historyTooltipView(view: EditorView): TooltipView {
   list.className = "cm-history-list";
   const footer = document.createElement("div");
   footer.className = "cm-history-footer";
-  footer.textContent = "↑↓ navigate · ↵ run · esc";
+  const localize = () => {
+    footer.textContent = i18n.t("terminal:block.historyHint");
+  };
+  localize();
+  i18n.on("languageChanged", localize);
   dom.append(list, footer);
 
   let lastSig = "";
@@ -115,6 +120,7 @@ function historyTooltipView(view: EditorView): TooltipView {
   return {
     dom,
     mount: render,
+    destroy: () => i18n.off("languageChanged", localize),
     update(u) {
       if (u.state.field(historyField) !== u.startState.field(historyField)) {
         render();

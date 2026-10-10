@@ -87,15 +87,6 @@
   opacity: 0.6;
 }
 
-.cm-tooltip-autocomplete::after {
-  content: "⇥ complete · ↵ run";
-  display: block;
-  padding: 5px 10px;
-  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  font-size: 10px;
-  color: var(--muted-foreground, rgba(160, 160, 160, 0.8));
-}
-
 .cm-ghost::after {
   content: " →";
   opacity: 0.5;
@@ -129,13 +120,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 18px;
+  overflow: hidden;
   opacity: 0.72;
   transition: opacity var(--dur-feedback) var(--ease-standard);
 }
 
 .bt-bar:hover {
   opacity: 1;
+}
+
+.bt-bar .bt-tools {
+  height: 100%;
+  padding-block: 0;
+  border-block-width: 0;
+  box-shadow: none;
+}
+
+.bt-bar .bt-btn {
+  height: 100%;
 }
 
 .bt-head-meta {
@@ -194,7 +196,7 @@
 
 .bt-search {
   position: absolute;
-  top: 8px;
+  top: -27px;
   right: 8px;
   padding: 2px 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -245,7 +247,7 @@
 
 .bt-sticky {
   position: absolute;
-  top: 0;
+  top: -28px;
   left: 0;
   right: 0;
   display: flex;

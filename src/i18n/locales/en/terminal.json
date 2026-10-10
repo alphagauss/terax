@@ -13,7 +13,12 @@
       "commandCopied": "Command copied",
       "outputCopied": "Output copied",
       "blockCopied": "Block copied"
-    }
+    },
+    "notReady": "The shell is not ready for block input.",
+    "multilineUnsupported": "This shell has not enabled atomic multiline input. Use an integrated PowerShell or Bash/WSL shell.",
+    "submitFailed": "Could not send the command. Your input has been kept.",
+    "inputPlaceholder": "Run a command · ↑ history · Tab complete · Shift+Enter newline",
+    "historyHint": "↑↓ navigate · Enter select · Esc close"
   },
   "watermark": {
     "browseHistory": "Browse your command history",

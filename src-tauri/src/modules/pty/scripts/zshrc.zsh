@@ -75,6 +75,9 @@ if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
     # Mark that a real command ran, so the next prompt switches from one blank
     # row (first prompt, no block above) to two (end gap + header row).
     [[ -n "$TERAX_BLOCKS" ]] && _terax_block_seen=1
+    if [[ -n "$TERAX_BLOCKS" ]]; then
+      printf '\e]133;E;%s\e\\' "$(_terax_urlencode "$1")"
+    fi
     local cmd="${1//[[:cntrl:]]/ }"
     printf '\e]133;C;%s\e\\' "${cmd[1,256]}"
   }

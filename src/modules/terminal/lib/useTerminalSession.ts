@@ -5,6 +5,8 @@
 
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import i18n from "@/i18n";
+import { toast } from "sonner";
+import { commandSubmission } from "../block/lib/commandSubmission";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
@@ -91,6 +93,7 @@ type Session = {
   snapshot: string | null;
   dormantRing: DormantRing;
   pendingInput: string;
+  submittedCommand: string | null;
   hasSlot: boolean;
   blocks: boolean;
   blockMode: BlockMode;
@@ -205,27 +208,59 @@ export function executeCommandInSession(
 ): boolean {
   const session = sessions.get(terminalId);
   if (!session || session.shellExited) return false;
-  session.everSubmitted = true;
   if (terminalCommandState(terminalId) === "idle") {
-    session.commandRunning = true;
-    setTerminalCommandState(terminalId, "running");
-    cancelHiddenRelease(session);
+    markCommandSubmitted(terminalId, session);
   }
+  session.everSubmitted = true;
   if (session.pty) void session.pty.write(`${command}\r`);
   else queuePendingInput(session, `${command}\r`);
   return true;
 }
 
-export function submitToTerminal(terminalId: number, text: string): void {
+function markCommandSubmitted(terminalId: number, session: Session): void {
+  session.everSubmitted = true;
+  session.commandRunning = true;
+  setTerminalCommandState(terminalId, "running");
+  cancelHiddenRelease(session);
+}
+
+export async function submitToTerminal(
+  terminalId: number,
+  text: string,
+): Promise<boolean> {
   const s = sessions.get(terminalId);
-  if (!s || s.shellExited) return;
-  s.everSubmitted = true;
-  // Bracketed paste keeps a multiline command atomic; trailing CR runs it.
-  const data = text.includes("\n")
-    ? `\x1b[200~${text}\x1b[201~\r`
-    : `${text}\r`;
-  if (s.pty) void s.pty.write(data);
-  else queuePendingInput(s, data);
+  const slot = getSlotForTerminal(terminalId);
+  const deco = s?.blockDecorations;
+  if (!s || s.shellExited || !s.pty || !slot || !deco) {
+    toast.error(i18n.t("terminal:block.notReady"));
+    return false;
+  }
+  const data = commandSubmission(
+    text,
+    deco.powershellInput,
+    slot.term.modes.bracketedPasteMode,
+  );
+  if (data === null) {
+    toast.error(i18n.t("terminal:block.multilineUnsupported"));
+    return false;
+  }
+  if (!deco.beginSubmission()) return false;
+  s.submittedCommand = text;
+  markCommandSubmitted(terminalId, s);
+  const pty = s.pty;
+  try {
+    await pty.write(data, true);
+    return true;
+  } catch {
+    // 失败回包不能覆盖期间已执行的命令或重新创建的会话。
+    if (s.pty === pty && s.submittedCommand === text && !s.shellExited) {
+      s.submittedCommand = null;
+      deco.cancelSubmission();
+      setTerminalCommandState(terminalId, "idle");
+    }
+    toast.error(i18n.t("terminal:block.submitFailed"));
+    return false;
+  }
 }
 
 export function interruptTerminal(terminalId: number): void {
@@ -234,6 +269,11 @@ export function interruptTerminal(terminalId: number): void {
 
 export function terminalCwd(terminalId: number): string | null {
   return sessions.get(terminalId)?.lastCwd ?? null;
+}
+
+/** 按当前 Shell 实际报告的能力识别 PowerShell，不能使用宿主操作系统推断 WSL/SSH。 */
+export function terminalUsesPowerShell(terminalId: number): boolean {
+  return sessions.get(terminalId)?.blockDecorations?.powershellInput ?? false;
 }
 
 export function navigateFocusedBlocks(dir: -1 | 1): boolean {
@@ -536,6 +576,7 @@ function ensureSession(
     snapshot: null,
     dormantRing: new DormantRing(),
     pendingInput: "",
+    submittedCommand: null,
     hasSlot: false,
     blocks,
     blockMode: "prompt",
@@ -674,6 +715,7 @@ function suspendRemoteSession(
     s.shellExited = true;
     s.pendingExit = null;
     s.pendingInput = "";
+    s.submittedCommand = null;
     s.commandRunning = false;
     setTerminalCommandState(terminalId, "unavailable");
     s.spawnFailed = false;
@@ -704,6 +746,7 @@ async function openPtyForSession(
         s.shellExited = true;
         s.pty = null;
         s.pendingInput = "";
+        s.submittedCommand = null;
         s.commandRunning = false;
         setTerminalCommandState(terminalId, "unavailable");
         if (isRecoverableRemoteExit(code)) {
@@ -741,6 +784,7 @@ function applyBlockMode(terminalId: number, mode: BlockMode): void {
   const finished = s.commandRunning && mode === "prompt";
   s.blockMode = mode;
   s.commandRunning = mode !== "prompt";
+  setTerminalCommandState(terminalId, s.commandRunning ? "running" : "idle");
   if (finished) notifyTerminalCommandFinished(s.lastCwd);
   const slot = getSlotForTerminal(terminalId);
   if (slot) {
@@ -749,7 +793,7 @@ function applyBlockMode(terminalId: number, mode: BlockMode): void {
     // Disable the helper textarea at the prompt so a grid click can't focus the
     // xterm (no flashing cursor) and can't steal focus from the shell input.
     if (slot.term.textarea) slot.term.textarea.disabled = prompt;
-    if (!prompt) {
+    if (!prompt && s.visibleNow && s.focusedNow) {
       slot.term.focus();
     } else if (s.visibleNow && s.focusedNow) {
       const inputFocus = s.inputFocus;
@@ -777,6 +821,11 @@ function bindTerminalToSlot(terminalId: number, s: Session): void {
       if (s.blocks) {
         const osc52 = registerOsc52ClipboardHandler(term);
         const deco = new BlockDecorations(term, {
+          takeSubmittedCommand: () => {
+            const command = s.submittedCommand;
+            s.submittedCommand = null;
+            return command;
+          },
           onCwd: (next) => {
             markSessionReady(terminalId);
             if (s.lastCwd === next) return;
@@ -918,6 +967,7 @@ export async function respawnSession(
   s.shellExited = false;
   s.pendingExit = null;
   s.pendingInput = "";
+  s.submittedCommand = null;
   s.altScreenAtRelease = false;
   s.commandRunning = false;
   setTerminalCommandState(terminalId, "unknown");
@@ -988,6 +1038,7 @@ export async function respawnSession(
   if (s.pendingInput) {
     void pty.write(s.pendingInput);
     s.pendingInput = "";
+    s.submittedCommand = null;
   }
   if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 }
@@ -1018,6 +1069,7 @@ export function disposeSession(terminalId: number): void {
   s.pty?.close();
   s.pty = null;
   s.pendingInput = "";
+  s.submittedCommand = null;
   sessions.delete(terminalId);
   clearTerminalCommandState(terminalId);
   blockViewportListeners.delete(terminalId);

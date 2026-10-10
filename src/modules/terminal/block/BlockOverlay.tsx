@@ -46,6 +46,7 @@ void homeDir()
   .catch(() => {});
 
 type Props = {
+  hidden?: boolean;
   subscribe: (cb: () => void) => () => void;
   getVisible: () => VisibleBlocks;
   readOutput: (id: string) => string | null;
@@ -96,7 +97,7 @@ function copy(text: string, message: string) {
 function signature(v: VisibleBlocks): string {
   let s = v.sticky?.id ?? "";
   for (const b of v.blocks) {
-    s += `|${b.id}:${Math.round(b.top)}:${Math.round(b.bottom)}:${b.running}`;
+    s += `|${b.id}:${b.top}:${b.bottom}:${b.headerTop}:${b.running}`;
   }
   return s;
 }
@@ -106,6 +107,13 @@ export function BlockOverlay(props: Props) {
   const [vis, setVis] = useState<VisibleBlocks>(EMPTY);
   const [searchId, setSearchId] = useState<string | null>(null);
   const lastSig = useRef("");
+
+  useEffect(() => {
+    if (props.hidden) {
+      props.clearSearch();
+      setSearchId(null);
+    }
+  }, [props.hidden, props.clearSearch]);
 
   useEffect(() => {
     const update = () => {
@@ -125,18 +133,30 @@ export function BlockOverlay(props: Props) {
   };
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-      {vis.blocks.map((b) => (
-        <BlockChrome key={b.id} block={b} all={props} onSearch={setSearchId} />
-      ))}
+    <div
+      hidden={props.hidden}
+      className="pointer-events-none absolute inset-x-0 bottom-0 top-7 z-10"
+    >
+      <div className="absolute inset-0 overflow-hidden">
+        {vis.blocks.map((b) => (
+          <BlockChrome
+            key={b.id}
+            block={b}
+            all={props}
+            onSearch={setSearchId}
+          />
+        ))}
+      </div>
       {vis.sticky && (
         <StickyHeader block={vis.sticky} all={props} onSearch={setSearchId} />
       )}
       {searchId && (
         <SearchBar
+          key={searchId}
           blockId={searchId}
           searchBlock={props.searchBlock}
           revealMatch={props.revealMatch}
+          clearSearch={props.clearSearch}
           onClose={closeSearch}
         />
       )}
@@ -160,7 +180,10 @@ function BlockChrome({ block, all, onSearch }: ChromeProps) {
         className={cn("bt-divider", !block.ok && "bt-divider-fail")}
         style={{ top: block.bottom }}
       />
-      <div className="bt-bar" style={{ top: block.headerTop }}>
+      <div
+        className="bt-bar"
+        style={{ top: block.headerTop, height: block.headerHeight }}
+      >
         <Meta block={block} />
         <Toolbar block={block} all={all} onSearch={onSearch} />
       </div>
@@ -190,7 +213,9 @@ function StickyHeader({ block, all, onSearch }: ChromeProps) {
         size={12}
         strokeWidth={1.75}
       />
-      <span className="bt-sticky-cmd">{block.command || t("block.commandFallback")}</span>
+      <span className="bt-sticky-cmd">
+        {block.command || t("block.commandFallback")}
+      </span>
       <Toolbar block={block} all={all} onSearch={onSearch} />
     </div>
   );
@@ -280,6 +305,7 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
         <MenuItem
           icon={ComputerTerminal02Icon}
           label={t("block.copyOutput")}
+          disabled={block.running}
           onClick={() => {
             const o = output();
             if (o) copy(o, t("block.toast.outputCopied"));
@@ -288,6 +314,7 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
         <MenuItem
           icon={Copy01Icon}
           label={t("block.copyCommandAndOutput")}
+          disabled={block.running}
           onClick={() => {
             const text = `$ ${block.command}\n${output()}`;
             copy(text, t("block.toast.blockCopied"));
@@ -296,11 +323,13 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
         <MenuItem
           icon={SparklesIcon}
           label={t("block.attachToAiChat")}
+          disabled={block.running}
           onClick={attach}
         />
         <MenuItem
           icon={Search01Icon}
           label={t("block.findInBlock")}
+          disabled={block.running}
           onClick={() => onSearch(block.id)}
         />
       </DropdownMenuContent>
@@ -337,11 +366,13 @@ function SearchBar({
   blockId,
   searchBlock,
   revealMatch,
+  clearSearch,
   onClose,
 }: {
   blockId: string;
   searchBlock: (id: string, query: string) => BlockMatch[];
   revealMatch: (m: BlockMatch) => void;
+  clearSearch: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["terminal", "common"]);
@@ -351,13 +382,15 @@ function SearchBar({
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+    return clearSearch;
+  }, [clearSearch]);
 
   const run = (query: string) => {
     const m = searchBlock(blockId, query);
     setMatches(m);
     setIdx(0);
     if (m.length) revealMatch(m[0]);
+    else clearSearch();
   };
   const nav = (dir: number) => {
     if (!matches.length) return;

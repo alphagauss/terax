@@ -316,6 +316,20 @@ mod tests {
     }
 
     #[test]
+    fn full_block_command_does_not_hide_agent_boundaries() {
+        let mut detector = AgentDetector::new();
+        // 完整命令扩展可超过原生 OSC 缓冲上限，后续短 C/D 仍须正常解析。
+        let mut bytes = osc(&format!("133;E;{}", "%E4%B8%AD".repeat(OSC_MAX)));
+        bytes.extend(osc("133;C;codex exec"));
+        bytes.extend(osc("133;D;0"));
+        let mut transitions = Vec::new();
+        for chunk in bytes.chunks(37) {
+            transitions.extend(run(&mut detector, chunk));
+        }
+        assert_eq!(transitions, vec![started("codex"), Transition::Exited]);
+    }
+
+    #[test]
     fn arms_on_pathed_and_wrapped_command() {
         let mut d = AgentDetector::new();
         assert_eq!(

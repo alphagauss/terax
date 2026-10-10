@@ -906,6 +906,26 @@ mod windows {
         use tempfile::tempdir;
 
         #[test]
+        fn powershell_preserves_commands_and_reports_exit_status() {
+            let shell = resolve_powershell_executable(super::super::windows_shell_path());
+            let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/modules/pty/scripts/profile.test.ps1");
+            let mut command = std::process::Command::new(shell);
+            crate::modules::proc::hide_console(&mut command);
+            let output = command
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(script)
+                .output()
+                .expect("PowerShell integration test");
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        #[test]
         fn resolves_argumentless_scoop_powershell_shim() {
             let dir = tempdir().unwrap();
             let shim = dir.path().join("pwsh.exe");

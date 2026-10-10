@@ -62,6 +62,15 @@ describe("统一终端关闭保护", () => {
     });
   });
 
+  it("PowerShell 专用提交没有 CR，仍在 Shell 回传前保持关闭保护", async () => {
+    const pty = await openPty(80, 24, { onData: vi.fn() });
+    report("idle");
+    await pty.write("#terax:YQ==\x1b[24;5~", true);
+    expect(await pty.needsCloseConfirmation()).toBe(true);
+    report("idle");
+    expect(await pty.needsCloseConfirmation()).toBe(false);
+  });
+
   it("未知和查询失败保留确认，新 PTY 不继承旧连接状态", async () => {
     const pty = await openPty(80, 24, { onData: vi.fn() });
     native.invoke.mockResolvedValueOnce(null);

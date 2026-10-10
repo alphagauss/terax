@@ -100,6 +100,9 @@ __terax_install_prompt
 function __terax_preexec --on-event fish_preexec
     printf '\e]777;terax;tasks;%s;running;\e\\' "$fish_pid"
     set -g __terax_block_seen 1
+    if set -q TERAX_BLOCKS
+        printf '\e]133;E;%s\e\\' (__terax_urlencode_path "$argv")
+    end
     set -l cmd (string replace -ra '[\x00-\x1f\x7f]' ' ' -- "$argv")
     printf '\e]133;C;%s\e\\' (string sub -l 256 -- "$cmd")
 end

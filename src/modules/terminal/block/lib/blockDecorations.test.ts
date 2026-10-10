@@ -30,8 +30,8 @@ function makeFakeTerm() {
         return { dispose: () => handlers.delete(code) };
       },
     },
-    registerMarker: vi.fn(() => ({
-      line: currentLine,
+    registerMarker: vi.fn((offset = 0) => ({
+      line: currentLine + offset,
       isDisposed: false,
       dispose: vi.fn(),
     })),
@@ -72,10 +72,65 @@ function makeFakeTerm() {
 }
 
 describe("BlockDecorations — OSC 133 block lifecycle", () => {
+  it("用提交原文关联 Bash 无命令标记，并阻止重复提交", () => {
+    const { term, emit, setLine } = makeFakeTerm();
+    let submitted: string | null = null;
+    const onMode = vi.fn();
+    const deco = new BlockDecorations(term, {
+      onMode,
+      takeSubmittedCommand: () => {
+        const text = submitted;
+        submitted = null;
+        return text;
+      },
+    });
+    expect(deco.beginSubmission()).toBe(false);
+    setLine(1);
+    emit("B");
+    expect(deco.beginSubmission()).toBe(true);
+    expect(onMode).toHaveBeenLastCalledWith("running");
+    expect(deco.beginSubmission()).toBe(false);
+    const command = `echo '${"长命令".repeat(100)}'\necho done`;
+    submitted = command;
+    setLine(9);
+    emit("C");
+    emit("D;0");
+    expect(deco.getBlocks()[0].command).toBe(command);
+    expect(onMode).toHaveBeenLastCalledWith("prompt");
+    deco.dispose();
+  });
+
+  it("按 B 锚点定位标题，多行回显和缩放不推移标题", () => {
+    const { term, emit, setLine } = makeFakeTerm();
+    const screenRect = { top: 100, height: 400 };
+    Object.assign(term, {
+      rows: 20,
+      element: {
+        querySelector: () => ({ getBoundingClientRect: () => screenRect }),
+        getBoundingClientRect: () => ({ top: 100 }),
+      },
+    });
+    const deco = new BlockDecorations(term);
+    setLine(2);
+    emit("B;terax=powershell");
+    expect(deco.powershellInput).toBe(true);
+    setLine(12);
+    const command = "Write-Output '你好'\nWrite-Output 'two'";
+    emit(`E;${encodeURIComponent(command)}`);
+    emit("C;preview");
+    setLine(15);
+    emit("D;0");
+    expect(deco.getBlocks()[0].command).toBe(command);
+    expect(deco.visibleBlocks().blocks[0].headerTop).toBe(20);
+    screenRect.height = 600;
+    expect(deco.visibleBlocks().blocks[0].headerTop).toBe(30);
+    deco.dispose();
+  });
   it("creates a finished block on C..D with command, exit code and range", () => {
     const { term, emit, setLine } = makeFakeTerm();
     const deco = new BlockDecorations(term);
     setLine(5);
+    emit("E;ls%20-al");
     emit("C;ls -al");
     setLine(9);
     emit("D;0");
@@ -104,17 +159,24 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     expect(deco.getBlocks()).toHaveLength(0);
   });
 
-  it("auto-closes a live block when a new C arrives without a D", () => {
+  it("同一次多行提交的多个 C 在 D 到达前保持同一命令块", () => {
     const { term, emit, setLine } = makeFakeTerm();
     const deco = new BlockDecorations(term);
     setLine(1);
+    emit("E;first");
     emit("C;first");
     setLine(3);
+    emit("E;second");
     emit("C;second");
+    expect(deco.getBlocks()).toHaveLength(0);
+    setLine(5);
+    emit("D;0");
     const blocks = deco.getBlocks();
     expect(blocks).toHaveLength(1);
     expect(blocks[0].command).toBe("first");
-    expect(blocks[0].exitCode).toBeNull();
+    expect(blocks[0].exitCode).toBe(0);
+    expect(blocks[0].startLine).toBe(1);
+    expect(blocks[0].endLine).toBe(5);
   });
 
   it("ignores a D that arrives with no live block", () => {
@@ -140,6 +202,7 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     const deco = new BlockDecorations(term);
     for (let i = 0; i < 1005; i++) {
       setLine(i);
+      emit(`E;cmd${i}`);
       emit(`C;cmd${i}`);
       emit("D;0");
     }
