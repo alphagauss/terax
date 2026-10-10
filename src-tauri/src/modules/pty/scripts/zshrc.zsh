@@ -47,23 +47,11 @@ if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
     done
     printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$$" "${(j:,:)_terax_jobs}"
     printf '\e]133;D;%s\e\\' "$_terax_ret"
+    # 提示符另起一行，避免无尾换行的输出与下一次输入共用网格行。
+    [[ -n "$TERAX_BLOCKS" ]] && printf '\n'
     printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_terax_urlencode "$PWD")"
-    # In block mode the host renders its own input bar, so suppress the shell
-    # prompt entirely (keep only the OSC 133 B marker) and add a leading blank
-    # line so frozen command blocks get vertical breathing room.
-    if [[ -n "$TERAX_BLOCKS" ]]; then
-      # Spacing reserved for the host-drawn block header lives in the prompt
-      # (the grid is WebGL, not CSS). Later prompts get two blank rows: the
-      # upper one is the previous block's end gap (above its divider), the lower
-      # one is this command's header row. The very first prompt has no block
-      # above it, so it gets a single row (header only) to avoid a tall top gap.
-      if [[ -n "$_terax_block_seen" ]]; then
-        PS1=$'\n\n%{\e]133;B\e\\%}'
-      else
-        PS1=$'\n%{\e]133;B\e\\%}'
-      fi
-      RPROMPT=''
-    elif [[ "$PS1" != *$'\e]133;B\e\\'* ]]; then
+    # 块模式保留左右提示符，仅注入定位标记。
+    if [[ "$PS1" != *$'\e]133;B\e\\'* ]]; then
       # Re-inject prompt-end marker in case a framework rebuilt PS1 (p10k, starship).
       PS1=$'%{\e]133;B\e\\%}'"$PS1"
     fi
@@ -72,9 +60,6 @@ if [[ -z "$__TERAX_HOOKS_LOADED" ]]; then
 
   _terax_preexec() {
     printf '\e]777;terax;tasks;%s;running;\e\\' "$$"
-    # Mark that a real command ran, so the next prompt switches from one blank
-    # row (first prompt, no block above) to two (end gap + header row).
-    [[ -n "$TERAX_BLOCKS" ]] && _terax_block_seen=1
     if [[ -n "$TERAX_BLOCKS" ]]; then
       printf '\e]133;E;%s\e\\' "$(_terax_urlencode "$1")"
     fi

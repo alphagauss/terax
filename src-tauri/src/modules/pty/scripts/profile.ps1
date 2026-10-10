@@ -71,7 +71,6 @@ function global:__terax_install_readline {
         }
         try {
             if ($line -is [string] -and $line.Trim().Length -gt 0) {
-                $global:__terax_block_seen = $true
                 $esc = [char]27
                 [Console]::Write("$esc]777;terax;tasks;$PID;running;?$esc\")
                 # 完整命令另发 E 标记，短 C 标记继续服务原生执行状态与 Agent 检测。
@@ -105,6 +104,8 @@ function global:prompt {
     [Console]::Write("$esc]777;terax;tasks;$PID;idle;?$esc\")
 
     $oscD = "$esc]133;D;$lec$esc\"
+    # 提示符另起一行，避免无尾换行输出串入下一次输入。
+    if ($env:TERAX_BLOCKS) { $oscD += "`r`n" }
     $oscA = "$esc]133;A$esc\"
     $oscB = "$esc]133;B$esc\"
     if ($global:__terax_block_input) { $oscB = "$esc]133;B;terax=powershell$esc\" }
@@ -119,15 +120,7 @@ function global:prompt {
         $osc7 = "$esc]7;file://$hostName$cwdEnc$esc\"
     }
 
-    # Block mode: the host renders its own input bar, so suppress the shell
-    # prompt (markers only) and reserve the header/gap rows in the prompt
-    # itself -- same layout contract as the zsh integration.
-    if ($env:TERAX_BLOCKS) {
-        $global:LASTEXITCODE = $nativeExit
-        $gap = if ($global:__terax_block_seen) { "`n`n" } else { "`n" }
-        return "$oscD$oscA$osc7$gap$oscB"
-    }
-
+    # 块模式保留原生提示符，独立输入栏不替代终端内的提示符和命令回显。
     $original = if (Test-Path Function:__terax_user_prompt) {
         try { & __terax_user_prompt } catch { "PS $((Get-Location).Path)> " }
     } else {

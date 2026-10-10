@@ -1,4 +1,5 @@
 set -gx TERAX_TERMINAL 1
+set -gx TERAX_BLOCKS 1
 set -l script_dir (dirname (status filename))
 
 function fish_prompt

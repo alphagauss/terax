@@ -56,36 +56,23 @@ end
 function __terax_install_prompt
     # 当前仅识别 Conda 的命名包装形态；若其他提示符框架也间接保留 Terax，
     # 再扩展这一窄范围保护，避免误判普通的提示符替换。
-    if not set -q TERAX_BLOCKS
-        and functions -q __fish_prompt_orig
+    if functions -q __fish_prompt_orig
         and functions fish_prompt | string match -q '*__fish_prompt_orig*'
         and functions __fish_prompt_orig | string match -q '*__terax_user_prompt*'
         return
     end
     __terax_capture_user_prompt
-    if set -q TERAX_BLOCKS
-        function fish_right_prompt
-        end
-        function fish_greeting
-        end
-    end
     function fish_prompt
         set -l __terax_status $status
         printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$fish_pid" (string join , (jobs --pid))
         printf '\e]133;D;%d\e\\' $__terax_status
+        # 提示符另起一行，避免无尾换行输出串入下一次输入。
+        if set -q TERAX_BLOCKS
+            printf '\n'
+        end
         printf '\e]7;file://%s%s\e\\' "$__TERAX_HOST" (__terax_urlencode_path "$PWD")
         printf '\e]133;A\e\\'
-        # Block mode: host renders its own input bar, so suppress the shell prompt
-        # (B marker only) and reserve header/gap rows, mirroring zsh.
-        if set -q TERAX_BLOCKS
-            if set -q __terax_block_seen
-                printf '\n\n'
-            else
-                printf '\n'
-            end
-            printf '\e]133;B\e\\'
-            return
-        end
+        # 块模式同样调用用户提示符，保留用户名、主机名及框架样式。
         __terax_restore_status $__terax_status
         if functions -q __terax_user_prompt
             __terax_user_prompt
@@ -99,7 +86,6 @@ __terax_install_prompt
 
 function __terax_preexec --on-event fish_preexec
     printf '\e]777;terax;tasks;%s;running;\e\\' "$fish_pid"
-    set -g __terax_block_seen 1
     if set -q TERAX_BLOCKS
         printf '\e]133;E;%s\e\\' (__terax_urlencode_path "$argv")
     end

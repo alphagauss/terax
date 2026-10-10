@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $env:TERAX_BLOCKS = '1'
 function global:PSConsoleHostReadLine { $global:teraxTestCommand }
 function global:Set-PSReadLineKeyHandler { param($Chord, $ScriptBlock) }
+function global:prompt { 'user@host:project> ' }
 . "$PSScriptRoot/profile.ps1"
 __terax_install_readline
 
@@ -20,6 +21,8 @@ try {
     $global:LASTEXITCODE = 7
     Write-Output 'successful cmdlet' | Out-Null
     $result = prompt
+    if ($result -notmatch 'user@host:project> ') { throw '块模式丢失原有提示符' }
+    if ($result -notmatch '133;D;0\x1b\\\r\n') { throw '提示符未与上一条输出分行' }
     if ($result -notmatch '133;D;0\x1b') { throw '成功的 cmdlet 继承了旧退出码' }
     if ($global:LASTEXITCODE -ne 7) { throw 'prompt 修改了用户的 LASTEXITCODE' }
     $global:LASTEXITCODE = $null

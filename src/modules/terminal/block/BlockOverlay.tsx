@@ -4,12 +4,18 @@
  */
 
 import { writeClipboardText } from "@/lib/clipboard";
+import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
 } from "@/components/menu/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
@@ -18,7 +24,6 @@ import {
   ArrowUp01Icon,
   Cancel01Icon,
   Clock01Icon,
-  CommandLineIcon,
   ComputerTerminal02Icon,
   Copy01Icon,
   MoreHorizontalIcon,
@@ -27,7 +32,6 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { homeDir } from "@tauri-apps/api/path";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -37,13 +41,6 @@ import type {
   VisibleBlocks,
 } from "./lib/blockDecorations";
 import { capAttachOutput } from "./lib/outputCap";
-
-let cachedHome: string | null = null;
-void homeDir()
-  .then((h) => {
-    cachedHome = h.replace(/\/+$/, "");
-  })
-  .catch(() => {});
 
 type Props = {
   hidden?: boolean;
@@ -58,10 +55,10 @@ type Props = {
   onRestoreFocus: () => void;
 };
 
-const EMPTY: VisibleBlocks = { blocks: [], sticky: null };
+const EMPTY: VisibleBlocks = { blocks: [], recent: [], geometryVersion: 0 };
 
 function fmtDuration(ms: number): string | null {
-  if (!Number.isFinite(ms) || ms <= 0) return null;
+  if (!Number.isFinite(ms) || ms < 0) return null;
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
   if (ms < 3_600_000) {
@@ -81,13 +78,6 @@ function fmtTime(ms: number): string {
   return `${h}:${m}`;
 }
 
-function relPath(p: string): string {
-  if (cachedHome && (p === cachedHome || p.startsWith(`${cachedHome}/`))) {
-    return `~${p.slice(cachedHome.length)}`;
-  }
-  return p;
-}
-
 function copy(text: string, message: string) {
   void writeClipboardText(text)
     .then(() => toast.success(message))
@@ -95,18 +85,20 @@ function copy(text: string, message: string) {
 }
 
 function signature(v: VisibleBlocks): string {
-  let s = v.sticky?.id ?? "";
+  let s = `${v.geometryVersion}`;
   for (const b of v.blocks) {
-    s += `|${b.id}:${b.top}:${b.bottom}:${b.headerTop}:${b.running}`;
+    s += `|${b.id}:${b.actionTop}:${b.actionHeight}`;
   }
+  for (const b of v.recent) s += `|recent:${b.id}:${b.canSearch}`;
   return s;
 }
 
 export function BlockOverlay(props: Props) {
-  const { subscribe, getVisible } = props;
+  const { subscribe, getVisible, readOutput } = props;
   const [vis, setVis] = useState<VisibleBlocks>(EMPTY);
   const [searchId, setSearchId] = useState<string | null>(null);
   const lastSig = useRef("");
+  const geometryVersion = useRef(0);
 
   useEffect(() => {
     if (props.hidden) {
@@ -118,6 +110,16 @@ export function BlockOverlay(props: Props) {
   useEffect(() => {
     const update = () => {
       const v = getVisible();
+      const resized = v.geometryVersion !== geometryVersion.current;
+      geometryVersion.current = v.geometryVersion;
+      setSearchId((id) =>
+        id &&
+        (resized ||
+          readOutput(id) === null ||
+          v.recent.some((b) => b.id === id && !b.canSearch))
+          ? null
+          : id,
+      );
       const sig = signature(v);
       if (sig === lastSig.current) return;
       lastSig.current = sig;
@@ -125,18 +127,17 @@ export function BlockOverlay(props: Props) {
     };
     update();
     return subscribe(update);
-  }, [subscribe, getVisible]);
+  }, [subscribe, getVisible, readOutput]);
 
   const closeSearch = () => {
     props.clearSearch();
     setSearchId(null);
   };
 
+  if (props.hidden) return null;
+
   return (
-    <div
-      hidden={props.hidden}
-      className="pointer-events-none absolute inset-x-0 bottom-0 top-7 z-10"
-    >
+    <div className="pointer-events-none absolute inset-0 z-10">
       <div className="absolute inset-0 overflow-hidden">
         {vis.blocks.map((b) => (
           <BlockChrome
@@ -147,8 +148,8 @@ export function BlockOverlay(props: Props) {
           />
         ))}
       </div>
-      {vis.sticky && (
-        <StickyHeader block={vis.sticky} all={props} onSearch={setSearchId} />
+      {vis.recent.length > 0 && (
+        <RecentBlocks blocks={vis.recent} all={props} onSearch={setSearchId} />
       )}
       {searchId && (
         <SearchBar
@@ -170,88 +171,14 @@ type ChromeProps = {
   onSearch: (id: string) => void;
 };
 
-// No chrome while the command runs; the bar lands together with the divider
-// once the block is finished.
+/** 操作入口只在悬停或操作期间显示，完整元数据留在原有菜单内。 */
 function BlockChrome({ block, all, onSearch }: ChromeProps) {
-  if (block.running) return null;
+  if (block.actionTop === null) return null;
   return (
-    <>
-      <div
-        className={cn("bt-divider", !block.ok && "bt-divider-fail")}
-        style={{ top: block.bottom }}
-      />
-      <div
-        className="bt-bar"
-        style={{ top: block.headerTop, height: block.headerHeight }}
-      >
-        <Meta block={block} />
-        <Toolbar block={block} all={all} onSearch={onSearch} />
-      </div>
-    </>
-  );
-}
-
-function Meta({ block }: { block: PositionedBlock }) {
-  return (
-    <span className="bt-head-meta">
-      {block.cwd && <span className="bt-cwd">{relPath(block.cwd)}</span>}
-      <span className="bt-clock">
-        <HugeiconsIcon icon={Clock01Icon} size={11} strokeWidth={1.75} />
-        {fmtTime(block.startedAt)}
-      </span>
-    </span>
-  );
-}
-
-function StickyHeader({ block, all, onSearch }: ChromeProps) {
-  const { t } = useTranslation("terminal");
-  return (
-    <div className="bt-sticky">
-      <HugeiconsIcon
-        className="bt-sticky-icon"
-        icon={CommandLineIcon}
-        size={12}
-        strokeWidth={1.75}
-      />
-      <span className="bt-sticky-cmd">
-        {block.command || t("block.commandFallback")}
-      </span>
-      <Toolbar block={block} all={all} onSearch={onSearch} />
-    </div>
-  );
-}
-
-function Toolbar({ block, all, onSearch }: ChromeProps) {
-  const { t } = useTranslation("terminal");
-  const duration = block.running
-    ? null
-    : fmtDuration(block.finishedAt - block.startedAt);
-  const failed = !block.running && !block.ok && block.exitCode !== null;
-  return (
-    <div className="bt-tools">
-      {failed && (
-        <span className="bt-exit">
-          {t("block.exit", { code: block.exitCode })}
-        </span>
-      )}
-      {duration && <span className="bt-dur">{duration}</span>}
-      {!block.running && !!block.command && (
-        <Hint content={t("block.runAgain")}>
-          <button
-            aria-label={t("block.runAgain")}
-            type="button"
-            className="bt-btn"
-            disabled={!all.promptReady}
-            onClick={() => all.onRunAgain(block.command)}
-          >
-            <HugeiconsIcon
-              icon={Refresh01Icon}
-              size={12.5}
-              strokeWidth={1.75}
-            />
-          </button>
-        </Hint>
-      )}
+    <div
+      className="bt-action"
+      style={{ top: block.actionTop, height: block.actionHeight }}
+    >
       <BlockMenu block={block} all={all} onSearch={onSearch} />
     </div>
   );
@@ -259,6 +186,82 @@ function Toolbar({ block, all, onSearch }: ChromeProps) {
 
 function BlockMenu({ block, all, onSearch }: ChromeProps) {
   const { t } = useTranslation("terminal");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("block.actions")}
+          variant="secondary"
+          size="icon-xs"
+          className="h-full shrink-0"
+        >
+          <HugeiconsIcon icon={MoreHorizontalIcon} size={18} strokeWidth={2} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="left"
+        align="start"
+        className="w-64 max-w-[calc(100vw-16px)]"
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          all.onRestoreFocus();
+        }}
+      >
+        <BlockMenuItems block={block} all={all} onSearch={onSearch} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** 失去网格定位后复用同一份菜单，复制已完成输出不依赖旧标记。 */
+function RecentBlocks({
+  blocks,
+  all,
+  onSearch,
+}: Omit<ChromeProps, "block"> & { blocks: PositionedBlock[] }) {
+  const { t } = useTranslation("terminal");
+  return (
+    <div className="bt-recent">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="secondary" size="sm">
+            {t("block.recent")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="w-64"
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            all.onRestoreFocus();
+          }}
+        >
+          {blocks.map((block) => (
+            <DropdownMenuSub key={block.id}>
+              <DropdownMenuSubTrigger>
+                <span className="min-w-0 flex-1 truncate font-mono">
+                  {block.command || t("block.commandFallback")}
+                </span>
+                <span className="text-muted-foreground">
+                  {fmtTime(block.startedAt)}
+                </span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-16px)]">
+                  <BlockMenuItems block={block} all={all} onSearch={onSearch} />
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function BlockMenuItems({ block, all, onSearch }: ChromeProps) {
+  const { t } = useTranslation("terminal");
+  const duration = fmtDuration(block.finishedAt - block.startedAt);
   const output = () => all.readOutput(block.id) ?? "";
   const attach = () => {
     const out = capAttachOutput(output());
@@ -266,74 +269,65 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
     useChatStore.getState().attachSelection({ text, source: "terminal" });
   };
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Hint content={t("block.actions")}>
-          <button
-            aria-label={t("block.actions")}
-            type="button"
-            className="bt-btn"
-          >
-            <HugeiconsIcon
-              icon={MoreHorizontalIcon}
-              size={14}
-              strokeWidth={1.75}
-            />
-          </button>
-        </Hint>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="min-w-44"
-        onCloseAutoFocus={(e) => {
-          e.preventDefault();
-          all.onRestoreFocus();
+    <>
+      <div className="space-y-1 px-2 py-1.5 text-xs">
+        {block.cwd && (
+          <div className="break-all font-mono text-foreground">{block.cwd}</div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <HugeiconsIcon icon={Clock01Icon} size={11} strokeWidth={1.75} />
+            {fmtTime(block.startedAt)}
+          </span>
+          {duration && <span>{duration}</span>}
+          {block.exitCode !== null && (
+            <span className={cn(!block.ok && "text-destructive")}>
+              {t("block.exit", { code: block.exitCode })}
+            </span>
+          )}
+        </div>
+      </div>
+      <DropdownMenuSeparator />
+      <MenuItem
+        icon={Refresh01Icon}
+        label={t("block.runAgain")}
+        disabled={!all.promptReady || !block.command}
+        onClick={() => all.onRunAgain(block.command)}
+      />
+      <MenuItem
+        icon={Copy01Icon}
+        label={t("block.copyCommand")}
+        disabled={!block.command}
+        onClick={() => copy(block.command, t("block.toast.commandCopied"))}
+      />
+      <MenuItem
+        icon={ComputerTerminal02Icon}
+        label={t("block.copyOutput")}
+        onClick={() => {
+          const o = output();
+          if (o) copy(o, t("block.toast.outputCopied"));
         }}
-      >
-        <MenuItem
-          icon={Refresh01Icon}
-          label={t("block.runAgain")}
-          disabled={block.running || !all.promptReady || !block.command}
-          onClick={() => all.onRunAgain(block.command)}
-        />
-        <MenuItem
-          icon={Copy01Icon}
-          label={t("block.copyCommand")}
-          disabled={!block.command}
-          onClick={() => copy(block.command, t("block.toast.commandCopied"))}
-        />
-        <MenuItem
-          icon={ComputerTerminal02Icon}
-          label={t("block.copyOutput")}
-          disabled={block.running}
-          onClick={() => {
-            const o = output();
-            if (o) copy(o, t("block.toast.outputCopied"));
-          }}
-        />
-        <MenuItem
-          icon={Copy01Icon}
-          label={t("block.copyCommandAndOutput")}
-          disabled={block.running}
-          onClick={() => {
-            const text = `$ ${block.command}\n${output()}`;
-            copy(text, t("block.toast.blockCopied"));
-          }}
-        />
-        <MenuItem
-          icon={SparklesIcon}
-          label={t("block.attachToAiChat")}
-          disabled={block.running}
-          onClick={attach}
-        />
-        <MenuItem
-          icon={Search01Icon}
-          label={t("block.findInBlock")}
-          disabled={block.running}
-          onClick={() => onSearch(block.id)}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      />
+      <MenuItem
+        icon={Copy01Icon}
+        label={t("block.copyCommandAndOutput")}
+        onClick={() => {
+          const text = `$ ${block.command}\n${output()}`;
+          copy(text, t("block.toast.blockCopied"));
+        }}
+      />
+      <MenuItem
+        icon={SparklesIcon}
+        label={t("block.attachToAiChat")}
+        onClick={attach}
+      />
+      <MenuItem
+        icon={Search01Icon}
+        label={t("block.findInBlock")}
+        disabled={!block.canSearch}
+        onClick={() => onSearch(block.id)}
+      />
+    </>
   );
 }
 

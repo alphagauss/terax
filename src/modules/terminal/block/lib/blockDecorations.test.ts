@@ -19,8 +19,10 @@ afterEach(() => {
 function makeFakeTerm() {
   const handlers = new Map<number, OscHandler>();
   let currentLine = 0;
+  let renderedRowHeight = 20;
   let selection: [number, number] | null = null;
   let scrolledTo: number | null = null;
+  let resize = () => {};
   const term = {
     options: {} as Record<string, unknown>,
     element: null,
@@ -30,15 +32,37 @@ function makeFakeTerm() {
         return { dispose: () => handlers.delete(code) };
       },
     },
-    registerMarker: vi.fn((offset = 0) => ({
-      line: currentLine + offset,
-      isDisposed: false,
+    registerMarker: vi.fn((offset = 0) => {
+      const marker = {
+        line: currentLine + offset,
+        isDisposed: false,
+        dispose: vi.fn(() => {
+          marker.isDisposed = true;
+        }),
+      };
+      return marker;
+    }),
+    registerDecoration: vi.fn(({ marker }) => ({
       dispose: vi.fn(),
+      onRender: vi.fn(),
+      get element() {
+        const row = marker.line - term.buffer.active.viewportY;
+        return {
+          style: {
+            top: `${row * renderedRowHeight}px`,
+            lineHeight: `${renderedRowHeight}px`,
+            display: row < 0 || row >= (term.rows || 20) ? "none" : "block",
+          },
+        };
+      },
     })),
-    registerDecoration: vi.fn(() => ({ dispose: vi.fn(), onRender: vi.fn() })),
     onWriteParsed: vi.fn(() => ({ dispose: vi.fn() })),
     onScroll: vi.fn(() => ({ dispose: vi.fn() })),
     onRender: vi.fn(() => ({ dispose: vi.fn() })),
+    onResize: vi.fn((cb: () => void) => {
+      resize = cb;
+      return { dispose: vi.fn() };
+    }),
     hasSelection: () => selection !== null,
     selectLines: (start: number, end: number) => {
       selection = [start, end];
@@ -56,18 +80,23 @@ function makeFakeTerm() {
         baseY: 0,
         cursorY: 0,
         viewportY: 0,
-        getLine: () => ({ translateToString: () => "" }),
+        getLine: () => ({ translateToString: () => "output" }),
       },
     },
   } as unknown as Terminal;
   return {
     term,
+    setRowHeight: (height: number) => {
+      renderedRowHeight = height;
+    },
     emit: (payload: string) => handlers.get(133)?.(payload),
     setLine: (n: number) => {
       currentLine = n;
+      Object.assign(term.buffer.active, { cursorY: n });
     },
     getSelection: () => selection,
     getScrolledTo: () => scrolledTo,
+    resize: () => resize(),
   };
 }
 
@@ -100,8 +129,8 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     deco.dispose();
   });
 
-  it("按 B 锚点定位标题，多行回显和缩放不推移标题", () => {
-    const { term, emit, setLine } = makeFakeTerm();
+  it("每块入口跟随命令首行，重排缩放与滚动不合并入口", () => {
+    const { term, emit, setLine, setRowHeight } = makeFakeTerm();
     const screenRect = { top: 100, height: 400 };
     Object.assign(term, {
       rows: 20,
@@ -121,9 +150,25 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     setLine(15);
     emit("D;0");
     expect(deco.getBlocks()[0].command).toBe(command);
-    expect(deco.visibleBlocks().blocks[0].headerTop).toBe(20);
-    screenRect.height = 600;
-    expect(deco.visibleBlocks().blocks[0].headerTop).toBe(30);
+    expect(deco.visibleBlocks().blocks[0].actionTop).toBe(38);
+    expect(deco.visibleBlocks().blocks[0].actionHeight).toBe(24);
+    screenRect.height = 800;
+    // DOMRect 的缩放不应改变装饰层提供的 CSS 坐标。
+    expect(deco.visibleBlocks().blocks[0].actionTop).toBe(38);
+    setRowHeight(30);
+    expect(deco.visibleBlocks().blocks[0].actionTop).toBe(60);
+    setLine(17);
+    emit("B");
+    setLine(18);
+    emit("E;second");
+    emit("C");
+    setLine(19);
+    emit("D;0");
+    expect(deco.visibleBlocks().blocks.map((b) => b.actionTop)).toEqual([
+      60, 510,
+    ]);
+    Object.assign(term.buffer.active, { viewportY: 3 });
+    expect(deco.visibleBlocks().blocks.map((b) => b.actionTop)).toEqual([420]);
     deco.dispose();
   });
   it("creates a finished block on C..D with command, exit code and range", () => {
@@ -210,6 +255,32 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     expect(blocks).toHaveLength(1000);
     expect(blocks[0].command).toBe("cmd5");
     expect(blocks[blocks.length - 1].command).toBe("cmd1004");
+  });
+
+  it("快照总量超限淘汰完整旧输出，位置失效后只展示仍可完整复制的记录", () => {
+    const { term, emit, setLine, resize } = makeFakeTerm();
+    const deco = new BlockDecorations(term, { invalidateOnResize: true });
+    const output = "x".repeat(1024 * 1024);
+    vi.spyOn(term.buffer.active, "getLine").mockReturnValue({
+      translateToString: () => output,
+    } as ReturnType<typeof term.buffer.active.getLine>);
+    for (let i = 0; i < 3; i++) {
+      setLine(i);
+      emit("C");
+      emit("D;0");
+    }
+    const ids = deco.getBlocks().map((b) => b.id);
+    resize();
+    expect(deco.readById(ids[0])).toBeNull();
+    expect(deco.readById(ids[1])?.output).toBe(output);
+    expect(deco.readById(ids[2])?.output).toBe(output);
+    expect(deco.visibleBlocks().recent.map((b) => b.id)).toEqual(
+      ids.slice(1).reverse(),
+    );
+    expect(deco.visibleBlocks().recent.every((b) => !b.canSearch)).toBe(true);
+    expect(deco.getBlocks()).toEqual([]);
+    deco.dispose();
+    expect(deco.visibleBlocks().recent).toEqual([]);
   });
 });
 

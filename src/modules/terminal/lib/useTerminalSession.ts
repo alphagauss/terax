@@ -5,6 +5,7 @@
 
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import i18n from "@/i18n";
+import { IS_WINDOWS } from "@/lib/platform";
 import { toast } from "sonner";
 import { commandSubmission } from "../block/lib/commandSubmission";
 import { useRemoteRuntimeStore } from "@/modules/remote";
@@ -821,6 +822,7 @@ function bindTerminalToSlot(terminalId: number, s: Session): void {
       if (s.blocks) {
         const osc52 = registerOsc52ClipboardHandler(term);
         const deco = new BlockDecorations(term, {
+          invalidateOnResize: IS_WINDOWS && currentWorkspaceEnv().kind !== "ssh",
           takeSubmittedCommand: () => {
             const command = s.submittedCommand;
             s.submittedCommand = null;
@@ -1324,7 +1326,8 @@ export function useTerminalSession({
     (): VisibleBlocks =>
       sessions.get(terminalId)?.blockDecorations?.visibleBlocks() ?? {
         blocks: [],
-        sticky: null,
+        recent: [],
+        geometryVersion: 0,
       },
     [terminalId],
   );

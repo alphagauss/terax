@@ -44,19 +44,15 @@ if [ -z "$__TERAX_HOOKS_LOADED" ]; then
       printf '\e]777;terax;tasks;%s;idle;%s\e\\' "$__TERAX_TASK_PID" "${_terax_jobs//$'\n'/,}"
     fi
     printf '\e]133;D;%s\e\\' "$_terax_ret"
+    # 提示符另起一行，避免无尾换行的输出与下一次输入共用网格行。
+    [ -n "$TERAX_BLOCKS" ] && printf '\n'
     printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_terax_urlencode "$PWD")"
-    if [ -n "$TERAX_BLOCKS" ]; then
-      # Host renders its own input bar: suppress the shell prompt (B marker
-      # only) and reserve header/gap rows, mirroring the zsh integration.
-      if [ -n "$_terax_block_seen" ]; then
-        PS1='\n\n\[\e]133;B\e\\\]'
-      else
-        PS1='\n\[\e]133;B\e\\\]'
-      fi
-    elif [ -z "$__TERAX_PS1_INJECTED" ]; then
-      PS1='\[\e]133;B\e\\\]'"$PS1"
-      __TERAX_PS1_INJECTED=1
-    fi
+    # 块模式也保留用户提示符，命令回显交给 Shell 原生编辑器。
+    # 用户重建 PS1 后重新补充标记，不依赖只设置一次的状态位。
+    case "$PS1" in
+      *'\[\e]133;B\e\\\]'*) ;;
+      *) PS1='\[\e]133;B\e\\\]'"$PS1" ;;
+    esac
     printf '\e]133;A\e\\'
   }
 
@@ -76,13 +72,7 @@ if [ -z "$__TERAX_HOOKS_LOADED" ]; then
     if [ -r "/proc/$$/winpid" ]; then
       __TERAX_TASK_PID=$(<"/proc/$$/winpid")
     fi
-    if [ -n "$TERAX_BLOCKS" ]; then
-      # PS0 only expands, never executes: the arithmetic inside the array
-      # subscript sets the seen flag while the unset array expands to nothing.
-      PS0='\[\e]777;terax;tasks;${__TERAX_TASK_PID};running;\e\\\]\[\e]133;C\e\\\]${_terax_noop[$((_terax_block_seen=1))]}'"${PS0:-}"
-    else
-      PS0='\[\e]777;terax;tasks;${__TERAX_TASK_PID};running;\e\\\]\[\e]133;C\e\\\]'"${PS0:-}"
-    fi
+    PS0='\[\e]777;terax;tasks;${__TERAX_TASK_PID};running;\e\\\]\[\e]133;C\e\\\]'"${PS0:-}"
   fi
 
   _terax_precmd

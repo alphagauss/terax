@@ -508,8 +508,8 @@ mod windows {
         shell: Option<String>,
     ) -> Result<CommandBuilder, String> {
         if let WorkspaceEnv::Wsl { distro } = workspace {
-            let _ = (blocks, shell);
-            return build_wsl(cwd, distro);
+            let _ = shell;
+            return build_wsl(cwd, distro, blocks);
         }
         let shell_path = shell
             .map(|s| s.trim().to_string())
@@ -611,7 +611,11 @@ mod windows {
         target
     }
 
-    fn build_wsl(cwd: Option<String>, distro: String) -> Result<CommandBuilder, String> {
+    fn build_wsl(
+        cwd: Option<String>,
+        distro: String,
+        blocks: bool,
+    ) -> Result<CommandBuilder, String> {
         crate::modules::workspace::validate_wsl_distro_name(&distro)?;
         let shell_path = crate::modules::workspace::wsl_login_shell(distro.clone())?;
         let shell_kind = ShellKind::from_path(&shell_path);
@@ -659,6 +663,7 @@ mod windows {
             }
         };
         let spec = build_wsl_launch_spec(
+            blocks,
             cwd.as_deref(),
             &distro,
             &shell_path,
@@ -678,6 +683,7 @@ mod windows {
     }
 
     fn build_wsl_launch_spec(
+        blocks: bool,
         cwd: Option<&str>,
         distro: &str,
         shell_path: &str,
@@ -690,7 +696,15 @@ mod windows {
             "--cd".to_string(),
             cwd.filter(|s| !s.is_empty()).unwrap_or("~").to_string(),
             "--exec".to_string(),
+            "env".to_string(),
+            "TERM=xterm-256color".to_string(),
+            "COLORTERM=truecolor".to_string(),
+            "TERAX_TERMINAL=1".to_string(),
         ];
+        // Windows 进程环境不会自动传入 WSL，必须由 Linux env 显式设置集成能力。
+        if blocks {
+            args.push("TERAX_BLOCKS=1".to_string());
+        }
         match (shell_kind, integration) {
             (
                 ShellKind::Zsh,
@@ -699,7 +713,6 @@ mod windows {
                     user_zdotdir,
                 },
             ) => {
-                args.push("env".to_string());
                 if let Some(user_zdotdir) = user_zdotdir {
                     args.push(format!("TERAX_USER_ZDOTDIR={user_zdotdir}"));
                 }
@@ -714,7 +727,6 @@ mod windows {
                 args.push("-i".to_string());
             }
             (ShellKind::Fish, WslShellIntegration::Fish { init }) => {
-                args.push("env".to_string());
                 args.push("fish_features=no-mark-prompt".to_string());
                 args.push(format!("TERAX_FISH_INIT={init}"));
                 args.push(shell_path.to_string());
@@ -976,6 +988,7 @@ mod windows {
         #[test]
         fn builds_wsl_zsh_launch_spec_with_env_and_login() {
             let spec = build_wsl_launch_spec(
+                false,
                 Some("/home/vinicios/repo"),
                 "Ubuntu",
                 "/usr/bin/zsh",
@@ -994,6 +1007,9 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "ZDOTDIR=/home/vinicios/.terax/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
@@ -1004,6 +1020,7 @@ mod windows {
         #[test]
         fn builds_wsl_zsh_launch_spec_with_user_zdotdir_probe() {
             let spec = build_wsl_launch_spec(
+                false,
                 Some("/home/vinicios/repo"),
                 "Ubuntu",
                 "/usr/bin/zsh",
@@ -1022,6 +1039,9 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "TERAX_USER_ZDOTDIR=/home/vinicios/.config/zsh".to_string(),
                     "ZDOTDIR=/home/vinicios/.terax/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
@@ -1033,6 +1053,7 @@ mod windows {
         #[test]
         fn builds_wsl_zsh_launch_spec_without_integration_still_uses_login_shell() {
             let spec = build_wsl_launch_spec(
+                false,
                 Some("/home/vinicios/repo"),
                 "Ubuntu",
                 "/usr/bin/zsh",
@@ -1047,6 +1068,10 @@ mod windows {
                     "--cd".to_string(),
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
+                    "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
                 ]
@@ -1054,8 +1079,27 @@ mod windows {
         }
 
         #[test]
+        fn forwards_blocks_mode_into_linux_shell() {
+            for blocks in [false, true] {
+                let spec = build_wsl_launch_spec(
+                    blocks,
+                    None,
+                    "Ubuntu",
+                    "/bin/bash",
+                    ShellKind::Bash,
+                    WslShellIntegration::Bash {
+                        rcfile: "/tmp/terax/bashrc".into(),
+                    },
+                );
+                assert_eq!(spec.args.iter().any(|arg| arg == "TERAX_BLOCKS=1"), blocks);
+                assert!(spec.args.iter().any(|arg| arg == "TERAX_TERMINAL=1"));
+            }
+        }
+
+        #[test]
         fn builds_wsl_bash_launch_spec_with_rcfile() {
             let spec = build_wsl_launch_spec(
+                false,
                 Some("/home/vinicios/repo"),
                 "Ubuntu",
                 "/bin/bash",
@@ -1072,6 +1116,10 @@ mod windows {
                     "--cd".to_string(),
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
+                    "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "/bin/bash".to_string(),
                     "--rcfile".to_string(),
                     "/home/vinicios/.terax/shell-integration/bash/bashrc".to_string(),
@@ -1083,6 +1131,7 @@ mod windows {
         #[test]
         fn builds_wsl_fish_launch_spec_without_init_command() {
             let spec = build_wsl_launch_spec(
+                false,
                 Some("/home/vinicios/repo"),
                 "Ubuntu",
                 "/usr/bin/fish",
@@ -1100,6 +1149,9 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "fish_features=no-mark-prompt".to_string(),
                     "TERAX_FISH_INIT=/home/vinicios/.terax/shell-integration/fish/terax.fish"
                         .to_string(),
@@ -1114,6 +1166,7 @@ mod windows {
         #[test]
         fn builds_wsl_other_shell_without_integration() {
             let spec = build_wsl_launch_spec(
+                false,
                 None,
                 "Ubuntu",
                 "/usr/bin/nu",
@@ -1128,6 +1181,10 @@ mod windows {
                     "--cd".to_string(),
                     "~".to_string(),
                     "--exec".to_string(),
+                    "env".to_string(),
+                    "TERM=xterm-256color".to_string(),
+                    "COLORTERM=truecolor".to_string(),
+                    "TERAX_TERMINAL=1".to_string(),
                     "/usr/bin/nu".to_string(),
                 ]
             );

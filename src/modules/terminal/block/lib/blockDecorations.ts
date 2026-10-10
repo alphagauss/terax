@@ -20,6 +20,8 @@ import type { BlockMeta } from "./types";
 const OK_RULER = "#5fb3b3";
 const FAIL_RULER = "#e5706b";
 const MAX_BLOCKS = 1000;
+// 按 UTF-16 字符数控制已完成输出的总占用；超限淘汰整份快照，不静默截断复制内容。
+const MAX_SNAPSHOT_CHARS = 2 * 1024 * 1024;
 
 type Entry = {
   id: string;
@@ -30,8 +32,10 @@ type Entry = {
   finishedAt: number;
   startMarker: IMarker;
   endMarker: IMarker;
-  headerMarker: IMarker | null;
+  commandMarker: IMarker | null;
   deco: IDecoration | null;
+  commandDeco: IDecoration | null;
+  output: string | null;
 };
 
 type LiveBlock = {
@@ -40,7 +44,7 @@ type LiveBlock = {
   cwd: string;
   startedAt: number;
   startMarker: IMarker;
-  headerMarker: IMarker | null;
+  commandMarker: IMarker | null;
 };
 
 export type BlockContext = {
@@ -55,20 +59,19 @@ export type PositionedBlock = {
   command: string;
   cwd: string;
   exitCode: number | null;
-  running: boolean;
   ok: boolean;
   startedAt: number;
   finishedAt: number;
-  top: number;
-  bottom: number;
-  // Pixel top of the header row (one line above the command, in the blank gap).
-  headerTop: number;
-  headerHeight: number;
+  /** 命令首行在视口内时，在右侧操作槽显示入口。 */
+  actionTop: number | null;
+  actionHeight: number;
+  canSearch: boolean;
 };
 
 export type VisibleBlocks = {
   blocks: PositionedBlock[];
-  sticky: PositionedBlock | null;
+  recent: PositionedBlock[];
+  geometryVersion: number;
 };
 
 export type BlockDecorationsOptions = {
@@ -76,6 +79,8 @@ export type BlockDecorationsOptions = {
   onMode?: (mode: BlockMode) => void;
   onViewport?: () => void;
   takeSubmittedCommand?: () => string | null;
+  /** ConPTY 缩放会重绘网格，旧标记无法继续保证对应原输出。 */
+  invalidateOnResize?: boolean;
 };
 
 export class BlockDecorations {
@@ -87,6 +92,7 @@ export class BlockDecorations {
   private searchResources: { dispose(): void }[] = [];
   private promptMarker: IMarker | null = null;
   private promptReady = false;
+  private discardCurrentCommand = false;
   private reportedCommand: string | null = null;
   powershellInput = false;
   private mode: ModeState = initialModeState();
@@ -98,6 +104,8 @@ export class BlockDecorations {
   private readonly onViewport?: () => void;
   private readonly takeSubmittedCommand?: () => string | null;
   private viewportRaf: number | null = null;
+  private snapshotChars = 0;
+  private geometryVersion = 0;
 
   constructor(
     private readonly term: Terminal,
@@ -130,6 +138,29 @@ export class BlockDecorations {
       () => scroll.dispose(),
       () => render.dispose(),
     );
+    const resize = term.onResize(() => {
+      // 搜索结果保存物理行列，重排后不能继续导航旧坐标。
+      this.geometryVersion++;
+      this.clearSearch();
+      if (opts?.invalidateOnResize) this.invalidateBlocks();
+      else this.scheduleViewport();
+    });
+    this.disposers.push(() => resize.dispose());
+  }
+
+  /** ConPTY 重绘仅撤销网格定位，已完成命令仍可通过有界快照复制。 */
+  private invalidateBlocks(): void {
+    this.clearBlockSelection();
+    for (const entry of this.entries) this.disposeEntry(entry);
+    // 仅正在执行且已建立边界的命令失效，空闲和等待 Shell 接受的新提交不应被封锁。
+    this.discardCurrentCommand ||= this.live !== null;
+    this.live?.startMarker.dispose();
+    this.live?.commandMarker?.dispose();
+    this.live = null;
+    this.promptMarker?.dispose();
+    this.promptMarker = null;
+    this.reportedCommand = null;
+    this.scheduleViewport();
   }
 
   private scheduleViewport(): void {
@@ -169,12 +200,14 @@ export class BlockDecorations {
     const e = this.entries.find((x) => x.id === id);
     if (!e) return null;
     const r = this.rangeOf(e);
-    if (!r) return null;
+    const output =
+      e.output ?? (r ? readRangeText(this.term, r.start, r.end) : null);
+    if (output === null) return null;
     return {
       command: e.command,
       cwd: e.cwd,
       exitCode: e.exitCode,
-      output: readRangeText(this.term, r.start, r.end),
+      output,
     };
   }
 
@@ -219,6 +252,8 @@ export class BlockDecorations {
 
   beginSubmission(): boolean {
     if (!this.promptReady || modeOf(this.mode) !== "prompt") return false;
+    this.discardCurrentCommand = false;
+    this.captureCommandAnchor();
     this.promptReady = false;
     this.mode = reduceMode(this.mode, { type: "osc133", marker: "C" });
     this.emitMode();
@@ -236,105 +271,51 @@ export class BlockDecorations {
   }
 
   visibleBlocks(): VisibleBlocks {
-    const term = this.term;
-    // No block chrome over a full-screen TUI (vim/htop) — it owns the screen.
-    if (this.mode.altScreen) return { blocks: [], sticky: null };
-    const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen || term.rows === 0) return { blocks: [], sticky: null };
-    const rect = screen.getBoundingClientRect();
-    const cellHeight = rect.height / term.rows;
-    if (cellHeight <= 0) return { blocks: [], sticky: null };
-    const elTop = term.element?.getBoundingClientRect().top ?? rect.top;
-    const offset = rect.top - elTop;
-    const buf = term.buffer.active;
-    const viewportY = buf.viewportY;
-    const vpTop = viewportY;
-    const vpBottom = viewportY + term.rows;
-
-    const out: PositionedBlock[] = [];
-    let sticky: PositionedBlock | null = null;
-
-    const consider = (
-      meta: Omit<
-        PositionedBlock,
-        "top" | "bottom" | "ok" | "headerTop" | "headerHeight"
-      >,
-      startLine: number,
-      endLine: number,
-      headerMarker: IMarker | null,
-    ) => {
-      const headerLine =
-        headerMarker && !headerMarker.isDisposed ? headerMarker.line : -1;
-      if (
-        endLine < vpTop ||
-        (headerLine >= 0 ? headerLine : startLine) > vpBottom
-      )
-        return;
-      const ok = meta.exitCode === 0 || meta.exitCode === null;
-      const top = offset + (startLine - viewportY) * cellHeight;
-      const bottom = offset + (endLine - viewportY + 1) * cellHeight;
-      const pb: PositionedBlock = {
-        ...meta,
-        ok,
-        top,
-        bottom,
-        // B 标记前的预留行是标题锚点，不依赖命令回显的物理行数。
-        headerTop:
-          headerLine >= 0
-            ? offset + (headerLine - viewportY) * cellHeight
-            : -100,
-        headerHeight: cellHeight,
+    if (this.mode.altScreen)
+      return { blocks: [], recent: [], geometryVersion: this.geometryVersion };
+    const blocks: PositionedBlock[] = [];
+    const recent: PositionedBlock[] = [];
+    const screen =
+      this.term.element?.querySelector<HTMLElement>(".xterm-screen");
+    // 装饰层直接提供 CSS 像素坐标，避免把受缩放影响的 DOMRect 再用于 CSS 定位。
+    const offset =
+      (this.term.element?.offsetTop ?? 0) + (screen?.offsetTop ?? 0);
+    for (const e of this.entries) {
+      const range = this.rangeOf(e);
+      const block: PositionedBlock = {
+        id: e.id,
+        command: e.command,
+        cwd: e.cwd,
+        exitCode: e.exitCode,
+        ok: e.exitCode === 0 || e.exitCode === null,
+        startedAt: e.startedAt,
+        finishedAt: e.finishedAt,
+        actionTop: null,
+        actionHeight: 24,
+        canSearch: range !== null,
       };
-      out.push(pb);
-      if (startLine < vpTop && endLine >= vpTop) sticky = pb;
+      if (range || e.output !== null) recent.push(block);
+      if (!range) continue;
+      const element = e.commandDeco?.element;
+      if (!element || element.style.display === "none") continue;
+      const rowTop = Number.parseFloat(element.style.top);
+      const rowHeight = Number.parseFloat(element.style.lineHeight);
+      if (!Number.isFinite(rowTop) || !Number.isFinite(rowHeight)) continue;
+      const actionHeight = Math.max(24, rowHeight);
+      blocks.push({
+        ...block,
+        actionTop: Math.max(
+          offset,
+          offset + rowTop + (rowHeight - actionHeight) / 2,
+        ),
+        actionHeight,
+      });
+    }
+    return {
+      blocks,
+      recent: recent.slice(-20).reverse(),
+      geometryVersion: this.geometryVersion,
     };
-
-    // entries are chronological, so binary search beats a full scan per frame
-    for (
-      let i = this.firstIndexEndingAtOrAfter(vpTop);
-      i < this.entries.length;
-      i++
-    ) {
-      const e = this.entries[i];
-      const r = this.rangeOf(e);
-      if (!r) continue;
-      consider(
-        {
-          id: e.id,
-          command: e.command,
-          cwd: e.cwd,
-          exitCode: e.exitCode,
-          running: false,
-          startedAt: e.startedAt,
-          finishedAt: e.finishedAt,
-        },
-        r.start,
-        r.end,
-        e.headerMarker,
-      );
-    }
-
-    const lb = this.live;
-    if (lb && !lb.startMarker.isDisposed && lb.startMarker.line >= 0) {
-      const start = lb.startMarker.line;
-      const end = Math.max(start, buf.baseY + buf.cursorY);
-      consider(
-        {
-          id: lb.id,
-          command: lb.command,
-          cwd: lb.cwd,
-          exitCode: null,
-          running: true,
-          startedAt: lb.startedAt,
-          finishedAt: 0,
-        },
-        start,
-        end,
-        lb.headerMarker,
-      );
-    }
-
-    return { blocks: out, sticky };
   }
 
   selectBlockAt(clientY: number): void {
@@ -362,6 +343,10 @@ export class BlockDecorations {
     const e = this.entries.find((x) => x.id === id);
     const r = e ? this.rangeOf(e) : null;
     if (!r) return;
+    if (r.end < r.start) {
+      this.clearBlockSelection();
+      return;
+    }
     this.term.selectLines(r.start, r.end);
     this.selectedId = id;
   }
@@ -389,7 +374,7 @@ export class BlockDecorations {
     while (idx >= 0 && idx < this.entries.length) {
       const e = this.entries[idx];
       const r = this.rangeOf(e);
-      if (r) {
+      if (r && r.end >= r.start) {
         this.term.selectLines(r.start, r.end);
         this.selectedId = e.id;
         this.term.scrollToLine(Math.max(0, r.start - 2));
@@ -404,8 +389,9 @@ export class BlockDecorations {
     this.clearSearch();
     for (const e of this.entries) this.disposeEntry(e);
     this.entries.length = 0;
+    this.snapshotChars = 0;
     this.live?.startMarker.dispose();
-    this.live?.headerMarker?.dispose();
+    this.live?.commandMarker?.dispose();
     this.promptMarker?.dispose();
     this.live = null;
     for (const d of this.disposers) {
@@ -418,19 +404,6 @@ export class BlockDecorations {
 
   private rangeOf(e: Entry): LineRange | null {
     return computeRange(e.startMarker, e.endMarker);
-  }
-
-  // Disposed ranges (trimmed-oldest prefix) sort as -1, before any viewport.
-  private firstIndexEndingAtOrAfter(line: number): number {
-    let lo = 0;
-    let hi = this.entries.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      const r = this.rangeOf(this.entries[mid]);
-      if ((r?.end ?? -1) < line) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
   }
 
   private toMeta(e: Entry, r: LineRange): BlockMeta {
@@ -458,6 +431,7 @@ export class BlockDecorations {
     const rest = data.length > 2 && data[1] === ";" ? data.slice(2) : "";
     switch (marker) {
       case "A":
+        this.discardCurrentCommand = false;
         this.reportedCommand = null;
         this.promptReady = false;
         this.takeSubmittedCommand?.();
@@ -465,10 +439,10 @@ export class BlockDecorations {
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "A" });
         break;
       case "B":
+        this.discardCurrentCommand = false;
         this.promptReady = true;
         this.powershellInput = rest === "terax=powershell";
-        this.promptMarker?.dispose();
-        this.promptMarker = this.term.registerMarker(-1) ?? null;
+        this.captureCommandAnchor();
         this.shellState.inCommand = true;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "B" });
         break;
@@ -488,13 +462,27 @@ export class BlockDecorations {
       case "D":
         this.shellState.inCommand = false;
         this.finishBlock(rest);
+        this.discardCurrentCommand = false;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "D" });
         break;
     }
     this.emitMode();
   }
 
+  /** 新提交本身就是新的锚点，不依赖 Shell 在 resize 后重新报告提示符。 */
+  private captureCommandAnchor(): void {
+    this.promptMarker?.dispose();
+    const buf = this.term.buffer.active;
+    const cursorLine = buf.baseY + buf.cursorY;
+    let commandLine = cursorLine;
+    while (commandLine > 0 && buf.getLine(commandLine)?.isWrapped)
+      commandLine--;
+    this.promptMarker =
+      this.term.registerMarker(commandLine - cursorLine) ?? null;
+  }
+
   private startBlock(): void {
+    if (this.discardCurrentCommand) return;
     // Bash 的一次多行提交可在同一个 D 前产生多个 PS0/C，仍属于同一命令块。
     if (this.live) {
       this.reportedCommand = null;
@@ -508,7 +496,7 @@ export class BlockDecorations {
       cwd: this.cwd,
       startedAt: Date.now(),
       startMarker: marker,
-      headerMarker: this.promptMarker,
+      commandMarker: this.promptMarker ?? this.term.registerMarker(0) ?? null,
     };
     this.promptMarker = null;
     this.reportedCommand = null;
@@ -519,22 +507,45 @@ export class BlockDecorations {
     const lb = this.live;
     if (!lb) return;
     this.live = null;
-    const exit = parseExitCode(codeStr);
-    const ok = exit === 0 || exit === null;
-    const endMarker = this.term.registerMarker(0);
-    if (!endMarker) {
-      lb.startMarker.dispose();
-      lb.headerMarker?.dispose();
+    if (lb.startMarker.isDisposed) {
+      lb.commandMarker?.dispose();
       return;
     }
-    // Only the scrollbar overview mark; the visible divider is drawn full-width
-    // in the host overlay (xterm decorations stop at the padded content edge).
+    const exit = parseExitCode(codeStr);
+    const ok = exit === 0 || exit === null;
+    // D 所在行只有存在内容或未归零的光标时才属于输出，不用空白文本反推命令边界。
+    const buf = this.term.buffer.active;
+    const cursorLine = buf.baseY + buf.cursorY;
+    const includesCursorLine =
+      buf.cursorX > 0 || !!buf.getLine(cursorLine)?.translateToString(true);
+    const endMarker = this.term.registerMarker(includesCursorLine ? 1 : 0);
+    if (!endMarker) {
+      lb.startMarker.dispose();
+      lb.commandMarker?.dispose();
+      return;
+    }
+    // 分隔线与概览标记共用输出结束边界，行高、重排及裁剪由 xterm 原生装饰层负责。
     const deco =
       this.term.registerDecoration({
         marker: endMarker,
         width: 1,
         overviewRulerOptions: { color: ok ? OK_RULER : FAIL_RULER },
       }) ?? null;
+    deco?.onRender((element) => {
+      element.classList.add("bt-output-boundary");
+      element.classList.toggle("bt-output-boundary-fail", !ok);
+      element.style.width = "100%";
+    });
+    const commandDeco = lb.commandMarker
+      ? (this.term.registerDecoration({ marker: lb.commandMarker, width: 1 }) ??
+        null)
+      : null;
+    commandDeco?.onRender(() => this.scheduleViewport());
+    const output = readRangeText(
+      this.term,
+      lb.startMarker.line,
+      endMarker.line - 1,
+    );
     this.entries.push({
       id: lb.id,
       command: lb.command,
@@ -544,21 +555,38 @@ export class BlockDecorations {
       finishedAt: Date.now(),
       startMarker: lb.startMarker,
       endMarker,
-      headerMarker: lb.headerMarker,
+      commandMarker: lb.commandMarker,
       deco,
+      commandDeco,
+      output: output.length <= MAX_SNAPSHOT_CHARS ? output : null,
     });
+    if (output.length <= MAX_SNAPSHOT_CHARS)
+      this.snapshotChars += output.length;
+    for (const entry of this.entries) {
+      if (this.snapshotChars <= MAX_SNAPSHOT_CHARS) break;
+      this.snapshotChars -= entry.output?.length ?? 0;
+      entry.output = null;
+    }
     while (this.entries.length > MAX_BLOCKS) {
       const old = this.entries.shift();
-      if (old) this.disposeEntry(old);
+      if (old) {
+        this.snapshotChars -= old.output?.length ?? 0;
+        this.disposeEntry(old);
+      }
     }
     this.scheduleViewport();
   }
 
   private disposeEntry(e: Entry): void {
-    e.headerMarker?.dispose();
+    e.commandDeco?.dispose();
+    e.commandDeco = null;
+    e.commandMarker?.dispose();
+    e.commandMarker = null;
     try {
       e.deco?.dispose();
     } catch {}
+    // 已完成快照继续留在历史里，但不能持有已从页面移除的装饰 DOM。
+    e.deco = null;
     try {
       e.startMarker.dispose();
     } catch {}

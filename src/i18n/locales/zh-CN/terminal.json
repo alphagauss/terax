@@ -1,5 +1,6 @@
 {
   "block": {
+    "recent": "最近命令",
     "commandFallback": "命令",
     "exit": "退出码 {{code}}",
     "runAgain": "重新运行",

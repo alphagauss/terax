@@ -3,8 +3,6 @@
  * 终端会话由模块级池持有，视图隐藏时不会销毁 PTY。
  */
 
-import { cn } from "@/lib/utils";
-
 import {
   ContextMenu,
   ContextMenuContent,
@@ -320,16 +318,13 @@ export const TerminalPane = memo(
         style={hideStyle}
         onContextMenu={prepareContextMenu}
       >
-        <div className="relative min-h-0 flex-1">
+        <div className="bt-surface relative min-h-0 flex-1">
           {loadingIndicator}
           {findWidget}
           {/* biome-ignore lint/a11y/noStaticElementInteractions: terminal surface; pointer selects command blocks */}
           <div
             ref={containerRef}
-            className={cn(
-              "absolute inset-x-0 bottom-0 z-0",
-              session.blockMode === "alt" ? "top-0" : "top-7",
-            )}
+            className="absolute inset-0 z-0"
             onMouseDown={(e) => {
               pointerDownRef.current = { x: e.clientX, y: e.clientY };
             }}

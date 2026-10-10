@@ -8,7 +8,10 @@ const marker = (line: number, isDisposed = false): MarkerLike => ({
 
 describe("computeRange", () => {
   it("derives the range from current marker positions", () => {
-    expect(computeRange(marker(10), marker(14))).toEqual({ start: 10, end: 14 });
+    expect(computeRange(marker(10), marker(14))).toEqual({
+      start: 10,
+      end: 13,
+    });
   });
 
   it("tracks markers after the buffer scrolls (eviction shifts lines down)", () => {
@@ -16,7 +19,7 @@ describe("computeRange", () => {
     const end = marker(14);
     start.line = 2;
     end.line = 6;
-    expect(computeRange(start, end)).toEqual({ start: 2, end: 6 });
+    expect(computeRange(start, end)).toEqual({ start: 2, end: 5 });
   });
 
   it("returns null once a marker is disposed", () => {
@@ -28,17 +31,14 @@ describe("computeRange", () => {
     expect(computeRange(marker(-1), marker(4))).toBeNull();
   });
 
-  it("never returns an inverted range", () => {
-    expect(computeRange(marker(8), marker(5))).toEqual({ start: 8, end: 8 });
+  it("无输出时保留空范围，不能把下一行当作输出", () => {
+    expect(computeRange(marker(8), marker(8))).toEqual({ start: 8, end: 7 });
+    expect(computeRange(marker(8), marker(5))).toEqual({ start: 8, end: 7 });
   });
 });
 
 describe("blockIndexAt", () => {
-  const ranges = [
-    { start: 0, end: 4 },
-    null,
-    { start: 5, end: 9 },
-  ];
+  const ranges = [{ start: 0, end: 4 }, null, { start: 5, end: 9 }];
 
   it("finds the block containing a line", () => {
     expect(blockIndexAt(ranges, 2)).toBe(0);
@@ -54,8 +54,14 @@ describe("blockIndexAt", () => {
   });
 
   it("resolves to the newest block on overlap", () => {
-    expect(blockIndexAt([{ start: 0, end: 10 }, { start: 5, end: 10 }], 7)).toBe(
-      1,
-    );
+    expect(
+      blockIndexAt(
+        [
+          { start: 0, end: 10 },
+          { start: 5, end: 10 },
+        ],
+        7,
+      ),
+    ).toBe(1);
   });
 });
