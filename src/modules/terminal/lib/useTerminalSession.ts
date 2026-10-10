@@ -59,6 +59,7 @@ import {
   discardRetainedSlot,
   disposeTerminalSlot,
   focusSlot,
+  flushSlotResize,
   getLiveSlotForTerminal,
   getSlotForTerminal,
   isTerminalAltScreen,
@@ -100,6 +101,7 @@ type Session = {
   blockMode: BlockMode;
   blockListeners: Set<() => void>;
   blockDecorations: BlockDecorations | null;
+  submissionPending: { cancelled: boolean } | null;
   // 由块终端输入框注册，在 xterm 网格抢走焦点时将输入焦点拉回输入栏。
   inputFocus: (() => void) | null;
   inputPaste: ((text: string) => boolean) | null;
@@ -236,6 +238,7 @@ export async function submitToTerminal(
     toast.error(i18n.t("terminal:block.notReady"));
     return false;
   }
+  if (s.submissionPending || s.blockMode !== "prompt") return false;
   const data = commandSubmission(
     text,
     deco.powershellInput,
@@ -245,11 +248,26 @@ export async function submitToTerminal(
     toast.error(i18n.t("terminal:block.multilineUnsupported"));
     return false;
   }
-  if (!deco.beginSubmission()) return false;
-  s.submittedCommand = text;
-  markCommandSubmitted(terminalId, s);
+  const submission = { cancelled: false };
+  s.submissionPending = submission;
   const pty = s.pty;
+  const canSubmit = () =>
+    !submission.cancelled &&
+    !s.shellExited &&
+    s.pty === pty &&
+    getSlotForTerminal(terminalId) === slot &&
+    s.blockDecorations === deco;
   try {
+    // 等输入清空及 CodeMirror 测量完成，再主动同步尺寸，不等待 resize 防抖计时器。
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    if (!canSubmit()) return false;
+    await flushSlotResize(slot);
+    if (!canSubmit()) return false;
+    if (!deco.beginSubmission()) return false;
+    s.submittedCommand = text;
+    markCommandSubmitted(terminalId, s);
     await pty.write(data, true);
     return true;
   } catch {
@@ -261,11 +279,15 @@ export async function submitToTerminal(
     }
     toast.error(i18n.t("terminal:block.submitFailed"));
     return false;
+  } finally {
+    s.submissionPending = null;
   }
 }
 
 export function interruptTerminal(terminalId: number): void {
-  sessions.get(terminalId)?.pty?.write("\x03");
+  const session = sessions.get(terminalId);
+  if (session?.submissionPending) session.submissionPending.cancelled = true;
+  session?.pty?.write("\x03");
 }
 
 export function terminalCwd(terminalId: number): string | null {
@@ -505,7 +527,7 @@ configureRendererPool({
       resizePty: (cols, rows) => {
         s.cols = cols;
         s.rows = rows;
-        s.pty?.resize(cols, rows);
+        return s.pty?.resize(cols, rows);
       },
       kickPty: (cols, rows) => {
         const pty = s.pty;
@@ -583,6 +605,7 @@ function ensureSession(
     blockMode: "prompt",
     blockListeners: new Set(),
     blockDecorations: null,
+    submissionPending: null,
     inputFocus: null,
     inputPaste: null,
     inputDraft: "",
@@ -822,7 +845,8 @@ function bindTerminalToSlot(terminalId: number, s: Session): void {
       if (s.blocks) {
         const osc52 = registerOsc52ClipboardHandler(term);
         const deco = new BlockDecorations(term, {
-          invalidateOnResize: IS_WINDOWS && currentWorkspaceEnv().kind !== "ssh",
+          invalidateOnResize:
+            IS_WINDOWS && currentWorkspaceEnv().kind !== "ssh",
           takeSubmittedCommand: () => {
             const command = s.submittedCommand;
             s.submittedCommand = null;

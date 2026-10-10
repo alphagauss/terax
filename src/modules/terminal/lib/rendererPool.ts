@@ -46,7 +46,7 @@ export type SlotAdapter = {
 
 export type TerminalBridge = {
   writeToPty(data: string): void;
-  resizePty(cols: number, rows: number): void;
+  resizePty(cols: number, rows: number): void | Promise<void>;
   // Force a SIGWINCH on the underlying PTY at the given dims. Implemented
   // as a +1 row / restore bump because the Linux kernel suppresses winsize
   // ioctls that don't actually change the size. Used to make alt-screen
@@ -693,6 +693,30 @@ function rewireSlot(slot: Slot, p: AcquireParams): void {
   slot.lastCols = slot.term.cols;
   slot.lastRows = slot.term.rows;
   p.onSearchReady(slot.searchAddon);
+}
+
+/** 提交前立即应用当前布局并等待 PTY resize，取消观察器中尚未发送的旧尺寸。 */
+export async function flushSlotResize(slot: Slot): Promise<void> {
+  if (slot.fitTimer) clearTimeout(slot.fitTimer);
+  if (slot.ptyTimer) clearTimeout(slot.ptyTimer);
+  slot.fitTimer = null;
+  slot.ptyTimer = null;
+  slot.fitAddon.fit();
+  const container = slot.host.parentElement;
+  if (container) {
+    slot.lastW = container.clientWidth;
+    slot.lastH = container.clientHeight;
+  }
+  const { cols, rows } = slot.term;
+  const terminalId = slot.currentTerminalId;
+  const bridge =
+    terminalId === null ? null : adapter?.resolveTerminal(terminalId);
+  if (!bridge) throw new Error("Terminal detached before submission");
+  // 即使观察器刚发送过同样尺寸，也等待本次确认，不能越过尚未完成的 resize。
+  await bridge.resizePty(cols, rows);
+  if (slot.currentTerminalId !== terminalId) return;
+  slot.lastCols = cols;
+  slot.lastRows = rows;
 }
 
 function setupResizeObserver(slot: Slot, p: AcquireParams): void {

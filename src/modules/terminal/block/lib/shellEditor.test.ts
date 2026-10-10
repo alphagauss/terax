@@ -3,7 +3,7 @@ import { EditorSelection } from "@codemirror/state";
 import { expect, it, vi } from "vitest";
 import { createShellEditor } from "@/modules/terminal/block/lib/shellEditor";
 
-it("提交期间不重复发送，失败保留原文，成功后才清空", async () => {
+it("发送前清空输入，阻止重复提交，失败时不覆盖新输入", async () => {
   const parent = document.createElement("div");
   document.body.append(parent);
   let finish!: (accepted: boolean) => void;
@@ -38,17 +38,19 @@ it("提交期间不重复发送，失败保留原文，成功后才清空", asyn
     enter();
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledWith(text);
-    expect(editor.getValue()).toBe(text);
-    finish(false);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(editor.getValue()).toBe(text);
-    enter();
-    finish(true);
-    await Promise.resolve();
-    await Promise.resolve();
     expect(editor.getValue()).toBe("");
     editor.setValue("next");
+    enter();
+    expect(submit).toHaveBeenCalledTimes(1);
+    finish(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(editor.getValue()).toBe("next");
+    enter();
+    expect(editor.getValue()).toBe("");
+    finish(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(editor.getValue()).toBe("");
+    editor.setValue("readonly");
     editor.setEditable(false);
     enter();
     expect(submit).toHaveBeenCalledTimes(2);

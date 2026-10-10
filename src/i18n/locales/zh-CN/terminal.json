@@ -17,7 +17,7 @@
     },
     "notReady": "Shell 尚未准备好接收块终端输入。",
     "multilineUnsupported": "当前 Shell 未启用完整多行输入能力，请使用已集成的 PowerShell 或 Bash/WSL。",
-    "submitFailed": "命令发送失败，已保留输入内容。",
+    "submitFailed": "命令发送失败。",
     "inputPlaceholder": "输入命令 · ↑ 历史 · Tab 补全 · Shift+Enter 换行",
     "historyHint": "↑↓ 选择 · Enter 填入 · Esc 关闭"
   },

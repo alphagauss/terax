@@ -1,3 +1,4 @@
+/** 管理 Shell 输入编辑、补全与提交；提交前收起输入，终端完成尺寸同步后再发送命令。 */
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import i18n from "@/i18n";
 import {
@@ -391,7 +392,6 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
   const placeholderComp = new Compartment();
   const languageComp = new Compartment();
   let submitting = false;
-  let destroyed = false;
 
   const clear = (view: EditorView) =>
     view.dispatch({
@@ -408,15 +408,10 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
           if (!text.trim()) return true;
           if (submitting || view.state.readOnly) return true;
           submitting = true;
-          void opts
-            .onSubmit(text)
-            .then((accepted) => {
-              if (accepted && !destroyed && view.state.doc.toString() === text)
-                clear(view);
-            })
-            .finally(() => {
-              submitting = false;
-            });
+          clear(view);
+          void opts.onSubmit(text).finally(() => {
+            submitting = false;
+          });
           return true;
         },
       },
@@ -543,9 +538,6 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
           highlightComp.reconfigure(syntaxHighlighting(highlightStyle())),
         ],
       }),
-    destroy: () => {
-      destroyed = true;
-      view.destroy();
-    },
+    destroy: () => view.destroy(),
   };
 }

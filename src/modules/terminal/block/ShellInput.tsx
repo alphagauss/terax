@@ -100,12 +100,13 @@ export default function ShellInput({
       historyList,
       onSubmit: async (text) => {
         const id = terminalIdRef.current;
-        if (!(await cbRef.current.onSubmit(text))) return false;
+        // 发送失败也保留完整输入，用户可通过向上箭头历史找回。
         historyRecord(text);
         const first = text.trim().split(/\s+/)[0];
         if (first && !commandsRef.current.includes(first)) {
           commandsRef.current = [first, ...commandsRef.current];
         }
+        if (!(await cbRef.current.onSubmit(text))) return false;
         if (getTerminalDraft(id) === text) setTerminalDraft(id, "");
         return terminalIdRef.current === id;
       },

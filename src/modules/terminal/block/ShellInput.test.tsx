@@ -3,11 +3,13 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import ShellInput from "@/modules/terminal/block/ShellInput";
+import { historyRecord } from "@/modules/terminal/block/lib/history";
 
 const mocks = vi.hoisted(() => ({
   copy: vi.fn().mockResolvedValue(undefined),
   grid: "终端输出",
   editorSelection: false,
+  submit: undefined as ((text: string) => Promise<boolean>) | undefined,
 }));
 vi.mock("@/modules/terminal/lib/terminalClipboard", () => ({
   readTerminalClipboard: vi.fn(),
@@ -38,28 +40,66 @@ vi.mock("@/modules/terminal/lib/useTerminalSession", () => ({
   setTerminalInputPaste: vi.fn(),
 }));
 vi.mock("@/modules/terminal/block/lib/shellEditor", () => ({
-  createShellEditor: () => ({
-    view: {
-      state: {
-        selection: {
-          get ranges() {
-            return [
-              { empty: true },
-              ...(mocks.editorSelection ? [{ empty: false }] : []),
-            ];
+  createShellEditor: (opts: {
+    onSubmit: (text: string) => Promise<boolean>;
+  }) => {
+    mocks.submit = opts.onSubmit;
+    return {
+      view: {
+        state: {
+          selection: {
+            get ranges() {
+              return [
+                { empty: true },
+                ...(mocks.editorSelection ? [{ empty: false }] : []),
+              ];
+            },
           },
         },
       },
-    },
-    focus: vi.fn(),
-    destroy: vi.fn(),
-    setValue: vi.fn(),
-    getValue: () => "",
-    retheme: vi.fn(),
-    setEditable: vi.fn(),
-    setPlaceholder: vi.fn(),
-  }),
+      focus: vi.fn(),
+      destroy: vi.fn(),
+      setValue: vi.fn(),
+      getValue: () => "",
+      retheme: vi.fn(),
+      setEditable: vi.fn(),
+      setPlaceholder: vi.fn(),
+    };
+  },
 }));
+
+it("多行原文在发送前记入历史，发送失败也可找回", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const text = "printf '%s\\n' \\\n  first \\\n  second";
+  const submit = vi.fn(async () => {
+    expect(historyRecord).toHaveBeenCalledWith(text);
+    return false;
+  });
+  try {
+    await act(async () =>
+      root.render(
+        <ShellInput
+          terminalId={1}
+          mode="prompt"
+          focused
+          themeKey="dark"
+          onSubmit={submit}
+          onInterrupt={() => {}}
+          getCwd={() => null}
+        />,
+      ),
+    );
+    await act(async () => {
+      expect(await mocks.submit?.(text)).toBe(false);
+    });
+    expect(submit).toHaveBeenCalledWith(text);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
 
 it("输入框代复制网格选区使用原生入口，同时保留编辑器自身选区和无选区行为", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
