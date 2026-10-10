@@ -2,14 +2,12 @@
  * 本文件把流式正文连接到短生命周期的渐进可见文本存储。
  * 非流式正文直接返回最终文本，不创建订阅或保留额外字符串副本。
  */
-
 import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useSyncExternalStore,
-} from "react";
+  useChatDisplayActive,
+  useChatDisplaySnapshot,
+} from "@/modules/ai/hooks/chatDisplay";
+
+import { useCallback, useEffect, useId, useLayoutEffect } from "react";
 import { progressiveTextStore } from "../lib/progressiveText";
 
 /**
@@ -19,6 +17,7 @@ import { progressiveTextStore } from "../lib/progressiveText";
  * `text`，并在布局提交后清理对应存储。
  */
 export function useProgressiveText(text: string, streaming: boolean): string {
+  const active = useChatDisplayActive();
   const streamId = useId();
   const subscribe = useCallback(
     (listener: () => void) =>
@@ -31,15 +30,15 @@ export function useProgressiveText(text: string, streaming: boolean): string {
     }
     return progressiveTextStore.getVisibleText(streamId);
   }, [streamId, streaming, text]);
-  const visibleText = useSyncExternalStore(subscribe, getSnapshot, () => text);
+  const visibleText = useChatDisplaySnapshot(subscribe, getSnapshot);
 
   useLayoutEffect(() => {
-    if (streaming) {
+    if (active && streaming) {
       progressiveTextStore.setTarget(streamId, text);
       return;
     }
     progressiveTextStore.clear(streamId);
-  }, [streamId, streaming, text]);
+  }, [active, streamId, streaming, text]);
 
   useEffect(
     () => () => {

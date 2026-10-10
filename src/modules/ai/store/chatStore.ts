@@ -459,7 +459,7 @@ export function retainSessionView(id: string): () => void {
   };
 }
 
-/** 只保留前台展示和未提交的业务运行；已完成的后台会话下次从磁盘恢复。 */
+/** 保留当前视图引用和未提交的业务运行；无视图引用的已完成后台会话下次从磁盘恢复。 */
 export function releaseUnusedChats() {
   const state = useChatStore.getState();
   for (const id of new Set([...chats.keys(), ...seedMessages.keys()])) {

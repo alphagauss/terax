@@ -74,7 +74,7 @@ function PooledSidebarView({
 }) {
   const [container] = useState(() => {
     const element = document.createElement("div");
-    element.className = "absolute inset-0";
+    element.className = "absolute top-0 left-0";
     element.dataset.sidebarView = view.id;
     return element;
   });
@@ -90,6 +90,18 @@ function PooledSidebarView({
     container.style.pointerEvents = visible ? "auto" : "none";
     container.inert = !visible;
     container.setAttribute("aria-hidden", String(!visible));
+    if (!visible || !host) return;
+    // 使用未缩放的布局尺寸，隐藏时冻结，避免零宽重排和应用缩放被重复计算。
+    const updateSize = () => {
+      const { clientWidth: width, clientHeight: height } = host;
+      if (width <= 0 || height <= 0) return;
+      container.style.width = `${width}px`;
+      container.style.height = `${height}px`;
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(host);
+    return () => observer.disconnect();
   }, [container, location, visible]);
 
   useEffect(

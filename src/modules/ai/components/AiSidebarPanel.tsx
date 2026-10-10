@@ -38,6 +38,7 @@ import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
   releaseUnusedChats,
+  retainSessionView,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -52,7 +53,17 @@ import {
   type FindPatternFieldHandle,
 } from "@/modules/find";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
+import {
+  type Chat,
+  type UIMessage,
+  type UseChatHelpers,
+  useChat,
+} from "@ai-sdk/react";
+import {
+  ChatDisplayContext,
+  useChatDisplayActive,
+  useChatDisplayStore,
+} from "@/modules/ai/hooks/chatDisplay";
 import {
   ArrowDown01Icon,
   Delete02Icon,
@@ -91,15 +102,13 @@ export function AiSidebarPanel({
       data-ai-sidebar-panel
       className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-[12px] dark:bg-sidebar"
     >
-      {visible &&
-        (sessionId ? (
-          <SessionBody
-            key={`${sessionId}:${revision}`}
-            sessionId={sessionId}
-          />
+      <ChatDisplayContext value={visible}>
+        {sessionId ? (
+          <SessionBody key={`${sessionId}:${revision}`} sessionId={sessionId} />
         ) : (
           <EmptyShell />
-        ))}
+        )}
+      </ChatDisplayContext>
       {hasComposer ? (
         <AiSidebarComposer />
       ) : (
@@ -109,13 +118,10 @@ export function AiSidebarPanel({
   );
 }
 
-/** 展示加载与业务运行解耦，隐藏时卸载订阅，重新显示时冷恢复已释放的历史。 */
-function SessionBody({
-  sessionId,
-}: {
-  sessionId: string;
-}) {
+/** 只保留当前会话的视图引用；收起不断开实例，切换会话或销毁面板时释放。 */
+function SessionBody({ sessionId }: { sessionId: string }) {
   const [chat, setChat] = useState<Chat<UIMessage> | null>(null);
+  useLayoutEffect(() => retainSessionView(sessionId), [sessionId]);
   useEffect(() => {
     let active = true;
     void loadChat(sessionId).then(
@@ -131,11 +137,7 @@ function SessionBody({
       active = false;
     };
   }, [sessionId]);
-  return chat ? (
-    <Body sessionId={sessionId} chat={chat} />
-  ) : (
-    <EmptyShell />
-  );
+  return chat ? <Body sessionId={sessionId} chat={chat} /> : <EmptyShell />;
 }
 
 function Body({
@@ -145,16 +147,19 @@ function Body({
   sessionId: string;
   chat: Chat<UIMessage>;
 }) {
-  const hasDeliveries = useDeliveryHistory((state) =>
+  const visible = useChatDisplayActive();
+  const [helpers, setHelpers] = useState<ChatDisplayState>(() => ({
+    messages: chat.messages,
+    status: chat.status,
+    error: chat.error,
+    clearError: chat.clearError,
+  }));
+  const hasDeliveries = useChatDisplayStore(useDeliveryHistory, (state) =>
     Boolean(state.sessions[sessionId]?.length),
   );
-  const hasCommands = useCommandStore((state) =>
+  const hasCommands = useChatDisplayStore(useCommandStore, (state) =>
     Boolean(state.sessions[sessionId]?.length),
   );
-  const helpers = useChat<UIMessage>({
-    chat,
-    experimental_throttle: STREAM_RENDER_INTERVAL_MS,
-  });
   const isBusy =
     helpers.status === "submitted" || helpers.status === "streaming";
   const showHeaderRunStatus =
@@ -162,6 +167,7 @@ function Body({
 
   return (
     <>
+      {visible && <ChatDisplaySubscription chat={chat} onChange={setHelpers} />}
       <Header
         sessionId={sessionId}
         isBusy={showHeaderRunStatus}
@@ -187,6 +193,29 @@ function Body({
   );
 }
 
+type ChatDisplayState = Pick<
+  UseChatHelpers<UIMessage>,
+  "messages" | "status" | "error" | "clearError"
+>;
+
+/** SDK 订阅单独挂载，暂停订阅时不销毁消息 DOM 或重新初始化卡片。 */
+function ChatDisplaySubscription({
+  chat,
+  onChange,
+}: {
+  chat: Chat<UIMessage>;
+  onChange: (state: ChatDisplayState) => void;
+}) {
+  const { messages, status, error, clearError } = useChat({
+    chat,
+    experimental_throttle: STREAM_RENDER_INTERVAL_MS,
+  });
+  useLayoutEffect(() => {
+    onChange({ messages, status, error, clearError });
+  }, [messages, status, error, clearError, onChange]);
+  return null;
+}
+
 function EmptyShell() {
   const { t } = useTranslation("ai");
   return (
@@ -209,7 +238,10 @@ function Header({
   messages?: UIMessage[];
 }) {
   const { t } = useTranslation("ai");
+  const visible = useChatDisplayActive();
   const newSession = useChatStore((s) => s.newSession);
+  // 工具栏仅保留固定占位；菜单与提示随隐藏关闭，不需要逐个维护展示状态。
+  if (!visible) return <div className="h-10 shrink-0" />;
 
   return (
     <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-sidebar px-2.5">
@@ -334,8 +366,7 @@ function SessionPicker() {
     const timer = window.setTimeout(() => {
       const sessionIds = useChatStore
         .getState()
-        .sessions
-        .filter(
+        .sessions.filter(
           (session) => agentFilter === null || session.agentId === agentFilter,
         )
         .map((session) => session.id);
@@ -712,6 +743,7 @@ function SessionAttentionIndicator({
 }
 
 function EmptyState() {
+  const visible = useChatDisplayActive();
   const { t } = useTranslation("ai");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 py-10 text-center">
@@ -724,7 +756,7 @@ function EmptyState() {
           {t("miniWindow.empty.description")}
         </p>
       </div>
-      <AgentPicker />
+      {visible && <AgentPicker />}
     </div>
   );
 }

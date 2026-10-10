@@ -8,6 +8,7 @@ import { ArrowDown02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import { useTranslation } from "react-i18next";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import {
@@ -49,6 +50,7 @@ export function AiChatScrollControls({
   running: boolean;
 }) {
   const { t } = useTranslation("ai");
+  const active = useChatDisplayActive();
   const { isAtBottom, scrollRef, scrollToBottom, stopScroll } =
     useStickToBottomContext();
   const [panelOpen, setPanelOpen] = useState(false);
@@ -89,11 +91,12 @@ export function AiChatScrollControls({
   );
 
   useEffect(() => {
-    if (!visible) {
+    if (!active || !visible) {
+      clearTimers();
       setPanelOpen(false);
       setUserMessages([]);
     }
-  }, [visible]);
+  }, [active, visible, clearTimers]);
 
   if (!visible) {
     return null;

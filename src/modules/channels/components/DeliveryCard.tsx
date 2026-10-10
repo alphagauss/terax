@@ -1,4 +1,5 @@
 /** 展示通用投递结果；已有回复正文时以内联状态展示，不再嵌套独立卡片。 */
+import { useChatDisplayStore } from "@/modules/ai/hooks/chatDisplay";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/controls/button";
@@ -23,7 +24,10 @@ export function DeliveryCard({
   busy?: boolean;
   canRetry?: boolean;
 }) {
-  const pending = useDeliveryHistory((state) => state.pending[entry.id]);
+  const pending = useChatDisplayStore(
+    useDeliveryHistory,
+    (state) => state.pending[entry.id],
+  );
   const { t, i18n } = useTranslation("channels");
   const handled =
     entry.notification?.status === "ignored" ||

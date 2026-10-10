@@ -5,6 +5,10 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 import {
+  useChatDisplayActive,
+  useChatDisplayStore,
+} from "@/modules/ai/hooks/chatDisplay";
+import {
   describeToolCall,
   formatToolSummary,
 } from "@/modules/ai/lib/toolSummary";
@@ -128,9 +132,10 @@ const conversationScrollPositions = new Map<
 
 /** 记忆并恢复会话滚动位置，滚动事件按动画帧合并，底部状态不采集消息锚点。 */
 function useConversationScrollMemory(sessionId: string) {
+  const active = useChatDisplayActive();
   const contextRef = useRef<StickToBottomContext | null>(null);
   const remembered = conversationScrollPositions.get(sessionId);
-  const revealLatest = useSessionAttentionStore((state) =>
+  const revealLatest = useChatDisplayStore(useSessionAttentionStore, (state) =>
     Boolean(state.revealLatestBySession[sessionId]),
   );
 
@@ -225,6 +230,7 @@ function useConversationScrollMemory(sessionId: string) {
 
   useLayoutEffect(() => {
     if (
+      !active ||
       !revealLatest ||
       !useSessionAttentionStore.getState().takeRevealLatest(sessionId)
     ) {
@@ -238,7 +244,7 @@ function useConversationScrollMemory(sessionId: string) {
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [revealLatest, sessionId]);
+  }, [active, revealLatest, sessionId]);
 
   return {
     contextRef,
@@ -378,7 +384,7 @@ type Props = {
 /**
  * AI 会话消息视图。
  *
- * 仅在前台挂载，负责恢复滚动位置、按引导切开活动块和渲染流式末尾消息。
+ * 当前会话保持挂载，隐藏时暂停展示订阅，保留阅读位置和卡片局部状态。
  */
 export function AiChatView({
   sessionId,
@@ -394,10 +400,12 @@ export function AiChatView({
     () => projectConversationDisplay(sourceMessages),
     [sourceMessages],
   );
-  const commands = useCommandStore(
+  const commands = useChatDisplayStore(
+    useCommandStore,
     (state) => state.sessions[sessionId] ?? EMPTY_COMMANDS,
   );
-  const deliveries = useDeliveryHistory(
+  const deliveries = useChatDisplayStore(
+    useDeliveryHistory,
     (state) => state.sessions[sessionId] ?? EMPTY_DELIVERIES,
   );
   const activities = [
@@ -459,10 +467,11 @@ export function AiChatView({
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
-  const meta = useChatStore((state) =>
+  const meta = useChatDisplayStore(useChatStore, (state) =>
     getAgentMetaForSession(state, sessionId),
   );
-  const sessionCwd = useChatStore(
+  const sessionCwd = useChatDisplayStore(
+    useChatStore,
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.cwd ?? null,
   );
@@ -1494,7 +1503,8 @@ const LiveSubagentCard = memo(function LiveSubagentCard({
   persistedDisplay?: SubagentDisplaySnapshot;
   backgroundResult?: SubagentResultView;
 }) {
-  const liveDisplay = useChatStore(
+  const liveDisplay = useChatDisplayStore(
+    useChatStore,
     (state) => state.subagentDisplaysBySession[sessionId]?.[part.toolCallId],
   );
   return (

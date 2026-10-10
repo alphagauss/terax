@@ -3,6 +3,8 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
+
 import {
   describeToolCall,
   formatToolSummary,
@@ -432,6 +434,7 @@ function resolveHeadline(
 
 /** 保证当前标题工具动作至少可见一秒，并把期间的新状态合并为最新值。 */
 function useStableHeadline(actual: Headline): Headline {
+  const active = useChatDisplayActive();
   const [shown, setShown] = useState(actual);
   const shownRef = useRef(shown);
   const pendingRef = useRef(actual);
@@ -442,6 +445,7 @@ function useStableHeadline(actual: Headline): Headline {
   }, [shown]);
 
   useEffect(() => {
+    if (!active) return;
     pendingRef.current = actual;
     const current = shownRef.current;
     if (sameHeadline(current, actual)) return;
@@ -473,7 +477,7 @@ function useStableHeadline(actual: Headline): Headline {
       TOOL_HEADLINE_MIN_MS - elapsed,
     );
     return () => window.clearTimeout(timer);
-  }, [actual]);
+  }, [active, actual]);
 
   return shown;
 }

@@ -2,6 +2,10 @@
  * 本文件实现聊天活动块的折叠标题、本地展开状态和运行计时展示。
  * 不同工具的标题切换至少间隔一秒，同一调用的摘要立即更新；计时起点按会话保留，活动结束立即完成并收起一次。
  */
+import {
+  useChatDisplayActive,
+  useChatDisplayStore,
+} from "@/modules/ai/hooks/chatDisplay";
 
 import { Shimmer } from "@/components/controls/shimmer";
 import {
@@ -53,7 +57,7 @@ export function ChatActivityBlock({
   const wasRunning = useRef(running);
   const shownHeadline = useStableHeadline(headline, running);
   const localStartedAt = useRef(Date.now()).current;
-  const activityTiming = useChatStore((state) =>
+  const activityTiming = useChatDisplayStore(useChatStore, (state) =>
     running ? state.agentMetaBySession[sessionId]?.activityTiming : undefined,
   );
   const patchAgentMeta = useChatStore((state) => state.patchAgentMeta);
@@ -155,13 +159,15 @@ export function ChatActivityBlock({
 
 /** 只在思考标题可见时逐秒刷新，起点由会话级内存状态提供。 */
 function ActivityThinkingTitle({ startedAt }: { startedAt: number }) {
+  const active = useChatDisplayActive();
   const { t } = useTranslation("ai");
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
+    if (!active) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [active]);
 
   const duration = Math.max(1, Math.floor((now - startedAt) / 1000) + 1);
   return (
@@ -176,10 +182,11 @@ function useStableHeadline(
   actual: ChatActivityHeadline,
   running: boolean,
 ): ChatActivityHeadline {
+  const active = useChatDisplayActive();
   const [shown, setShown] = useState({ value: actual, at: Date.now() });
 
   useLayoutEffect(() => {
-    if (!running || !actual) return;
+    if (!active || !running || !actual) return;
     const current = shown.value;
     if (
       (current?.kind === "thinking" && actual.kind === "thinking") ||
@@ -208,7 +215,7 @@ function useStableHeadline(
       remaining,
     );
     return () => window.clearTimeout(timer);
-  }, [actual, running, shown]);
+  }, [active, actual, running, shown]);
 
   return shown.value;
 }

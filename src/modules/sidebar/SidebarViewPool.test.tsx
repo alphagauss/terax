@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SidebarViewPool } from "./SidebarViewPool";
 import type { SidebarPlacements, SidebarRuntimeState } from "./types";
 
@@ -152,5 +152,56 @@ it("moves an activated view only when its sidebar location changes", async () =>
     );
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+it("保留未缩放的有效尺寸，隐藏不接受零宽，恢复接入宿主新尺寸", async () => {
+  const root = createRoot(rootElement);
+  let size = { width: 280, height: 600 };
+  vi.spyOn(primaryHost, "clientWidth", "get").mockImplementation(
+    () => size.width,
+  );
+  vi.spyOn(primaryHost, "clientHeight", "get").mockImplementation(
+    () => size.height,
+  );
+  vi.spyOn(primaryHost, "getBoundingClientRect").mockImplementation(
+    () => ({ width: size.width * 1.5, height: size.height * 1.5 }) as DOMRect,
+  );
+  const render = (collapsed: boolean, temporarilyHidden = false) =>
+    act(async () =>
+      root.render(
+        <SidebarViewPool
+          views={[{ id: "explorer", content: <input defaultValue="draft" /> }]}
+          placements={placements}
+          runtime={{
+            ...runtime("explorer"),
+            primary: { ...runtime("explorer").primary, collapsed },
+          }}
+          temporarilyHidden={temporarilyHidden}
+        />,
+      ),
+    );
+  try {
+    await render(false);
+    const view = primaryHost.querySelector<HTMLElement>(
+      '[data-sidebar-view="explorer"]',
+    );
+    if (!view) throw new Error("Missing sidebar view");
+    const input = view.querySelector("input");
+    expect([view.style.width, view.style.height]).toEqual(["280px", "600px"]);
+    size = { width: 0, height: 600 };
+    await render(true);
+    expect([view.style.width, view.style.height]).toEqual(["280px", "600px"]);
+    expect(view.inert).toBe(true);
+    size = { width: 340, height: 720 };
+    await render(false, true);
+    expect([view.style.width, view.style.height]).toEqual(["280px", "600px"]);
+    await render(false);
+    expect([view.style.width, view.style.height]).toEqual(["340px", "720px"]);
+    expect(view.querySelector("input")).toBe(input);
+    expect(view.inert).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    vi.restoreAllMocks();
   }
 });

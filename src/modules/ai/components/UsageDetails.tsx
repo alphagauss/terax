@@ -1,4 +1,5 @@
 /** 主 Agent 与子任务共用的用量明细：上下文和缓存均取末次请求。 */
+import { useChatDisplaySnapshot } from "@/modules/ai/hooks/chatDisplay";
 
 import { Hint } from "@/components/controls/tooltip";
 import {
@@ -13,7 +14,7 @@ import {
   type UsageRecord,
 } from "@/modules/ai/lib/usage";
 import { subscribeUsage, usageRecords } from "@/modules/ai/lib/usageRuntime";
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 export function useUsageRecords(sessionId: string, settled = false) {
@@ -25,7 +26,7 @@ export function useUsageRecords(sessionId: string, settled = false) {
     () => usageRecords(sessionId, settled),
     [sessionId, settled],
   );
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  return useChatDisplaySnapshot(subscribe, snapshot);
 }
 
 export function formatTokens(value: number): string {

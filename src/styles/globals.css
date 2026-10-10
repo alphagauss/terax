@@ -695,6 +695,14 @@ html *::-webkit-scrollbar {
     transform: translateY(0) scale(1);
   }
 }
+/* 保活侧栏隐藏时暂停展示动画，保留动画进度和原有 DOM。 */
+[data-sidebar-view][aria-hidden="true"],
+[data-sidebar-view][aria-hidden="true"] *,
+[data-sidebar-view][aria-hidden="true"] *::before,
+[data-sidebar-view][aria-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}
+
 .terax-pill-in {
   animation: terax-pill-in var(--dur-control) var(--ease-emphasized);
 }

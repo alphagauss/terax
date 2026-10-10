@@ -41,7 +41,7 @@ import { useCommandStore } from "@/modules/ai/commands/store";
 import { MAIN_AGENT } from "@/modules/ai/lib/agents";
 import type { SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
-import { useChatStore } from "../store/chatStore";
+import { chats, useChatStore } from "../store/chatStore";
 import { AiSidebarPanel } from "./AiSidebarPanel";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
@@ -109,14 +109,15 @@ describe("AI sidebar chat subscription", () => {
     expect(container.querySelector('[data-testid="messages"]')).not.toBeNull();
     await act(async () => root.unmount());
   });
-  it("unsubscribes hidden messages and resumes the same running Chat", async () => {
+  it("收起保留当前视图并暂停订阅，恢复接入最新状态，切换释放旧会话", async () => {
     const current = chat([message("m1", "first")]);
     runtime.chat = current;
     useChatStore.setState({
       activeSessionId: sessionId,
       sessions: [],
-      runLockSessionIds: { [sessionId]: true },
+      runLockSessionIds: {},
     });
+    chats.set(sessionId, current);
     let listeners = 0;
     const subscribe = current["~registerMessagesCallback"];
     current["~registerMessagesCallback"] = (callback, throttle) => {
@@ -132,18 +133,40 @@ describe("AI sidebar chat subscription", () => {
     const root = createRoot(container);
     await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
     expect(listeners).toBe(1);
+    const messages = container.querySelector<HTMLElement>(
+      '[data-testid="messages"]',
+    );
+    if (!messages) throw new Error("Missing message view");
     await act(async () =>
       root.render(<AiSidebarPanel hasComposer visible={false} />),
     );
     expect(listeners).toBe(0);
-    expect(container.querySelector('[data-testid="messages"]')).toBeNull();
+    expect(container.querySelector('[data-testid="messages"]')).toBe(messages);
+    expect(chats.get(sessionId)).toBe(current);
     current.messages = [message("m2", "background result")];
+    expect(container.textContent).toContain("first");
     await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
     expect(container.textContent).toContain("background result");
+    expect(container.querySelector('[data-testid="messages"]')).toBe(messages);
     expect(listeners).toBe(1);
     expect(stop).not.toHaveBeenCalled();
-    await act(async () => root.unmount());
+    await act(async () =>
+      root.render(<AiSidebarPanel hasComposer visible={false} />),
+    );
+    runtime.chat = chat([message("m3", "another session")]);
+    await act(async () =>
+      useChatStore.setState({ activeSessionId: "another-session" }),
+    );
     expect(listeners).toBe(0);
+    expect(chats.has(sessionId)).toBe(false);
+    expect(container.querySelectorAll('[data-testid="messages"]')).toHaveLength(
+      1,
+    );
+    expect(container.querySelector('[data-testid="messages"]')).not.toBe(
+      messages,
+    );
+    expect(container.textContent).toContain("another session");
+    await act(async () => root.unmount());
   });
   it("re-subscribes when the active revision replaces a same-id Chat", async () => {
     runtime.chat = chat([message("m1", "first")]);

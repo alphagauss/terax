@@ -1,12 +1,7 @@
 /** 文件编辑统计共用入口，实时数字按调用订阅，历史数据来自消息的展示投影。 */
+import { useChatDisplaySnapshot } from "@/modules/ai/hooks/chatDisplay";
 import { Hint } from "@/components/controls/tooltip";
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useSyncExternalStore,
-} from "react";
+import { createContext, memo, useCallback, useContext } from "react";
 import { useTranslation } from "react-i18next";
 import {
   peekFileEditRuntime,
@@ -46,7 +41,7 @@ export const FileEditStats = memo(function FileEditStats({
         : peekFileEditRuntime(sessionId)?.getCall(toolCallId, taskId),
     [sessionId, toolCallId, taskId, calls],
   );
-  const live = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const live = useChatDisplaySnapshot(subscribe, getSnapshot);
   const value =
     live ??
     calls?.find(

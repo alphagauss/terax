@@ -7,6 +7,7 @@
 
 import { preloadEn } from "@/i18n";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { ChatDisplayContext } from "@/modules/ai/hooks/chatDisplay";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -71,6 +72,33 @@ describe("ChatActivityBlock", () => {
     act(() => trigger?.click());
     renderBlock(root, thinking, false, 1250);
     expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("侧栏隐藏时停止思考计时，展开保留同一活动块", () => {
+    vi.useFakeTimers();
+    const render = (active: boolean) =>
+      act(() =>
+        root.render(
+          <ChatDisplayContext value={active}>
+            <ChatActivityBlock
+              sessionId="session"
+              activityKey="activity"
+              headline={thinking}
+              running
+            >
+              activity detail
+            </ChatActivityBlock>
+          </ChatDisplayContext>,
+        ),
+      );
+    render(true);
+    render(false);
+    const text = container.textContent;
+    act(() => vi.advanceTimersByTime(5000));
+    expect(container.textContent).toBe(text);
+    render(true);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(container.textContent).not.toBe(text);
   });
 
   it("holds a running tool headline for at least one second", () => {

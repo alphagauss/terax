@@ -1,5 +1,6 @@
 /** 每轮回答的轻量性能提示；只在悬停时订阅和汇总该轮 SDK 记录。 */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import { useTranslation } from "react-i18next";
 import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -25,8 +26,12 @@ export function TurnMetrics({
 }) {
   const { t } = useTranslation("ai");
   const [open, setOpen] = useState(false);
+  const active = useChatDisplayActive();
+  useEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
   return (
-    <Tooltip open={open} onOpenChange={setOpen}>
+    <Tooltip open={active && open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <MessageAction
           label={t("chat.metrics.title")}
@@ -36,7 +41,9 @@ export function TurnMetrics({
         </MessageAction>
       </TooltipTrigger>
       <TooltipContent side="top" align="start">
-        {open && <TurnMetricsContent sessionId={sessionId} turnId={turnId} />}
+        {active && open && (
+          <TurnMetricsContent sessionId={sessionId} turnId={turnId} />
+        )}
       </TooltipContent>
     </Tooltip>
   );
