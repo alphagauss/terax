@@ -8,28 +8,28 @@ import {
   resolveProviderInstance,
   tryResolveModel,
 } from "@/modules/ai/config";
+import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import {
   type GitChangedFile,
   type GitDiscardEntry,
+  type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
-  type GitPanelDiffStats,
   native,
 } from "@/modules/ai/lib/native";
 import { isProviderConnectionReady } from "@/modules/ai/providerRegistry";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { useStore } from "zustand";
-import { useTranslation } from "react-i18next";
-import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  type CommitMessageEntry,
   commitMessageStore,
   EMPTY_COMMIT_MESSAGE,
   generateRepositoryCommitMessage,
   setCommitMessageDraft,
-  type CommitMessageEntry,
 } from "@/modules/source-control/commitMessage";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import type { GitDiffSide } from "./gitTypes";
 import { openSourceControlFileDiff } from "./openFileDiff";
 import type { RepositoryController } from "./useRepositoryController";
@@ -180,14 +180,13 @@ export function useSourceControlPanel(
   const repo = controller.repo;
   const status = controller.status;
   // 可见性不改变数据状态，避免普通侧栏切换卸载 Changes 滚动节点。
-  const panelState: PanelState =
-    controller.localError && !status
+  const panelState: PanelState = controller.isLoading
+    ? "loading"
+    : controller.localError && !status
       ? "error"
-      : controller.isLoading && !status
-        ? "loading"
-        : repo && status
-          ? "ready"
-          : "no-repo";
+      : repo && status
+        ? "ready"
+        : "no-repo";
   const messageState = useStore(commitMessageStore, (state) =>
     repo
       ? (state[repo.repoRoot] ?? EMPTY_COMMIT_MESSAGE)

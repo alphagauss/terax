@@ -3,6 +3,7 @@
  * 所有调用方共享真实快照与单调 revision；工作区状态与 Git 引用分别合并刷新。
  */
 
+import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
   type GitPanelDiffStats,
   type GitRepoInfo,
@@ -13,11 +14,10 @@ import {
   subscribeFileSystemChanges,
   subscribeWorkspaceResume,
 } from "@/modules/filesystem";
-import { documentPathIdentity } from "@/lib/pathIdentity";
 import { subscribeTerminalCommandFinished } from "@/modules/terminal/lib/commandCompletion";
 import {
-  type WorkspaceEnv,
   useWorkspaceEnvStore,
+  type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,6 +47,7 @@ export type RepositoryController = {
   ahead: number;
   behind: number;
   hasRepo: boolean;
+  /** 当前上下文尚未完成首次检测；已有结果的后台复查不进入加载态。 */
   isLoading: boolean;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
@@ -62,10 +63,10 @@ export type RepositoryController = {
 };
 
 type RepositoryControllerState = {
+  contextPath: string | null;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
   diffStats: GitPanelDiffStats | null;
-  isLoading: boolean;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
@@ -115,10 +116,10 @@ export function useRepositoryController(
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceKey = workspaceScopeKey(workspaceEnv);
   const [state, setState] = useState<RepositoryControllerState>({
+    contextPath: null,
     repo: null,
     status: null,
     diffStats: null,
-    isLoading: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,
@@ -131,7 +132,6 @@ export function useRepositoryController(
   const contextPathRef = useRef(contextPath);
   const workspaceKeyRef = useRef(workspaceKey);
   const lastRefreshAtRef = useRef(0);
-  const lastRefreshContextRef = useRef<string | null>(null);
 
   enabledRef.current = enabled;
   contextPathRef.current = contextPath;
@@ -145,6 +145,7 @@ export function useRepositoryController(
     ) => {
       const next =
         typeof update === "function" ? update(stateRef.current) : update;
+      if (next === stateRef.current) return;
       stateRef.current = next;
       setState(next);
     },
@@ -155,12 +156,11 @@ export function useRepositoryController(
     void workspaceKey;
     requestIdRef.current++;
     lastRefreshAtRef.current = 0;
-    lastRefreshContextRef.current = null;
     updateState({
+      contextPath: null,
       repo: null,
       status: null,
       diffStats: null,
-      isLoading: false,
       localError: null,
       busyAction: null,
       lastRemoteError: null,
@@ -181,40 +181,41 @@ export function useRepositoryController(
       workspaceKeyRef.current === requestedWorkspace;
 
     if (!requestedContext) {
-      updateState({
-        repo: null,
-        status: null,
-        diffStats: null,
-        isLoading: false,
-        localError: null,
-        busyAction: null,
-        lastRemoteError: null,
-        revision: stateRef.current.revision,
-        graphRevision: stateRef.current.graphRevision,
-      });
+      updateState((current) =>
+        current.contextPath === null
+          ? current
+          : {
+              ...current,
+              contextPath: null,
+              repo: null,
+              status: null,
+              diffStats: null,
+              localError: null,
+              busyAction: null,
+              lastRemoteError: null,
+            },
+      );
       return;
     }
-
-    updateState((current) => ({
-      ...current,
-      isLoading: true,
-      localError: null,
-    }));
 
     try {
       const snapshot = await native.gitPanelSnapshot(requestedContext);
       if (!isCurrentRequest()) return;
       if (!snapshot.repo || !snapshot.status) {
-        updateState((current) => ({
-          ...current,
-          repo: null,
-          status: null,
-          diffStats: null,
-          isLoading: false,
-          localError: null,
-        }));
-        lastRefreshAtRef.current = Date.now();
-        lastRefreshContextRef.current = requestedContext;
+        updateState((current) =>
+          current.contextPath === requestedContext &&
+          current.repo === null &&
+          current.localError === null
+            ? current
+            : {
+                ...current,
+                contextPath: requestedContext,
+                repo: null,
+                status: null,
+                diffStats: null,
+                localError: null,
+              },
+        );
         return;
       }
       const repo = snapshot.repo;
@@ -222,6 +223,7 @@ export function useRepositoryController(
 
       updateState((current) => ({
         ...current,
+        contextPath: requestedContext,
         repo,
         status,
         diffStats: snapshot.diffStats,
@@ -230,23 +232,26 @@ export function useRepositoryController(
           current.repo?.repoRoot === repo.repoRoot
             ? current.graphRevision
             : null,
-        isLoading: false,
         localError: null,
       }));
-      lastRefreshAtRef.current = Date.now();
-      lastRefreshContextRef.current = requestedContext;
     } catch (error) {
       if (!isCurrentRequest()) return;
-      updateState((current) => ({
-        ...current,
-        repo: null,
-        status: null,
-        diffStats: null,
-        isLoading: false,
-        localError: normalizeError(error),
-      }));
-      lastRefreshAtRef.current = Date.now();
-      lastRefreshContextRef.current = requestedContext;
+      const localError = normalizeError(error);
+      updateState((current) =>
+        current.contextPath === requestedContext &&
+        current.localError === localError
+          ? current
+          : {
+              ...current,
+              contextPath: requestedContext,
+              repo: null,
+              status: null,
+              diffStats: null,
+              localError,
+            },
+      );
+    } finally {
+      if (isCurrentRequest()) lastRefreshAtRef.current = Date.now();
     }
   }, [updateState]);
 
@@ -359,10 +364,10 @@ export function useRepositoryController(
     if (!enabled) {
       requestIdRef.current++;
       updateState({
+        contextPath: null,
         repo: null,
         status: null,
         diffStats: null,
-        isLoading: false,
         localError: null,
         busyAction: null,
         lastRemoteError: null,
@@ -371,12 +376,16 @@ export function useRepositoryController(
       });
       return;
     }
-    updateState((current) => ({ ...current, lastRemoteError: null }));
+    updateState((current) =>
+      current.lastRemoteError === null
+        ? current
+        : { ...current, lastRemoteError: null },
+    );
     const run = () => {
       const fresh = Date.now() - lastRefreshAtRef.current < SC_STATUS_TTL_MS;
       if (
         fresh &&
-        contextPath === lastRefreshContextRef.current &&
+        contextPath === stateRef.current.contextPath &&
         stateRef.current.repo
       ) {
         return;
@@ -479,7 +488,7 @@ export function useRepositoryController(
       ahead: state.status?.ahead ?? 0,
       behind: state.status?.behind ?? 0,
       hasRepo: state.repo !== null,
-      isLoading: state.isLoading,
+      isLoading: enabled && !!contextPath && state.contextPath !== contextPath,
       localError: state.localError,
       busyAction: state.busyAction,
       lastRemoteError: state.lastRemoteError,
@@ -488,6 +497,6 @@ export function useRepositoryController(
       refresh,
       runRemoteAction,
     }),
-    [state, refresh, runRemoteAction],
+    [state, enabled, contextPath, refresh, runRemoteAction],
   );
 }
