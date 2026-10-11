@@ -18,13 +18,10 @@ export type ProviderCredentialDefinition =
       catalogAuth: CatalogAuthDefinition;
     };
 
-export type ProviderEndpointDefinition =
-  | { kind: "fixed"; baseURL: string; allowPrivateNetwork: false }
-  | {
-      kind: "editable";
-      defaultBaseURL?: string;
-      allowPrivateNetwork: true;
-    };
+export type ProviderEndpointDefinition = {
+  defaultBaseURL?: string;
+  allowPrivateNetwork: boolean;
+};
 
 export type CatalogAdapterId = "openai" | "anthropic" | "google" | "xai";
 
@@ -41,6 +38,7 @@ export type ProviderDefinition = {
   label: string;
   consoleUrl: string;
   builtin: boolean;
+  category: "cloud" | "local" | "custom";
   endpoint: ProviderEndpointDefinition;
   credential: ProviderCredentialDefinition;
   catalog: {
@@ -54,14 +52,44 @@ export type ProviderDefinition = {
   };
 };
 
+/** 为使用标准目录和 Bearer 凭据的兼容云服务提供共同默认值。 */
+function compatibleCloudProvider(input: {
+  label: string;
+  consoleUrl: string;
+  baseURL: string;
+  keyringAccount: string;
+  keyPrefix?: string;
+  headers?: Readonly<Record<string, string>>;
+}): ProviderDefinition {
+  return {
+    label: input.label,
+    consoleUrl: input.consoleUrl,
+    builtin: true,
+    category: "cloud",
+    endpoint: { defaultBaseURL: input.baseURL, allowPrivateNetwork: false },
+    credential: {
+      adapter: "api-key",
+      required: true,
+      keyringAccount: input.keyringAccount,
+      keyPrefix: input.keyPrefix ?? null,
+      catalogAuth: { kind: "bearer" },
+    },
+    catalog: { adapter: "openai", path: "models" },
+    runtime: {
+      adapter: "openai-compatible",
+      ...(input.headers ? { headers: input.headers } : {}),
+    },
+  };
+}
+
 export const PROVIDER_DEFINITIONS = {
   openai: {
     label: "OpenAI",
     consoleUrl: "https://platform.openai.com/api-keys",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.openai.com/v1",
+      defaultBaseURL: "https://api.openai.com/v1",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -78,9 +106,9 @@ export const PROVIDER_DEFINITIONS = {
     label: "Anthropic",
     consoleUrl: "https://console.anthropic.com/settings/keys",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.anthropic.com/v1",
+      defaultBaseURL: "https://api.anthropic.com/v1",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -101,9 +129,9 @@ export const PROVIDER_DEFINITIONS = {
     label: "Google",
     consoleUrl: "https://aistudio.google.com/apikey",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://generativelanguage.googleapis.com/v1beta",
+      defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -120,9 +148,9 @@ export const PROVIDER_DEFINITIONS = {
     label: "xAI",
     consoleUrl: "https://console.x.ai/",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.x.ai/v1",
+      defaultBaseURL: "https://api.x.ai/v1",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -139,9 +167,9 @@ export const PROVIDER_DEFINITIONS = {
     label: "Cerebras",
     consoleUrl: "https://cloud.cerebras.ai/",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.cerebras.ai/v1",
+      defaultBaseURL: "https://api.cerebras.ai/v1",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -158,9 +186,9 @@ export const PROVIDER_DEFINITIONS = {
     label: "Groq",
     consoleUrl: "https://console.groq.com/keys",
     builtin: true,
+    category: "cloud",
     endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.groq.com/openai/v1",
+      defaultBaseURL: "https://api.groq.com/openai/v1",
       allowPrivateNetwork: false,
     },
     credential: {
@@ -173,74 +201,36 @@ export const PROVIDER_DEFINITIONS = {
     catalog: { adapter: "openai", path: "models" },
     runtime: { adapter: "groq" },
   },
-  deepseek: {
+  deepseek: compatibleCloudProvider({
     label: "DeepSeek",
     consoleUrl: "https://platform.deepseek.com/api_keys",
-    builtin: true,
-    endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.deepseek.com",
-      allowPrivateNetwork: false,
-    },
-    credential: {
-      adapter: "api-key",
-      required: true,
-      keyringAccount: "deepseek-api-key",
-      keyPrefix: "sk-",
-      catalogAuth: { kind: "bearer" },
-    },
-    catalog: { adapter: "openai", path: "models" },
-    runtime: { adapter: "openai-compatible" },
-  },
-  mistral: {
+    baseURL: "https://api.deepseek.com",
+    keyringAccount: "deepseek-api-key",
+    keyPrefix: "sk-",
+  }),
+  mistral: compatibleCloudProvider({
     label: "Mistral",
     consoleUrl: "https://console.mistral.ai/api-keys/",
-    builtin: true,
-    endpoint: {
-      kind: "fixed",
-      baseURL: "https://api.mistral.ai/v1",
-      allowPrivateNetwork: false,
-    },
-    credential: {
-      adapter: "api-key",
-      required: true,
-      keyringAccount: "mistral-api-key",
-      keyPrefix: null,
-      catalogAuth: { kind: "bearer" },
-    },
-    catalog: { adapter: "openai", path: "models" },
-    runtime: { adapter: "openai-compatible" },
-  },
-  openrouter: {
+    baseURL: "https://api.mistral.ai/v1",
+    keyringAccount: "mistral-api-key",
+  }),
+  openrouter: compatibleCloudProvider({
     label: "OpenRouter",
     consoleUrl: "https://openrouter.ai/keys",
-    builtin: true,
-    endpoint: {
-      kind: "fixed",
-      baseURL: "https://openrouter.ai/api/v1",
-      allowPrivateNetwork: false,
+    baseURL: "https://openrouter.ai/api/v1",
+    keyringAccount: "openrouter-api-key",
+    keyPrefix: "sk-or-",
+    headers: {
+      "HTTP-Referer": "https://terax.ai",
+      "X-Title": "Terax",
     },
-    credential: {
-      adapter: "api-key",
-      required: true,
-      keyringAccount: "openrouter-api-key",
-      keyPrefix: "sk-or-",
-      catalogAuth: { kind: "bearer" },
-    },
-    catalog: { adapter: "openai", path: "models" },
-    runtime: {
-      adapter: "openai-compatible",
-      headers: {
-        "HTTP-Referer": "https://terax.ai",
-        "X-Title": "Terax",
-      },
-    },
-  },
+  }),
   "openai-compatible": {
     label: "OpenAI Compatible",
     consoleUrl: "https://platform.openai.com/docs/api-reference",
     builtin: false,
-    endpoint: { kind: "editable", allowPrivateNetwork: true },
+    category: "custom",
+    endpoint: { allowPrivateNetwork: true },
     credential: {
       adapter: "api-key",
       required: false,
@@ -255,8 +245,8 @@ export const PROVIDER_DEFINITIONS = {
     label: "LM Studio",
     consoleUrl: "https://lmstudio.ai/docs/basics/server",
     builtin: true,
+    category: "local",
     endpoint: {
-      kind: "editable",
       defaultBaseURL: "http://localhost:1234/v1",
       allowPrivateNetwork: true,
     },
@@ -269,8 +259,8 @@ export const PROVIDER_DEFINITIONS = {
     consoleUrl:
       "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
     builtin: true,
+    category: "local",
     endpoint: {
-      kind: "editable",
       defaultBaseURL: "http://127.0.0.1:8080/v1",
       allowPrivateNetwork: true,
     },
@@ -282,8 +272,8 @@ export const PROVIDER_DEFINITIONS = {
     label: "Ollama",
     consoleUrl: "https://ollama.com/download",
     builtin: true,
+    category: "local",
     endpoint: {
-      kind: "editable",
       defaultBaseURL: "http://localhost:11434/v1",
       allowPrivateNetwork: true,
     },
@@ -332,11 +322,6 @@ export function getProvider(id: ProviderId): ProviderInfo {
   return { id, ...definition } as ProviderInfo;
 }
 
-/** 判断内置 Provider 是否需要用户配置地址。 */
-export function providerHasEditableBaseURL(id: ProviderId): boolean {
-  return getProvider(id).endpoint.kind === "editable";
-}
-
 /** 判断 Provider 是否接受 API key。 */
 export function providerSupportsApiKey(id: ProviderId): boolean {
   return getProvider(id).credential.adapter === "api-key";
@@ -348,14 +333,13 @@ export function providerRequiresCredential(id: ProviderId): boolean {
   return credential.adapter === "api-key" && credential.required;
 }
 
-/** 解析固定地址或用户覆盖后的 Provider 地址。 */
+/** 解析用户覆盖或默认 Provider 地址，空白覆盖恢复默认值。 */
 export function resolveProviderBaseURL(
   provider: ProviderId,
   override?: string,
 ): string {
   const endpoint = getProvider(provider).endpoint;
-  if (endpoint.kind === "fixed") return endpoint.baseURL;
-  return (override ?? endpoint.defaultBaseURL ?? "").trim();
+  return override?.trim() || endpoint.defaultBaseURL || "";
 }
 
 /**
@@ -397,4 +381,22 @@ export function isProviderConnectionReady(
   return (
     credential.adapter === "none" || !credential.required || !!credential.value
   );
+}
+
+/** 地址覆盖按 Provider 独立持久化，避免不同窗口写回过时的整张映射。 */
+export const PROVIDER_BASE_URL_PREFIX = "providerBaseURL:";
+
+/** 从共享设置读取已登记 Provider 的非默认地址覆盖。 */
+export function readProviderBaseURLs(
+  values: Readonly<Record<string, unknown>>,
+): ProviderBaseURLs {
+  const result: ProviderBaseURLs = {};
+  for (const provider of PROVIDERS) {
+    const value = values[PROVIDER_BASE_URL_PREFIX + provider.id];
+    if (typeof value !== "string") continue;
+    const url = value.trim();
+    if (url && url !== provider.endpoint.defaultBaseURL)
+      result[provider.id] = url;
+  }
+  return result;
 }

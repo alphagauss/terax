@@ -179,3 +179,28 @@ describe("ModelCatalog", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 });
+
+it("does not reuse a cached directory after overriding the same provider address", async () => {
+  const request = vi.fn(async (input: { url: string }) => ({
+    status: 200,
+    body: JSON.stringify({
+      data: [
+        {
+          id: input.url.includes("gateway.example")
+            ? "gateway-model"
+            : "official-model",
+        },
+      ],
+    }),
+  }));
+  const catalog = new ModelCatalog(request);
+  expect(await catalog.list(openaiConnection)).toEqual(["official-model"]);
+  const overridden = createProviderConnection({
+    instanceId: openaiConnection.instanceId,
+    provider: "openai",
+    credentialValue: "secret",
+    baseURL: "https://gateway.example/v1",
+  });
+  expect(await catalog.list(overridden)).toEqual(["gateway-model"]);
+  expect(request).toHaveBeenCalledTimes(2);
+});

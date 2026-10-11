@@ -85,12 +85,12 @@ describe("getAvailableModelRefs", () => {
     ]);
   });
 
-  it("requires both endpoint and model for local and custom providers", () => {
+  it("restores the local default for an empty override while custom providers still require an endpoint", () => {
     const customProvider: ProviderInstance = {
       id: "custom:12345678-1234-4123-8123-123456789abc",
       protocol: "openai-compatible",
       name: "Custom",
-      baseURL: "https://example.com/v1",
+      baseURL: "",
     };
     const refs = getAvailableModelRefs({
       ...baseConfig,
@@ -105,7 +105,7 @@ describe("getAvailableModelRefs", () => {
     });
 
     expect(refs).toEqual([
-      { providerId: customProvider.id, modelId: "custom-model" },
+      { providerId: builtinProviderId("lmstudio"), modelId: "local-model" },
     ]);
   });
 });

@@ -87,7 +87,7 @@ describe("provider native transport", () => {
         provider,
         instanceId: "test:parameters",
         credentialValue: "test-key",
-        baseURL: "http://127.0.0.1:1234/v1",
+        baseURL: "https://gateway.example/v1",
       });
       const parameters: ParameterAssignment[] = [
         {
@@ -192,7 +192,7 @@ describe("provider native transport", () => {
         provider,
         instanceId: `test:${provider}`,
         credentialValue: "test-key",
-        baseURL: "http://127.0.0.1:1234/v1",
+        baseURL: "https://gateway.example/v1",
       });
       const model = await buildLanguageModel(connection, "test-model");
       await expect(
@@ -208,6 +208,7 @@ describe("provider native transport", () => {
         );
       }
       for (const [, args] of native.invoke.mock.calls) {
+        expect(args.url).toContain("https://gateway.example/v1/");
         expect(args.networkTarget).toEqual({
           kind: "provider",
           id: connection.instanceId,

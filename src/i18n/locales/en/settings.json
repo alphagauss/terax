@@ -382,6 +382,7 @@
       "removeProvider": "Remove provider",
       "removeEndpoint": "Remove endpoint",
       "baseUrl": "Base URL",
+      "resetBaseUrl": "Reset",
       "apiKey": "API key",
       "name": "Name",
       "namePlaceholder": "My endpoint",

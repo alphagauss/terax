@@ -3,6 +3,8 @@
  * 命令行选择只作用于本次运行，不修改桌面的全局默认模型或权限。
  */
 
+import { readProviderBaseURLs } from "@/modules/ai/providerRegistry";
+
 import type { ShellIdentity } from "@/modules/ai/lib/native";
 import { readModelUsages } from "@/modules/ai/lib/modelUsage";
 
@@ -18,9 +20,7 @@ import {
   normalizeMainAgentSteps,
   MAX_SUBAGENT_STEPS_DEFAULT,
   providerFromBuiltinId,
-  PROVIDERS,
   type ModelRef,
-  type ProviderBaseURLs,
   type ProviderModels,
 } from "@/modules/ai/config";
 import {
@@ -58,18 +58,7 @@ export async function loadTerminalSettings(modelOption?: string) {
     for (const [id, models] of Object.entries(settings.providerModels))
       providerModels[id] = normalizeConfiguredModels(models);
   }
-  const providerBaseURLs: ProviderBaseURLs = {};
-  if (
-    settings.providerBaseURLs &&
-    typeof settings.providerBaseURLs === "object"
-  ) {
-    const urls = settings.providerBaseURLs as Record<string, unknown>;
-    for (const provider of PROVIDERS) {
-      const url = urls[provider.id];
-      if (provider.endpoint.kind === "editable" && typeof url === "string")
-        providerBaseURLs[provider.id] = url;
-    }
-  }
+  const providerBaseURLs = readProviderBaseURLs(settings);
   let model: ModelRef | null = isModelRef(settings.defaultModel)
     ? settings.defaultModel
     : null;

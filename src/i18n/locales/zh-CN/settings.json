@@ -382,6 +382,7 @@
       "removeProvider": "移除提供商",
       "removeEndpoint": "移除端点",
       "baseUrl": "Base URL",
+      "resetBaseUrl": "恢复默认",
       "apiKey": "API key",
       "name": "名称",
       "namePlaceholder": "我的端点",

@@ -4,6 +4,13 @@
  */
 
 import {
+  getProvider,
+  type ProviderId,
+  PROVIDER_BASE_URL_PREFIX,
+  readProviderBaseURLs,
+} from "@/modules/ai/providerRegistry";
+
+import {
   clampAgentSteps,
   clampMaxConcurrentSubagents,
   MAX_AGENT_STEPS_DEFAULT,
@@ -47,7 +54,6 @@ import {
   type ModelRef,
   modelRefKey,
   normalizeConfiguredModels,
-  PROVIDERS,
   type ProviderBaseURLs,
   type ProviderInstance,
   type ProviderModels,
@@ -289,7 +295,6 @@ const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
 const KEY_AUTOCOMPLETE_TRIGGER = "autocompleteTrigger";
 const KEY_PROVIDER_MODELS = "providerModels";
 const MODEL_PARAMETERS_PREFIX = "modelParameters:";
-const KEY_PROVIDER_BASE_URLS = "providerBaseURLs";
 const KEY_CUSTOM_PROVIDERS = "customProviders";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
@@ -467,7 +472,6 @@ export type ModelSettingsPatch = Partial<
     | "desktopModel"
     | "desktopModelParameterSelections"
     | "providerModels"
-    | "providerBaseURLs"
     | "customProviders"
     | "favoriteModels"
     | "recentModels"
@@ -479,11 +483,24 @@ const MODEL_SETTING_KEYS: Record<keyof ModelSettingsPatch, string> = {
   desktopModel: KEY_DESKTOP_MODEL,
   desktopModelParameterSelections: KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS,
   providerModels: KEY_PROVIDER_MODELS,
-  providerBaseURLs: KEY_PROVIDER_BASE_URLS,
   customProviders: KEY_CUSTOM_PROVIDERS,
   favoriteModels: KEY_FAVORITE_MODELS,
   recentModels: KEY_RECENT_MODELS,
 };
+
+/** 保存单个地址覆盖；空值或默认地址删除覆盖，不影响其他 Provider。 */
+export async function setProviderBaseURL(
+  provider: ProviderId,
+  value: string,
+): Promise<void> {
+  const url = value.trim();
+  const key = PROVIDER_BASE_URL_PREFIX + provider;
+  await mutateSharedStore("settings", [
+    url && url !== getProvider(provider).endpoint.defaultBaseURL
+      ? { kind: "set", key, value: url }
+      : { kind: "delete", key },
+  ]);
+}
 
 /** 在一次共享存储事务中保存相互依赖的模型配置和引用。 */
 export async function setModelSettings(
@@ -564,21 +581,7 @@ export async function loadPreferences(): Promise<Preferences> {
       if (models.length > 0) providerModels[providerId] = models;
     }
   }
-  const storedProviderBaseURLs = get<unknown>(KEY_PROVIDER_BASE_URLS);
-  const providerBaseURLs: ProviderBaseURLs = {};
-  if (
-    storedProviderBaseURLs &&
-    typeof storedProviderBaseURLs === "object" &&
-    !Array.isArray(storedProviderBaseURLs)
-  ) {
-    const values = storedProviderBaseURLs as Record<string, unknown>;
-    for (const provider of PROVIDERS) {
-      const value = values[provider.id];
-      if (provider.endpoint.kind === "editable" && typeof value === "string") {
-        providerBaseURLs[provider.id] = value.trim();
-      }
-    }
-  }
+  const providerBaseURLs = readProviderBaseURLs(values);
   const storedFavoriteModels = get<unknown>(KEY_FAVORITE_MODELS);
   const favoriteModels = Array.isArray(storedFavoriteModels)
     ? storedFavoriteModels
@@ -1132,7 +1135,7 @@ export async function onPreferencesChange(
     [KEY_PROVIDER_MODELS]: "providerModels",
     [MODEL_PARAMETERS_PREFIX]: "modelParameters",
     [MODEL_USAGE_PREFIX]: "modelUsages",
-    [KEY_PROVIDER_BASE_URLS]: "providerBaseURLs",
+    [PROVIDER_BASE_URL_PREFIX]: "providerBaseURLs",
     [KEY_CUSTOM_PROVIDERS]: "customProviders",
     [KEY_STT_PROVIDER]: "sttProvider",
     [KEY_GROQ_STT_MODEL]: "groqSttModel",

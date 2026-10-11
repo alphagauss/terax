@@ -44,7 +44,6 @@ import {
   type ProviderInstance,
   type ProviderModels,
   parseModelContextWindow,
-  providerHasEditableBaseURL,
   resolveProviderBaseURL,
   resolveProviderInstance,
   STT_PROVIDER_LABELS,
@@ -91,6 +90,7 @@ import {
   setMaxConcurrentSubagents,
   setMaxSubagentSteps,
   setModelSettings,
+  setProviderBaseURL,
   setModelUsageModel,
   setModelUsageParameters,
   setSttProvider,
@@ -347,33 +347,10 @@ export function ModelsSection() {
     });
   };
 
-  /** 更新可编辑 Provider 地址；地址为空时保留模型配置但停止提供运行候选。 */
+  /** 地址覆盖只影响后续请求，恢复默认不会更换模型引用。 */
   const updateProviderBaseURL = async (provider: ProviderId, value: string) => {
-    const prefs = usePreferencesStore.getState();
-    const previousBaseURL = resolveProviderBaseURL(
-      provider,
-      prefs.providerBaseURLs[provider],
-    );
-    if (previousBaseURL === value) return;
-    const nextProviderBaseURLs = {
-      ...prefs.providerBaseURLs,
-      [provider]: value,
-    };
+    await setProviderBaseURL(provider, value);
     modelCatalog.invalidate(builtinProviderId(provider));
-    const fallbackModels = { ...providerModels };
-    const providerId = builtinProviderId(provider);
-    delete fallbackModels[providerId];
-    const matchesProvider = (model: ModelRef) =>
-      model.providerId === providerId;
-    const replacement = firstAvailableModel(fallbackModels);
-    const referencePatch = value.trim()
-      ? {}
-      : prepareReferenceUpdate(matchesProvider, replacement);
-    await setModelSettings({
-      ...referencePatch,
-      providerBaseURLs: nextProviderBaseURLs,
-    });
-    if (!value.trim()) syncChatReference(matchesProvider, replacement);
   };
 
   const isConfigured = (id: ProviderId): boolean => {
@@ -395,11 +372,7 @@ export function ModelsSection() {
       ...referencePatch,
       providerModels: nextProviderModels,
     };
-    if (providerHasEditableBaseURL(id)) {
-      const nextProviderBaseURLs = { ...providerBaseURLs };
-      delete nextProviderBaseURLs[id];
-      settingsPatch.providerBaseURLs = nextProviderBaseURLs;
-    }
+    await setProviderBaseURL(id, "");
     await setModelSettings(settingsPatch);
     syncChatReference(matchesProvider, replacement);
     modelCatalog.invalidate(providerId);
@@ -591,12 +564,8 @@ function AddProviderMenu({
   onAddCustom: () => void;
 }) {
   const { t } = useTranslation();
-  const cloud = providers.filter(
-    (provider) => !providerHasEditableBaseURL(provider.id),
-  );
-  const local = providers.filter((provider) =>
-    providerHasEditableBaseURL(provider.id),
-  );
+  const cloud = providers.filter((provider) => provider.category === "cloud");
+  const local = providers.filter((provider) => provider.category === "local");
 
   return (
     <DropdownMenu>
@@ -1294,13 +1263,31 @@ function BuiltinProviderFields({
 }) {
   const { t } = useTranslation();
   const [baseURLDraft, setBaseURLDraft] = useState(baseURL);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const saveBaseURL = async (value: string) => {
+    const next = resolveProviderBaseURL(provider.id, value);
+    setBaseURLDraft(next);
+    if (next === baseURL) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onBaseURLChange(value);
+    } catch (error) {
+      setBaseURLDraft(baseURL);
+      setSaveError(t("models.card.failedSave", { error: String(error) }));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => setBaseURLDraft(baseURL), [baseURL]);
 
   const resolvedConnection = createProviderConnection({
     instanceId: builtinProviderId(provider.id),
     provider: provider.id,
-    baseURL: baseURLDraft,
+    baseURL,
     credentialValue,
   });
   const connection = isProviderConnectionReady(resolvedConnection)
@@ -1309,25 +1296,37 @@ function BuiltinProviderFields({
 
   return (
     <>
-      {provider.endpoint.kind === "editable" ? (
-        <>
-          <span className="text-[11px] leading-4 text-muted-foreground">
-            {t(`models.local.${provider.id}.description`)}
-          </span>
-          <FieldRow label={t("models.card.baseUrl")}>
-            <Input
-              value={baseURLDraft}
-              onChange={(event) => setBaseURLDraft(event.target.value)}
-              onBlur={() => {
-                const next = baseURLDraft.trim();
-                if (next !== baseURL) void onBaseURLChange(next);
-              }}
-              placeholder={provider.endpoint.defaultBaseURL}
-              spellCheck={false}
-              className="flex-1 font-mono"
-            />
-          </FieldRow>
-        </>
+      {provider.category === "local" ? (
+        <span className="text-[11px] leading-4 text-muted-foreground">
+          {t(`models.local.${provider.id}.description`)}
+        </span>
+      ) : null}
+      <FieldRow label={t("models.card.baseUrl")}>
+        <Input
+          value={baseURLDraft}
+          disabled={saving}
+          onChange={(event) => setBaseURLDraft(event.target.value)}
+          onBlur={() => void saveBaseURL(baseURLDraft)}
+          placeholder={provider.endpoint.defaultBaseURL}
+          spellCheck={false}
+          className="flex-1 font-mono"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={
+            saving ||
+            (baseURL === provider.endpoint.defaultBaseURL &&
+              baseURLDraft === baseURL)
+          }
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => void saveBaseURL("")}
+        >
+          {t("models.card.resetBaseUrl")}
+        </Button>
+      </FieldRow>
+      {saveError ? (
+        <p className="text-[11px] text-destructive">{saveError}</p>
       ) : null}
       <NetworkRouteSelect
         target={`provider:${builtinProviderId(provider.id)}`}

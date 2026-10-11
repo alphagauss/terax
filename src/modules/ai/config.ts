@@ -18,7 +18,6 @@ export {
   type ProviderBaseURLs,
   type ProviderId,
   type ProviderInfo,
-  providerHasEditableBaseURL,
   providerRequiresCredential,
   resolveProviderBaseURL,
 } from "./providerRegistry";

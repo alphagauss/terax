@@ -154,3 +154,27 @@ describe("provider connections", () => {
     );
   });
 });
+
+describe("provider address overrides", () => {
+  it("keeps cloud credentials and private-network policy when overriding or resetting the endpoint", () => {
+    const connection = resolveProviderInstance("builtin:openai", {
+      providerBaseURLs: { openai: " https://gateway.example/v1 " },
+      providerCredentials: { openai: "test-key" },
+    });
+    expect(connection).toMatchObject({
+      instanceId: "builtin:openai",
+      baseURL: "https://gateway.example/v1",
+      allowPrivateNetwork: false,
+      credential: { value: "test-key", required: true },
+      runtime: { adapter: "openai" },
+    });
+    const reset = resolveProviderInstance("builtin:openai", {
+      providerBaseURLs: { openai: "  " },
+    });
+    expect(reset.baseURL).toBe("https://api.openai.com/v1");
+    expect(connection.baseURL).toBe("https://gateway.example/v1");
+    expect(
+      resolveProviderInstance("builtin:lmstudio").allowPrivateNetwork,
+    ).toBe(true);
+  });
+});
