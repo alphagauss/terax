@@ -214,6 +214,12 @@ export const PROVIDER_DEFINITIONS = {
     baseURL: "https://api.mistral.ai/v1",
     keyringAccount: "mistral-api-key",
   }),
+  zhipu: compatibleCloudProvider({
+    label: "Zhipu AI (GLM)",
+    consoleUrl: "https://bigmodel.cn/",
+    baseURL: "https://open.bigmodel.cn/api/paas/v4",
+    keyringAccount: "zhipu-api-key",
+  }),
   openrouter: compatibleCloudProvider({
     label: "OpenRouter",
     consoleUrl: "https://openrouter.ai/keys",

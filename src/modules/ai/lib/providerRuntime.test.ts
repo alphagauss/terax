@@ -18,7 +18,14 @@ import {
   buildLanguageModel,
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
-import { generateText, streamText } from "ai";
+import { generateText, streamText, stepCountIs, type ModelMessage } from "ai";
+import { normalizeUsage } from "@/modules/ai/lib/usage";
+import {
+  convertToAgentModelMessages,
+  modelHistoryPart,
+  serializeSessionMessages,
+  projectSessionMessages,
+} from "@/modules/ai/lib/conversation";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,7 +74,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("provider native transport", () => {
-  it.each(["deepseek", "openai-compatible"] as const)(
+  it.each(["deepseek", "zhipu", "openai-compatible"] as const)(
     "serializes %s parameter selections through the real SDK",
     async (provider) => {
       native.status = 200;
@@ -93,10 +100,10 @@ describe("provider native transport", () => {
         {
           target: "provider",
           path:
-            provider === "deepseek"
+            provider !== "openai-compatible"
               ? "thinking.type"
               : "chat_template_kwargs.enable_thinking",
-          value: provider === "deepseek" ? "disabled" : false,
+          value: provider !== "openai-compatible" ? "disabled" : false,
         },
         { target: "provider", path: "reasoning_effort", value: "medium" },
         { target: "provider", path: "reasoning.effort", value: "low" },
@@ -144,9 +151,11 @@ describe("provider native transport", () => {
         expect(body.temperature).toBe(0.7);
         expect(body.custom_options).toEqual({ optional_value: null });
         expect(
-          provider === "deepseek" ? body.thinking : body.chat_template_kwargs,
+          provider !== "openai-compatible"
+            ? body.thinking
+            : body.chat_template_kwargs,
         ).toEqual(
-          provider === "deepseek"
+          provider !== "openai-compatible"
             ? { type: "disabled" }
             : { enable_thinking: false },
         );
@@ -309,5 +318,214 @@ describe("provider native transport", () => {
     expect(await result.toolCalls).toMatchObject([
       { toolCallId: "call", toolName: "lookup", input: { query: "test" } },
     ]);
+  });
+});
+
+describe("Zhipu compatible protocol", () => {
+  it("discovers models using the same authenticated native connection", async () => {
+    native.status = 200;
+    native.body = JSON.stringify({ data: [{ id: "glm-test" }] });
+    const connection = createProviderConnection({
+      provider: "zhipu",
+      instanceId: "builtin:zhipu",
+      credentialValue: "test-key",
+    });
+    expect(await new ModelCatalog().list(connection)).toEqual(["glm-test"]);
+    const args = native.invoke.mock.calls[0][1];
+    expect(args.url).toBe("https://open.bigmodel.cn/api/paas/v4/models");
+    expect(args.headers).toMatchObject({ authorization: "Bearer test-key" });
+    expect(args.networkTarget).toEqual({
+      kind: "provider",
+      id: "builtin:zhipu",
+    });
+    expect(args.allowPrivateNetwork).toBe(false);
+  });
+
+  it("replays streamed thinking and tool history without changing the prefix and normalizes reported cache usage", async () => {
+    const deliver = native.invoke.getMockImplementation();
+    if (!deliver) throw new Error("Native transport mock is not initialized");
+    const bodies: Array<{
+      messages: Array<{
+        role: string;
+        content: unknown;
+        reasoning_content?: string;
+      }>;
+      thinking?: unknown;
+      stream_options?: unknown;
+    }> = [];
+    native.status = 200;
+    native.invoke.mockImplementation(async (command, args) => {
+      const body = JSON.parse(
+        new TextDecoder().decode(Uint8Array.from(args.body)),
+      );
+      bodies.push(body);
+      const first = bodies.length === 1;
+      const usage = {
+        prompt_tokens: first ? 100 : 160,
+        completion_tokens: 12,
+        ...(body.stream
+          ? { prompt_tokens_details: { cached_tokens: first ? 0 : 80 } }
+          : {}),
+      };
+      const reasoning = first ? "先查询工具。" : "依据工具结果回答。";
+      if (body.stream) {
+        const deltas = first
+          ? [
+              { reasoning_content: reasoning },
+              {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "lookup-1",
+                    type: "function",
+                    function: { name: "lookup", arguments: '{"query":"test"}' },
+                  },
+                ],
+              },
+            ]
+          : [
+              { reasoning_content: reasoning },
+              { content: "查询" },
+              { content: "完成。" },
+            ];
+        native.body = [
+          ...deltas.map((delta) => ({
+            choices: [{ index: 0, delta, finish_reason: null }],
+          })),
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: first ? "tool_calls" : "stop",
+              },
+            ],
+            usage,
+          },
+        ]
+          .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+          .join("")
+          .concat("data: [DONE]\n\n");
+      } else {
+        native.body = JSON.stringify({
+          id: "followup",
+          created: 1,
+          model: "glm-test",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "记得查询结果。",
+                reasoning_content: reasoning,
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage,
+        });
+      }
+      return deliver(command, args);
+    });
+    const connection = createProviderConnection({
+      provider: "zhipu",
+      instanceId: "builtin:zhipu",
+      credentialValue: "test-key",
+    });
+    const model = await buildLanguageModel(connection, "glm-test");
+    const parameters = buildParameterOptions(
+      [
+        { target: "provider", path: "thinking.type", value: "enabled" },
+        { target: "provider", path: "thinking.clear_thinking", value: false },
+      ],
+      connection.runtime.adapter,
+      connection.provider,
+    );
+    const execute = vi.fn(async () => "查询结果");
+    const messages: ModelMessage[] = [{ role: "user", content: "查询 test" }];
+    const result = streamText({
+      model,
+      system: "保持上下文",
+      messages,
+      ...parameters,
+      maxRetries: 0,
+      tools: {
+        lookup: { inputSchema: z.object({ query: z.string() }), execute },
+      },
+      stopWhen: stepCountIs(3),
+    });
+    expect(await result.text).toBe("查询完成。");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].messages.slice(0, 2)).toEqual(bodies[0].messages);
+    expect(bodies[1].messages[2]).toMatchObject({
+      role: "assistant",
+      reasoning_content: "先查询工具。",
+      tool_calls: [{ id: "lookup-1" }],
+    });
+    expect(bodies[1].messages[3]).toMatchObject({
+      role: "tool",
+      tool_call_id: "lookup-1",
+      content: "查询结果",
+    });
+    for (const body of bodies) {
+      expect(body.thinking).toEqual({ type: "enabled", clear_thinking: false });
+      expect(body.stream_options).toEqual({ include_usage: true });
+    }
+    const steps = await result.steps;
+    expect(steps.map((step) => normalizeUsage(step.usage, 0, 0))).toEqual([
+      {
+        values: { inputTokens: 100, outputTokens: 12, cacheReadTokens: 0 },
+        estimated: [],
+      },
+      {
+        values: { inputTokens: 160, outputTokens: 12, cacheReadTokens: 80 },
+        estimated: [],
+      },
+    ]);
+    // 模拟持久化往返后追加新轮，已有的思考和工具结果必须仍在请求前缀中。
+    const persisted = serializeSessionMessages(
+      [
+        {
+          id: "response",
+          role: "assistant",
+          parts: [modelHistoryPart(await result.responseMessages)],
+        },
+      ],
+      { timestamp: "2026-10-11T00:00:00.000Z", turnId: "turn" },
+    );
+    const restored = await convertToAgentModelMessages(
+      projectSessionMessages(
+        "restored-session",
+        JSON.parse(JSON.stringify(persisted)),
+      ),
+    );
+    const followup = await generateText({
+      model,
+      system: "保持上下文",
+      messages: [
+        ...messages,
+        ...restored,
+        { role: "user", content: "还记得吗？" },
+      ],
+      ...parameters,
+      maxRetries: 0,
+    });
+    expect(followup.text).toBe("记得查询结果。");
+    expect(bodies[2].messages.slice(0, bodies[1].messages.length)).toEqual(
+      bodies[1].messages,
+    );
+    expect(
+      bodies[2].messages[bodies[2].messages.length - 2].reasoning_content,
+    ).toBe("依据工具结果回答。");
+    expect(
+      normalizeUsage(followup.steps[0].usage, 0, 0).values.cacheReadTokens,
+    ).toBeUndefined();
+    for (const [, args] of native.invoke.mock.calls) {
+      expect(args.url).toBe(
+        "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      );
+      expect(args.headers).toMatchObject({ authorization: "Bearer test-key" });
+    }
   });
 });
