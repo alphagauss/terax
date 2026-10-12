@@ -197,3 +197,30 @@ it("错误节点进入模态框焦点范围且不重建详情，关闭弹窗后�
   await act(async () => render(false));
   expect(document.querySelector("body > [data-error-host] pre")).toBe(details);
 });
+
+it("页内弹窗的祖先隐藏或禁用后释放错误浮层，重新显示时恢复归属", async () => {
+  const render = (hidden: boolean) =>
+    root.render(
+      <>
+        <ErrorHost />
+        <div aria-hidden={hidden} inert={hidden}>
+          <div role="dialog" aria-label="settings" />
+        </div>
+      </>,
+    );
+  await act(async () => {
+    render(false);
+    reportError("failed");
+  });
+  await act(async () => button("errors.details").click());
+  const details = document.querySelector("[data-error-host] pre");
+  expect(document.querySelector('[role="dialog"] [data-error-host] pre')).toBe(
+    details,
+  );
+  await act(async () => render(true));
+  expect(document.querySelector("body > [data-error-host] pre")).toBe(details);
+  await act(async () => render(false));
+  expect(document.querySelector('[role="dialog"] [data-error-host] pre')).toBe(
+    details,
+  );
+});

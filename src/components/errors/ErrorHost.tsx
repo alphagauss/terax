@@ -189,9 +189,9 @@ export function ErrorHost() {
         ),
       ).filter(
         (dialog) =>
-          dialog.dataset.state !== "closed" &&
-          dialog.getAttribute("aria-hidden") !== "true" &&
-          !dialog.hidden,
+          !dialog.closest(
+            '[inert], [hidden], [aria-hidden="true"], [data-state="closed"]',
+          ),
       );
       const parent = dialogs[dialogs.length - 1] ?? document.body;
       if (mount.parentElement !== parent) {
@@ -216,7 +216,8 @@ export function ErrorHost() {
         mutations.some((mutation) =>
           mutation.type === "attributes"
             ? mutation.target instanceof Element &&
-              mutation.target.matches(dialogSelector)
+              (mutation.target.matches(dialogSelector) ||
+                mutation.target.querySelector(dialogSelector))
             : [...mutation.addedNodes, ...mutation.removedNodes].some(
                 (node) =>
                   node instanceof Element &&
@@ -231,7 +232,7 @@ export function ErrorHost() {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-state", "aria-hidden", "hidden"],
+      attributeFilter: ["data-state", "aria-hidden", "hidden", "inert"],
     });
     return () => {
       observer.disconnect();
