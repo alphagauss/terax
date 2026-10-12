@@ -34,6 +34,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 type MarkdownImageContextValue = {
   documentPath: string;
@@ -222,7 +223,9 @@ export function MarkdownPreviewImage({
             void writeClipboardImage(element)
               .then(() => toast.success(t("imageCopied")))
               .catch((error) =>
-                toast.error(t("imageCopyFailed", { message: String(error) })),
+                reportError(t("imageCopyFailed", { message: String(error) }), {
+                  error,
+                }),
               );
           }}
         >
@@ -241,7 +244,9 @@ export function MarkdownPreviewImage({
                 if (saved) toast.success(t("imageSaved"));
               })
               .catch((error) =>
-                toast.error(t("imageSaveFailed", { message: String(error) })),
+                reportError(t("imageSaveFailed", { message: String(error) }), {
+                  error,
+                }),
               );
           }}
         >

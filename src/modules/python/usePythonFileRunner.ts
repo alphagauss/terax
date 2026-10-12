@@ -35,6 +35,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 type PickerRequest =
   | { kind: "select"; root: string }
@@ -119,7 +120,7 @@ export function usePythonFileRunner({
       const previous = operations.current.get(key) ?? Promise.resolve();
       const current = previous.then(operation).catch((error) => {
         console.warn("[python] failed to run file", error);
-        toast.error(t("runFailed"), { description: String(error) });
+        reportError(t("runFailed"), { error });
       });
       operations.current.set(key, current);
       void current.then(() => {
@@ -145,7 +146,7 @@ export function usePythonFileRunner({
       if (!dirtyTab) return true;
       const editor = editorRefs.current.get(dirtyTab.id);
       if (!editor) {
-        toast.error(t("runFailed"), { description: t("saveRequired") });
+        reportError(t("runFailed"), { description: t("saveRequired") });
         return false;
       }
       return editor.save();
@@ -158,7 +159,7 @@ export function usePythonFileRunner({
     async (request: RunRequest): Promise<boolean> => {
       if (!(await saveBeforeRun(request.path))) return false;
       if (await ensureWorkspaceReady()) return true;
-      toast.error(t("runFailed"));
+      reportError(t("runFailed"));
       return false;
     },
     [ensureWorkspaceReady, saveBeforeRun, t],
@@ -184,7 +185,7 @@ export function usePythonFileRunner({
       const title = `python · ${pythonFileName(request.path)}`;
       updateTabTitle(terminalId, title);
       activateTab(terminalId);
-      if (!submitRun(terminalId, request)) toast.error(t("runFailed"));
+      if (!submitRun(terminalId, request)) reportError(t("runFailed"));
     },
     [activateTab, submitRun, t, updateTabTitle],
   );
@@ -204,7 +205,7 @@ export function usePythonFileRunner({
       if (managed && runTerminals.current.get(request.key) === tabId) {
         runTerminals.current.delete(request.key);
       }
-      toast.error(t("runFailed"));
+      reportError(t("runFailed"));
     },
     [newRunTab, submitRun, t],
   );

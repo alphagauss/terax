@@ -19,8 +19,9 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 vi.mock("sonner", () => ({
-  toast: { success: mocks.success, error: mocks.error },
+  toast: { success: mocks.success },
 }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: mocks.url,
@@ -41,9 +42,7 @@ vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
     t: (key: string, options?: { line?: number }) =>
-      key === "fileActions.lineReference"
-        ? `(line:${options?.line})`
-        : key,
+      key === "fileActions.lineReference" ? `(line:${options?.line})` : key,
   }),
 }));
 
@@ -285,7 +284,9 @@ describe("chat file references", () => {
       expect(mocks.error).not.toHaveBeenCalled();
       mocks.invoke.mockRejectedValueOnce(new Error("disk full"));
       await save();
-      expect(mocks.error).toHaveBeenCalledWith("table.downloadFailed");
+      expect(mocks.error).toHaveBeenCalledWith("table.downloadFailed", {
+        error: expect.objectContaining({ message: "disk full" }),
+      });
       expect(download?.disabled).toBe(false);
       mocks.invoke.mockResolvedValueOnce(true);
       await save();

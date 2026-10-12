@@ -66,6 +66,8 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import i18n from "@/i18n";
+import { reportError } from "@/lib/errors";
 import { NetworkSettings } from "@/settings/components/NetworkSettings";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 import { SettingGroup } from "@/components/settings/SettingGroup";
@@ -252,8 +254,8 @@ export function GeneralSection() {
       const executable = await invoke<string>("open_with_register");
       toast.success("Registered for Open With", { description: executable });
     } catch (error) {
-      toast.error("Could not register for Open With", {
-        description: String(error),
+      reportError(i18n.t("common:errors.registerFailed"), {
+        error,
       });
     } finally {
       setOpenWithAction(null);
@@ -266,8 +268,8 @@ export function GeneralSection() {
       await invoke("open_with_unregister");
       toast.success("Unregistered Open With");
     } catch (error) {
-      toast.error("Could not remove Open With registration", {
-        description: String(error),
+      reportError(i18n.t("common:errors.unregisterFailed"), {
+        error,
       });
     } finally {
       setOpenWithAction(null);

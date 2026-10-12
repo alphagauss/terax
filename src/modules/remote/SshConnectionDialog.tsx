@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useMemo, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { remoteNative } from "@/modules/remote/native";
 import {
@@ -141,7 +142,7 @@ export function SshConnectionDialog({
       }
       onOpenChange(false);
     } catch (cause) {
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
     } finally {
       setBusy(false);
     }

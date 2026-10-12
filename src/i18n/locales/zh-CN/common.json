@@ -69,5 +69,32 @@
     "toolarge": "文件超过文本复制的 10 MB 上限。",
     "remoteFileInputRejected": "在 WSL 和 SSH 窗口中，请将文件粘贴或拖入文件管理器上传。",
     "clipboardReadFailed": "无法读取剪贴板文件，请重试。"
+  },
+  "errors": {
+    "region": "错误提示",
+    "history": "最近错误（{{count}}）",
+    "details": "查看详情",
+    "hideDetails": "收起详情",
+    "copy": "复制错误",
+    "copied": "已复制",
+    "copyFailed": "复制失败，请选中详情复制",
+    "repeated": "发生 {{count}} 次",
+    "dismiss": "关闭：{{title}}",
+    "operationFailed": "操作失败",
+    "saveFailed": "保存设置失败",
+    "workspaceOpenFailed": "打开 Workspace 窗口失败",
+    "registerFailed": "注册打开方式失败",
+    "unregisterFailed": "移除打开方式注册失败",
+    "undoCommitFailed": "撤销提交失败",
+    "formatFailed": "语言服务器格式化失败",
+    "sessionSyncFailed": "AI 会话同步失败",
+    "transcriptionFailed": "语音转写失败",
+    "microphoneFailed": "无法访问麦克风",
+    "serverStartFailed": "{{name}} 语言服务器启动失败",
+    "serverStopped": "{{name}} 语言服务器已停止",
+    "serverCrashing": "{{name}} 语言服务器连续崩溃",
+    "serverExited": "{{name}} 语言服务器已退出",
+    "serverGivingUp": "已停止在此工作区重试。",
+    "clear": "清空"
   }
 }

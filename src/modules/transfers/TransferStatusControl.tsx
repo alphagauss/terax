@@ -43,7 +43,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { TFunction } from "i18next";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   formatTransferError,
   formatTransferFailure,
@@ -124,10 +124,11 @@ function TransferStatusPanel() {
           : await transferNative.clearAll();
       removeLocalMany(ids);
     } catch (error) {
-      toast.error(
+      reportError(
         t("transfers.operationFailed", {
           error: formatTransferError(error, t),
         }),
+        { error },
       );
     } finally {
       setClearing(null);
@@ -327,10 +328,11 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
 
   const run = (operation: Promise<void>) => {
     void operation.catch((error) =>
-      toast.error(
+      reportError(
         t("transfers.operationFailed", {
           error: formatTransferError(error, t),
         }),
+        { error },
       ),
     );
   };
@@ -339,10 +341,11 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
       .remove(task.id)
       .then(() => removeLocal(task.id))
       .catch((error) =>
-        toast.error(
+        reportError(
           t("transfers.operationFailed", {
             error: formatTransferError(error, t),
           }),
+          { error },
         ),
       );
   };
@@ -351,10 +354,11 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
     setFailureActionPending(true);
     void operation()
       .catch((error) =>
-        toast.error(
+        reportError(
           t("transfers.operationFailed", {
             error: formatTransferError(error, t),
           }),
+          { error },
         ),
       )
       .finally(() => setFailureActionPending(false));
@@ -603,10 +607,11 @@ export function TransferConflictDialog({
       })
       .catch((error) => {
         setSubmitting(false);
-        toast.error(
+        reportError(
           t("transfers.operationFailed", {
             error: formatTransferError(error, t),
           }),
+          { error },
         );
       });
   };

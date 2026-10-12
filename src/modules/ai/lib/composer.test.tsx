@@ -68,7 +68,8 @@ vi.mock("@/modules/ai/store/snippetsStore", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { info: vi.fn() } }));
+vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 
 const key = "ai:composerDraft";
 const image = {

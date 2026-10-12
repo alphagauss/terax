@@ -13,6 +13,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
+import { ErrorHost } from "@/components/errors/ErrorHost";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/controls/tooltip";
 import {
@@ -147,8 +148,9 @@ import { useSpaceDirectories } from "@/modules/spaces/lib/useSpaceDirectories";
 import { SpaceDirectoryDialog } from "@/modules/spaces/components/SpaceDirectoryDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
-import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
+import { reportError } from "@/lib/errors";
 import { CloseDialogs } from "./components/CloseDialogs";
 import { WorkspaceConnectionPlaceholder } from "./components/WorkspaceConnectionPlaceholder";
 import { spaceDeleteDocuments } from "./lib/spaceDelete";
@@ -300,7 +302,7 @@ export default function App() {
   const handleZenFullscreenError = useCallback(
     (error: unknown) => {
       console.error("zen mode fullscreen transition failed:", error);
-      toast.error(t("zenMode.fullscreenFailed", { ns: "app" }));
+      reportError(t("zenMode.fullscreenFailed", { ns: "app" }));
     },
     [t],
   );
@@ -364,8 +366,8 @@ export default function App() {
     (env: WorkspaceEnv) => {
       const policy = policyForEnvironmentSelection(workspaceEnv, env);
       void spawnWorkspaceProcess(env, policy).catch((error) => {
-        toast.error("Failed to open Workspace window", {
-          description: String(error),
+        reportError(i18n.t("common:errors.workspaceOpenFailed"), {
+          error,
         });
       });
     },
@@ -374,8 +376,8 @@ export default function App() {
 
   const openNewWindow = useCallback(() => {
     void spawnWorkspaceProcess(workspaceEnv, "fresh").catch((error) => {
-      toast.error("Failed to open Workspace window", {
-        description: String(error),
+      reportError(i18n.t("common:errors.workspaceOpenFailed"), {
+        error,
       });
     });
   }, [workspaceEnv]);
@@ -2244,6 +2246,7 @@ export default function App() {
             selectedPath={pythonRunner.selectedPath}
             onSelect={pythonRunner.selectInterpreter}
           />
+          <ErrorHost />
           <ToastDismissOnClick />
           <Toaster
             position="bottom-right"

@@ -2,6 +2,7 @@
  * 本文件实现常规设置中的共享代理设置组。
  * 地址通过原生校验后保存，密码单独写入秘密存储，配置不会全局启用代理。
  */
+import { reportError } from "@/lib/errors";
 import { Button } from "@/components/controls/button";
 import { Input } from "@/components/controls/input";
 import { FormField } from "@/components/layout/FormField";
@@ -21,7 +22,7 @@ export function NetworkSettings() {
   const [url, setUrl] = useState(currentUrl);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<"saved" | "saveError" | null>(null);
+  const [message, setMessage] = useState<"saved" | null>(null);
   useEffect(() => setUrl(currentUrl), [currentUrl]);
   const save = async (clearPassword = false) => {
     setBusy(true);
@@ -53,8 +54,8 @@ export function NetworkSettings() {
       await setSharedStoreKey("settings", "network.proxyUrl", url.trim());
       setPassword("");
       setMessage("saved");
-    } catch {
-      setMessage("saveError");
+    } catch (error) {
+      reportError(t("network.saveError"), { error });
     } finally {
       setBusy(false);
     }

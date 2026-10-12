@@ -11,6 +11,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
 
 type TextReadResult = {
@@ -756,8 +757,8 @@ class SharedDocumentModel {
       if (this.savePromise) await this.savePromise;
       await this.saveNow(true);
     } catch (error) {
-      toast.error(i18n.t("editor:saveFailed"), {
-        description: String(error),
+      reportError(i18n.t("editor:saveFailed"), {
+        error,
       });
       this.showConflict();
     }

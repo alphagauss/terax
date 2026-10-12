@@ -110,6 +110,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 type KeysMap = Record<ProviderId, string | null>;
@@ -683,7 +684,6 @@ function SubagentCard({
   const [previewModel, setPreviewModel] = useState<ModelRef | null>(
     () => usage.model ?? defaultModel ?? models[0] ?? null,
   );
-  const [error, setError] = useState<string | null>(null);
   const parameterModel =
     models.find(
       (model) => previewModel && modelRefsEqual(model, previewModel),
@@ -742,9 +742,8 @@ function SubagentCard({
             inheritLabel={t("models.defaults.followChatModel")}
             ariaLabel={t("models.defaults.subagentModel")}
             onSelect={(model) => {
-              setError(null);
               void setModelUsageModel("subagent", model).catch((e) =>
-                setError(String(e)),
+                reportError(t("common:errors.saveFailed"), { error: e }),
               );
             }}
           />
@@ -776,23 +775,19 @@ function SubagentCard({
             onSelect={setPreviewModel}
             onParametersChange={(selections) => {
               if (!parameterModel) return;
-              setError(null);
               void setModelUsageParameters(
                 "subagent",
                 parameterModel,
                 selections,
-              ).catch((e) => setError(String(e)));
+              ).catch((e) =>
+                reportError(t("common:errors.saveFailed"), { error: e }),
+              );
             }}
           />
         </div>
         <p className="text-xs text-muted-foreground">
           {t("models.subagent.followHelp")}
         </p>
-        {error && (
-          <p role="alert" className="text-xs text-destructive">
-            {error}
-          </p>
-        )}
       </div>
     </div>
   );
@@ -812,7 +807,6 @@ function CompactionCard({
   const usage = usePreferencesStore((state) => state.modelUsages.compaction);
   const definitions = usePreferencesStore((state) => state.modelParameters);
   const [preview, setPreview] = useState<ModelRef | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const model = preview ?? usage.model ?? models[0] ?? null;
   return (
     <div className="flex flex-col gap-field">
@@ -825,9 +819,8 @@ function CompactionCard({
           customProviders={customProviders}
           inheritLabel={t("models.defaults.followChatModel")}
           onSelect={(value) => {
-            setError(null);
             void setModelUsageModel("compaction", value).catch((e) =>
-              setError(String(e)),
+              reportError(t("common:errors.saveFailed"), { error: e }),
             );
           }}
         />
@@ -844,9 +837,8 @@ function CompactionCard({
         onSelect={setPreview}
         onParametersChange={(selections) => {
           if (model) {
-            setError(null);
             void setModelUsageParameters("compaction", model, selections).catch(
-              (e) => setError(String(e)),
+              (e) => reportError(t("common:errors.saveFailed"), { error: e }),
             );
           }
         }}
@@ -854,11 +846,6 @@ function CompactionCard({
       <p className="text-xs text-muted-foreground">
         {t("models.compaction.followHelp")}
       </p>
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
@@ -925,7 +912,6 @@ function CommitMessageCard({
   const usage = usePreferencesStore((s) => s.modelUsages.commitMessage);
   const definitions = usePreferencesStore((s) => s.modelParameters);
   const defaultModel = usePreferencesStore((s) => s.defaultModel);
-  const [error, setError] = useState<string | null>(null);
   const model = usage.model ?? defaultModel;
   return (
     <div className="flex flex-col gap-field">
@@ -945,26 +931,21 @@ function CommitMessageCard({
             model ? (usage.parameterSelections[modelRefKey(model)] ?? {}) : {}
           }
           onSelect={(selected) => {
-            setError(null);
             void setModelUsageModel("commitMessage", selected).catch((e) =>
-              setError(String(e)),
+              reportError(t("common:errors.saveFailed"), { error: e }),
             );
           }}
           onParametersChange={(selections) => {
             if (!model) return;
-            setError(null);
             void setModelUsageParameters(
               "commitMessage",
               model,
               selections,
-            ).catch((e) => setError(String(e)));
+            ).catch((e) =>
+              reportError(t("common:errors.saveFailed"), { error: e }),
+            );
           }}
         />
-        {error && (
-          <p role="alert" className="text-xs text-destructive">
-            {error}
-          </p>
-        )}
       </div>
     </div>
   );
@@ -1145,7 +1126,6 @@ function AutocompleteCard({
     (state) => state.modelParameters,
   );
   const completionSelections = usage.parameterSelections;
-  const [parameterError, setParameterError] = useState<string | null>(null);
   const userShortcuts = usePreferencesStore((state) => state.shortcuts);
   const currentModel = tryResolveModel(model, {
     customProviders,
@@ -1222,24 +1202,18 @@ function AutocompleteCard({
               model ? (completionSelections[modelRefKey(model)] ?? {}) : {}
             }
             onSelect={(next) => {
-              setParameterError(null);
               void setModelUsageModel("completion", next).catch((error) =>
-                setParameterError(String(error)),
+                reportError(t("common:errors.saveFailed"), { error }),
               );
             }}
             onParametersChange={(next) => {
               if (!model) return;
-              setParameterError(null);
               void setModelUsageParameters("completion", model, next).catch(
-                (error) => setParameterError(String(error)),
+                (error) =>
+                  reportError(t("common:errors.saveFailed"), { error }),
               );
             }}
           />
-          {parameterError && (
-            <p role="alert" className="text-xs text-destructive">
-              {parameterError}
-            </p>
-          )}
         </div>
       </div>
     </div>
@@ -1264,19 +1238,17 @@ function BuiltinProviderFields({
   const { t } = useTranslation();
   const [baseURLDraft, setBaseURLDraft] = useState(baseURL);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   const saveBaseURL = async (value: string) => {
     const next = resolveProviderBaseURL(provider.id, value);
     setBaseURLDraft(next);
     if (next === baseURL) return;
     setSaving(true);
-    setSaveError(null);
     try {
       await onBaseURLChange(value);
     } catch (error) {
       setBaseURLDraft(baseURL);
-      setSaveError(t("models.card.failedSave", { error: String(error) }));
+      reportError(t("common:errors.saveFailed"), { error });
     } finally {
       setSaving(false);
     }
@@ -1325,9 +1297,6 @@ function BuiltinProviderFields({
           {t("models.card.resetBaseUrl")}
         </Button>
       </FieldRow>
-      {saveError ? (
-        <p className="text-[11px] text-destructive">{saveError}</p>
-      ) : null}
       <NetworkRouteSelect
         target={`provider:${builtinProviderId(provider.id)}`}
       />

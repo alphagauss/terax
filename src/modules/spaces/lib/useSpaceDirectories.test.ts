@@ -33,7 +33,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.picker }));
 vi.mock("@/i18n", () => ({ default: { t: mocks.t } }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.t }) }));
-vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 
 import {
   prepareSpaceDirectory,

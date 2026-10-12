@@ -1,5 +1,6 @@
 /** 编辑模型的枚举参数定义；请求路径使用官方 API 命名，保存时校验值类型。 */
 import { useId, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
 import { Input } from "@/components/controls/input";
@@ -66,7 +67,7 @@ export function ModelParameterEditor({ model }: { model: ModelRef }) {
       await setModelParameters(model, next);
       setDraft(null);
     } catch (e) {
-      setError(String(e));
+      reportError(t("common:errors.saveFailed"), { error: e });
     } finally {
       setSaving(false);
     }

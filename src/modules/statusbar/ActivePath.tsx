@@ -8,7 +8,7 @@ import {
 } from "@/components/menu/context-menu";
 import { writeClipboardText } from "@/lib/clipboard";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 export function ActivePath({
   path,
@@ -44,8 +44,8 @@ export function ActivePath({
       <ContextMenuContent>
         <ContextMenuItem
           onSelect={() => {
-            void writeClipboardText(path).catch(() =>
-              toast.error(t("common:pageMenu.copyFailed")),
+            void writeClipboardText(path).catch((cause) =>
+              reportError(t("common:pageMenu.copyFailed"), { error: cause }),
             );
           }}
         >

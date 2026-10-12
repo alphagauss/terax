@@ -44,8 +44,9 @@ vi.mock("@/modules/transfers/store", () => ({
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.t }) }));
 vi.mock("sonner", () => ({
-  toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() },
+  toast: { info: vi.fn(), success: vi.fn() },
 }));
+vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 
 it.each(["local", "wsl", "ssh"])(
   "粘贴冻结目标，拖放共用复制或上传，纯内存数据不导入：%s",

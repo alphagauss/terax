@@ -66,7 +66,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { FormField } from "@/components/layout/FormField";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
@@ -114,8 +114,8 @@ export function AgentsSection() {
         sessionCount: sessions.filter((session) => session.agentId === agent.id)
           .length,
       });
-    } catch {
-      toast.error(t("agents.delete.countFailed"));
+    } catch (cause) {
+      reportError(t("agents.delete.countFailed"), { error: cause });
     }
   };
 
@@ -126,10 +126,11 @@ export function AgentsSection() {
       await removeAgent(deletingAgent.agent.id);
       setDeletingAgent(null);
     } catch (error) {
-      toast.error(
+      reportError(
         String(error).includes("CUSTOM_AGENT_SESSIONS_RUNNING")
           ? t("agents.delete.running")
           : t("agents.delete.failed"),
+        { error },
       );
     } finally {
       setDeleteBusy(false);

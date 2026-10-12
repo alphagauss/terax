@@ -5,7 +5,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { EditorView } from "@codemirror/view";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { IS_WINDOWS } from "@/lib/platform";
 import {
   ContextMenu,
@@ -244,7 +244,7 @@ function EditMenu({ request, close }: { request: Request; close: () => void }) {
       }
     } catch (error) {
       console.error("执行编辑菜单失败", error);
-      if (choice !== null) toast.error(t("editorMenu.failed"));
+      if (choice !== null) reportError(t("editorMenu.failed"), { error });
     } finally {
       close();
     }

@@ -8,7 +8,7 @@ import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus
 import { Button } from "@/components/controls/button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 /** 展示当前 Local 主窗口持有的连接，并提供不离开面板的启用或停用入口。 */
 export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
@@ -19,7 +19,7 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
     if (pendingId) return;
     setPendingId(id);
     void requestChannels({ action: "enable", id, enabled })
-      .catch(() => toast.error(t("errors.unavailable")))
+      .catch((cause) => reportError(t("errors.unavailable"), { error: cause }))
       .finally(() => setPendingId(null));
   };
 
@@ -43,7 +43,9 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
                 id: snapshot.connection.id,
               })
                 .then(onActivate)
-                .catch(() => toast.error(t("errors.unavailable")));
+                .catch((cause) =>
+                  reportError(t("errors.unavailable"), { error: cause }),
+                );
             }}
           >
             <span className="min-w-0 truncate text-[12px] text-muted-foreground">

@@ -1,6 +1,7 @@
 /** 消息通道订阅已有会话实例及展示记录，不读取独立历史副本，也不启动 Agent。 */
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChat, type Chat, type UIMessage } from "@ai-sdk/react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
 import { requestChannels } from "@/modules/channels/client";
@@ -31,13 +32,11 @@ export function ChannelConversation({
   sessionId,
   connectionId: id,
   canRetry,
-  onError,
 }: {
   chat: Chat<UIMessage>;
   sessionId: string;
   connectionId: string;
   canRetry: boolean;
-  onError: (message: string) => void;
 }) {
   const { t } = useTranslation("channels");
   const { messages } = useChat<UIMessage>({
@@ -123,15 +122,14 @@ export function ChannelConversation({
   ) => {
     if (handling) return;
     setHandling(true);
-    onError("");
     try {
       await requestChannels(
         action === "dismiss-deliveries"
           ? { action, id, sessionId, deliveryIds: ids }
           : { action, id, sessionId, deliveryId: ids[0] },
       );
-    } catch {
-      onError(t("outbound.handleFailed"));
+    } catch (error) {
+      reportError(t("outbound.handleFailed"), { error, source: id });
     } finally {
       setHandling(false);
     }

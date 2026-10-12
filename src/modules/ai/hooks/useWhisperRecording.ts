@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import i18n from "@/i18n";
+import { reportError } from "@/lib/errors";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { transcribeAudio, type SttOptions } from "../lib/stt";
@@ -81,7 +82,10 @@ export function useWhisperRecording({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mimeType = pickMime();
-      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const rec = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
       chunksRef.current = [];
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -98,11 +102,18 @@ export function useWhisperRecording({
         }
         setState("transcribing");
         try {
-          const text = await transcribeAudio(blob, sttProvider, apiKeys, sttOptions);
+          const text = await transcribeAudio(
+            blob,
+            sttProvider,
+            apiKeys,
+            sttOptions,
+          );
           if (text.trim()) onResult(text.trim());
         } catch (e) {
           console.error("stt.transcribe", e);
-          toast.error(e instanceof Error ? e.message : "Transcription failed");
+          reportError(i18n.t("common:errors.transcriptionFailed"), {
+            error: e,
+          });
         } finally {
           setState("idle");
         }
@@ -112,7 +123,7 @@ export function useWhisperRecording({
       setState("recording");
     } catch (e) {
       console.error("stt.getUserMedia", e);
-      toast.error("Microphone access failed");
+      reportError(i18n.t("common:errors.microphoneFailed"), { error: e });
       teardownStream();
       setState("idle");
     }

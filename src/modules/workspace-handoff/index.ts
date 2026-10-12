@@ -12,6 +12,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 export type WorkspacePage =
   | {
@@ -232,7 +233,7 @@ export function useWorkspacePageHandoff({
 
   const reportBlockedPage = useCallback(
     (reason: WorkspacePageCopyBlockReason) => {
-      toast.error(
+      reportError(
         t(
           reason === "dirty" ? "saveBeforeWindowCopy" : "windowCopyUnsupported",
         ),
@@ -252,7 +253,7 @@ export function useWorkspacePageHandoff({
         .then(() => toast.success(t("windowCopySent")))
         .catch((error) => {
           console.error("[terax] Workspace page send failed:", error);
-          toast.error(t("windowCopyFailed"));
+          reportError(t("windowCopyFailed"), { error });
           refreshTargets();
         });
     },
@@ -270,7 +271,7 @@ export function useWorkspacePageHandoff({
         .then(() => toast.success(t("windowCopySentToNew")))
         .catch((error) => {
           console.error("[terax] temporary Workspace launch failed:", error);
-          toast.error(t("windowCopyFailed"));
+          reportError(t("windowCopyFailed"), { error });
         });
     },
     [pageForCopy, reportBlockedPage, t],
@@ -300,7 +301,7 @@ export function useWorkspacePageHandoff({
           toast.success(t("windowCopyReceived"));
         } catch (error) {
           console.error("[terax] copied Workspace page could not open:", error);
-          toast.error(t("windowCopyReceiveFailed"));
+          reportError(t("windowCopyReceiveFailed"), { error });
         }
       }
     }, controller.signal)

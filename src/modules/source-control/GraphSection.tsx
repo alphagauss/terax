@@ -70,6 +70,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 const PAGE_SIZE = 40;
 // 与原生 git-log 的单页上限一致，搜索按页继续扫描历史。
@@ -382,13 +383,13 @@ export const GraphSection = memo(function GraphSection({
       });
       onDidUndo();
     } catch (undoError) {
-      toast.error("Could not undo commit", {
+      reportError(t("common:errors.undoCommitFailed"), {
         description: normalizeError(undoError),
       });
     } finally {
       setUndoing(false);
     }
-  }, [closePopover, onDidUndo, pendingUndo, repoRoot]);
+  }, [closePopover, onDidUndo, pendingUndo, repoRoot, t]);
 
   const selectedCommit = openAnchor
     ? (commits.find((commit) => commit.sha === openAnchor.sha) ?? null)

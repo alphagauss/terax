@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { normalizeSpaceRoot, useSpaces } from "./useSpaces";
 
 /** 目录校验成功后才授权；WSL 保留发行版路径，不使用授权接口返回的宿主路径。 */
@@ -71,7 +71,7 @@ export function useSpaceDirectories(
         return true;
       } catch (error) {
         if (isCurrent())
-          toast.error(t("directoryFailed"), {
+          reportError(t("directoryFailed"), {
             description:
               error instanceof Error && error.message === "not-directory"
                 ? t("directoryInvalid")
@@ -104,7 +104,7 @@ export function useSpaceDirectories(
         if (typeof selected === "string")
           await openDirectory(selected.replace(/\\/g, "/"), spaceId);
       } catch (error) {
-        toast.error(t("directoryFailed"), { description: String(error) });
+        reportError(t("directoryFailed"), { error });
       }
     },
     [openDirectory, t],

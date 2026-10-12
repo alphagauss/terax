@@ -24,7 +24,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.toastError }));
 vi.mock("./native", () => ({
   native: { workspaceAuthorize: vi.fn() },
 }));

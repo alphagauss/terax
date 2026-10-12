@@ -24,6 +24,7 @@ import {
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -107,7 +108,7 @@ export function PythonInterpreterDialog({
       onOpenChange(false);
     } catch (reason) {
       console.warn("[python] interpreter selection failed", reason);
-      setError(t("selectionFailed"));
+      reportError(t("selectionFailed"), { error: reason });
     }
   };
 
@@ -142,7 +143,7 @@ export function PythonInterpreterDialog({
       await commitSelection(interpreter);
     } catch (reason) {
       console.warn(`[python] interpreter ${errorKey}`, reason);
-      setError(t(errorKey));
+      reportError(t(errorKey), { error: reason });
     } finally {
       setSelecting(false);
     }

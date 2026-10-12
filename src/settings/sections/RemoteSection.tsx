@@ -78,6 +78,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -295,7 +296,10 @@ export function RemoteSection() {
       await persistProfile(profile, value);
       toast.success(t("remote.actions.saved"));
     } catch (cause) {
-      setError(persistenceErrorMessage(cause));
+      reportError(t("common:errors.saveFailed"), {
+        description: persistenceErrorMessage(cause),
+        error: cause,
+      });
     } finally {
       setBusy(false);
     }
@@ -323,10 +327,11 @@ export function RemoteSection() {
         "recent",
       );
     } catch (cause) {
-      setError(
+      reportError(
         persisted
           ? t("remote.launch.openFailedAfterSave", { error: String(cause) })
           : persistenceErrorMessage(cause),
+        { error: cause },
       );
     } finally {
       setBusy(false);
@@ -372,7 +377,7 @@ export function RemoteSection() {
           : t("remote.actions.noImports"),
       );
     } catch (cause) {
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
     } finally {
       setBusy(false);
     }
@@ -411,7 +416,7 @@ export function RemoteSection() {
         ),
       );
     } catch (cause) {
-      setGroupEditorError(String(cause));
+      reportError(t("common:errors.saveFailed"), { error: cause });
     } finally {
       setBusy(false);
     }
@@ -441,7 +446,7 @@ export function RemoteSection() {
       );
       toast.success(t("remote.groups.actions.deleted"));
     } catch (cause) {
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
     } finally {
       setBusy(false);
     }
@@ -470,7 +475,7 @@ export function RemoteSection() {
       startNew();
       toast.success(t("remote.actions.deleted"));
     } catch (cause) {
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
     } finally {
       setBusy(false);
     }

@@ -28,6 +28,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { useWhisperRecording } from "@/modules/ai/hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "@/modules/ai/lib/snippets";
 import {
@@ -266,7 +267,11 @@ export function AiComposerProvider({
     void useChatStore
       .getState()
       .live.revealWorkingDirectory(workingDirectory)
-      .catch(() => toast.error(t("composer.workingDirectoryUnavailable")))
+      .catch((cause) =>
+        reportError(t("composer.workingDirectoryUnavailable"), {
+          error: cause,
+        }),
+      )
       .finally(() => {
         revealingWorkingDirectoryRef.current = false;
         setRevealingWorkingDirectory(false);
@@ -282,7 +287,7 @@ export function AiComposerProvider({
         const id = `path-${path}`;
         const result = await readPathAttachment(path, workspace);
         if (result.kind !== "image" && result.kind !== "file") {
-          toast.error(t("composer.unsupportedFile", { name }));
+          reportError(t("composer.unsupportedFile", { name }));
           return;
         }
         const environmentKey = currentWorkspaceBootstrap().environmentKey;
@@ -311,7 +316,9 @@ export function AiComposerProvider({
         );
         useChatStore.getState().focusInput();
       } catch (e) {
-        toast.error(t("composer.attachFailed", { error: String(e) }));
+        reportError(t("composer.attachFailed", { error: String(e) }), {
+          error: e,
+        });
       }
     },
     [readOnly, t],
@@ -336,7 +343,9 @@ export function AiComposerProvider({
         attachFileByPath,
       );
     } catch (error) {
-      toast.error(t("composer.attachFailed", { error: String(error) }));
+      reportError(t("composer.attachFailed", { error: String(error) }), {
+        error,
+      });
     } finally {
       pickingFilesRef.current = false;
     }
@@ -565,8 +574,8 @@ export function AiComposerProvider({
           current.filter((snippet) => !submittedSnippetIds.has(snippet.id)),
         );
         requestAnimationFrame(() => textareaRef.current?.focus());
-      } catch {
-        toast.error(t("composer.sendFailed"));
+      } catch (cause) {
+        reportError(t("composer.sendFailed"), { error: cause });
       } finally {
         submittingRef.current = false;
       }

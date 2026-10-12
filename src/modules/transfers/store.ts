@@ -5,7 +5,7 @@
 
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { create } from "zustand";
 import { transferNative } from "./native";
 import type { TransferTask } from "./types";
@@ -143,7 +143,7 @@ export function useTransferBridge(): void {
     let unlisten: (() => void) | undefined;
     void transferNative
       .onSyncSaveFailed(() => {
-        if (active) toast.error(t("sync.saveFailed"));
+        if (active) reportError(t("sync.saveFailed"));
       })
       .then((stop) => {
         if (active) unlisten = stop;

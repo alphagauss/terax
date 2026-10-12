@@ -43,7 +43,6 @@ export function ChannelConnectionEditor({
   edits,
   loginPending,
   disabled,
-  error,
   updateDraft,
   run,
   perform,
@@ -52,7 +51,6 @@ export function ChannelConnectionEditor({
   edits?: Partial<ChannelDraft>;
   loginPending: boolean;
   disabled: boolean;
-  error?: string;
   updateDraft: (id: string, patch?: Partial<ChannelDraft>) => void;
   perform: (id: string, work: () => Promise<void>) => Promise<boolean>;
   run: (action: ChannelAction) => Promise<boolean>;
@@ -75,7 +73,7 @@ export function ChannelConnectionEditor({
     draft.mode !== connection.busyMessageMode;
   const dirty = configChanged || draft.route !== route;
   const invalidName = !draft.name.trim() || draft.name.trim().length > 80;
-  const message = error ?? snapshot.issue;
+  const message = snapshot.issue;
 
   /** 两个权威存储分别提交；部分失败保留草稿，重试只写仍有差异的部分。 */
   const save = () => {
@@ -91,8 +89,8 @@ export function ChannelConnectionEditor({
       if (draft.route !== route) {
         try {
           await setNetworkRoute(`channel:${connection.id}`, draft.route);
-        } catch {
-          throw new Error("route-save");
+        } catch (cause) {
+          throw Object.assign(new Error("route-save"), { cause });
         }
       }
       updateDraft(connection.id);

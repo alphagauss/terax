@@ -12,7 +12,7 @@ import type { Tab } from "@/modules/workbench";
 import { invoke } from "@tauri-apps/api/core";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import type { Live } from "../store/chatStore";
 import { native } from "./native";
 import { redactSensitive } from "./redact";
@@ -62,8 +62,8 @@ export function useAiLiveBridge(params: Params) {
           "[terax] default AI workspace preparation failed:",
           error,
         );
-        toast.error(t("composer.workingDirectoryUnavailable"), {
-          description: String(error),
+        reportError(t("composer.workingDirectoryUnavailable"), {
+          error,
         });
       });
     return () => {

@@ -31,6 +31,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   extractTableDataFromElement,
   StreamdownContext,
@@ -112,7 +113,9 @@ export function MarkdownTable({
         copyTimer.current = window.setTimeout(() => setCopied(false), 2_000);
       }
     } catch (error) {
-      toast.error(t(`table.${action}Failed`, { message: String(error) }));
+      reportError(t(`table.${action}Failed`, { message: String(error) }), {
+        error,
+      });
     } finally {
       if (action === "download") setSaving(false);
     }

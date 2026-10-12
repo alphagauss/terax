@@ -92,7 +92,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { RepositoryDiffStats } from "./RepositoryDiffStats";
 
 type Props = {
@@ -221,7 +221,7 @@ function BranchDropdown({
         setOpen(false);
         onRefresh();
       } catch (e) {
-        toast.error(String(e));
+        reportError(String(e), { error: e });
       } finally {
         checkoutInFlight.current = false;
         setCheckingOut(false);

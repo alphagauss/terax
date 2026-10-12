@@ -3,6 +3,7 @@ import { writeClipboardImage } from "@/lib/imageActions";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { Button } from "@/components/controls/button";
 import {
   Dialog,
@@ -63,7 +64,9 @@ export default function AttachmentPreview({
               if (imageRef.current)
                 void writeClipboardImage(imageRef.current)
                   .then(() => toast.success(t("attachments.copied")))
-                  .catch(() => toast.error(t("attachments.failed")));
+                  .catch((cause) =>
+                    reportError(t("attachments.failed"), { error: cause }),
+                  );
             }}
           >
             {t("attachments.copyImage")}

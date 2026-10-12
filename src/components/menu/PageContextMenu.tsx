@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -54,7 +55,9 @@ export function PageContextMenu() {
           ? { element: image, src: image.currentSrc || image.src }
           : null,
         href: link instanceof HTMLAnchorElement ? link.href : null,
-        container: element.closest<HTMLElement>('[role="dialog"]'),
+        container: element.closest<HTMLElement>(
+          '[data-error-host], [role="dialog"]',
+        ),
       };
       if (intersects && selection?.toString() && !snapshot.selection) return;
       // 普通空白处没有可用动作，不弹出浏览器的通用页面菜单。
@@ -78,7 +81,9 @@ export function PageContextMenu() {
   const copy = (action: () => Promise<void>) => {
     void action()
       .then(() => toast.success(t("copied")))
-      .catch(() => toast.error(t("pageMenu.copyFailed")));
+      .catch((cause) =>
+        reportError(t("pageMenu.copyFailed"), { error: cause }),
+      );
   };
   const selection = target?.selection;
   const image = target?.image;
@@ -97,7 +102,10 @@ export function PageContextMenu() {
           className="pointer-events-none fixed h-0 w-0"
         />
       </ContextMenuTrigger>
-      <ContextMenuContent portalContainer={target?.container ?? undefined}>
+      <ContextMenuContent
+        portalContainer={target?.container ?? undefined}
+        className="pointer-events-auto"
+      >
         {selection && (
           <ContextMenuItem
             onSelect={() => {
@@ -136,7 +144,9 @@ export function PageContextMenu() {
                 .then((saved) => {
                   if (saved) toast.success(t("pageMenu.saved"));
                 })
-                .catch(() => toast.error(t("pageMenu.saveFailed")));
+                .catch((cause) =>
+                  reportError(t("pageMenu.saveFailed"), { error: cause }),
+                );
             }}
           >
             {t("pageMenu.saveImage")}

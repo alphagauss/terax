@@ -24,7 +24,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { AgentIcon } from "@/modules/agents/lib/agentIcon";
 import { displayAgent } from "@/modules/agents/lib/format";
 import type {
@@ -266,7 +266,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
       });
       setHooks((h) => ({ ...h, [id]: !enabled }));
     } catch (error) {
-      toast.error(t("hook.updateFailed"), { description: String(error) });
+      reportError(t("hook.updateFailed"), { error });
     } finally {
       hookPending.current = false;
       setInstalling(null);

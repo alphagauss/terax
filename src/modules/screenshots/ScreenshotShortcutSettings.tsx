@@ -19,6 +19,7 @@ import { ShortcutRecorder } from "@/modules/shortcuts/components/ShortcutRecorde
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 export function ScreenshotShortcutSettings({
@@ -82,7 +83,7 @@ export function ScreenshotShortcutSettings({
       await invoke("screenshot_configure", { patch });
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      reportError(t("common:errors.saveFailed"), { error: reason });
     } finally {
       setPending(false);
     }

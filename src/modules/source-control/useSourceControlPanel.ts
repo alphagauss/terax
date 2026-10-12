@@ -29,6 +29,7 @@ import {
   setCommitMessageDraft,
 } from "@/modules/source-control/commitMessage";
 import { useCallback, useMemo, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import type { GitDiffSide } from "./gitTypes";
@@ -89,15 +90,6 @@ type SourceControlPanelState = {
   commit: () => Promise<void>;
   push: () => Promise<void>;
 };
-
-function normalizeError(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return "Unknown source control error";
-}
 
 function normalizeStatusCode(status: string): string {
   const code = status.trim().toUpperCase();
@@ -317,13 +309,16 @@ export function useSourceControlPanel(
         await ipc();
         await controller.refresh();
       } catch (error) {
-        setActionError(normalizeError(error));
+        reportError(t("common:errors.operationFailed"), {
+          error,
+          source: repo.repoRoot,
+        });
         await controller.refresh().catch(() => {});
       } finally {
         setLocalActionBusy(null);
       }
     },
-    [controller, repo],
+    [controller, repo, t],
   );
 
   const requestDiscardAll = useCallback(() => {
@@ -475,11 +470,21 @@ export function useSourceControlPanel(
       );
       await controller.refresh();
     } catch (error) {
-      setActionError(normalizeError(error));
+      reportError(t("common:errors.operationFailed"), {
+        error,
+        source: repo.repoRoot,
+      });
     } finally {
       setLocalActionBusy(null);
     }
-  }, [commitMessage, controller, repo, messageState.running, setCommitMessage]);
+  }, [
+    commitMessage,
+    controller,
+    repo,
+    messageState.running,
+    setCommitMessage,
+    t,
+  ]);
 
   const push = useCallback(async () => {
     if (!repo) return;
@@ -493,9 +498,12 @@ export function useSourceControlPanel(
       return;
     }
     if (result.error) {
-      setActionError(result.error);
+      reportError(t("common:errors.operationFailed"), {
+        error: result.error,
+        source: repo.repoRoot,
+      });
     }
-  }, [controller, repo, status?.upstream]);
+  }, [controller, repo, status?.upstream, t]);
 
   const pendingDiscardView = useMemo<PendingDiscard | null>(() => {
     if (!pendingDiscard) return null;

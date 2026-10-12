@@ -13,7 +13,7 @@ import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import type { FileReference } from "@/modules/file-actions/references";
 import { useState, type ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & {
   href: string;
@@ -60,18 +60,15 @@ export function FileReferenceLink({
                     : onOpen(file.path, file.line),
                 )
                 .catch((error) =>
-                  toast.error(t("fileActions.failed"), {
-                    description: String(error),
+                  reportError(t("fileActions.failed"), {
+                    error,
                   }),
                 );
             }}
           >
             {children}
             {reference.line !== undefined && (
-              <>
-                {" "}
-                {t("fileActions.lineReference", { line: reference.line })}
-              </>
+              <> {t("fileActions.lineReference", { line: reference.line })}</>
             )}
           </a>
         </Hint>

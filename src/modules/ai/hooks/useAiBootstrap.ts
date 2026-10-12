@@ -8,7 +8,8 @@ import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import i18n from "@/i18n";
+import { reportError } from "@/lib/errors";
 import { modelRefKey, modelRefsEqual } from "../config";
 import {
   listExternalAgents,
@@ -226,7 +227,9 @@ export function useAiBootstrap(): {
 
   useEffect(() => {
     if (!sessionSyncError) return;
-    toast.error("AI session sync failed", { description: sessionSyncError });
+    reportError(i18n.t("common:errors.sessionSyncFailed"), {
+      description: sessionSyncError,
+    });
   }, [sessionSyncError]);
 
   return { hasComposer, keysLoaded };

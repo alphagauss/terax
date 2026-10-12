@@ -48,6 +48,7 @@ import { Edit02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMemo, useRef, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
@@ -102,11 +103,12 @@ export function ThemesSection() {
         await saveCustomTheme(result.theme);
         setThemeId(result.theme.id);
       } catch (e) {
-        setImportError(
+        reportError(
           t("themes.errors.read", {
             name: file.name,
             error: e instanceof Error ? e.message : t("themes.errors.unknown"),
           }),
+          { error: e, source: file.name },
         );
         return;
       }
@@ -138,9 +140,10 @@ export function ThemesSection() {
       await setBackgroundKind("image");
       if (prev && prev !== id) await deleteBgImage(prev).catch(() => undefined);
     } catch (e) {
-      setBgError(
-        e instanceof Error ? e.message : t("themes.errors.importImage"),
-      );
+      reportError(t("themes.errors.importImage"), {
+        error: e,
+        source: file.name,
+      });
     }
   };
 

@@ -4,6 +4,7 @@ import { readClipboardFiles } from "@/modules/file-actions/clipboard";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { formatDroppedPaths } from "@/modules/terminal/lib/quoteShellPath";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import i18n from "@/i18n";
 
 /** 拖放与粘贴共用终端宿主文件策略，不上传文件或自动提交命令。 */
@@ -31,8 +32,10 @@ export async function readTerminalClipboard(): Promise<string> {
   try {
     const paths = await readClipboardFiles();
     if (paths.length) return terminalFilePaths(paths);
-  } catch {
-    toast.error(i18n.t("common:fileActions.clipboardReadFailed"));
+  } catch (cause) {
+    reportError(i18n.t("common:fileActions.clipboardReadFailed"), {
+      error: cause,
+    });
     return "";
   }
   if (IS_LINUX) {

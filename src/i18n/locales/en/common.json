@@ -69,5 +69,32 @@
     "toolarge": "The file exceeds the 10 MB text copy limit.",
     "remoteFileInputRejected": "In WSL and SSH windows, paste or drop files into the file explorer to upload them.",
     "clipboardReadFailed": "Unable to read clipboard files. Please try again."
+  },
+  "errors": {
+    "region": "Errors",
+    "history": "Recent errors ({{count}})",
+    "details": "Details",
+    "hideDetails": "Hide details",
+    "copy": "Copy error",
+    "copied": "Copied",
+    "copyFailed": "Copy failed; select details to copy",
+    "repeated": "{{count}} occurrences",
+    "dismiss": "Dismiss: {{title}}",
+    "operationFailed": "Operation failed",
+    "saveFailed": "Could not save settings",
+    "workspaceOpenFailed": "Failed to open Workspace window",
+    "registerFailed": "Could not register for Open With",
+    "unregisterFailed": "Could not remove Open With registration",
+    "undoCommitFailed": "Could not undo commit",
+    "formatFailed": "Language server format failed",
+    "sessionSyncFailed": "AI session sync failed",
+    "transcriptionFailed": "Transcription failed",
+    "microphoneFailed": "Microphone access failed",
+    "serverStartFailed": "{{name}} language server failed to start",
+    "serverStopped": "{{name}} language server stopped",
+    "serverCrashing": "{{name}} language server keeps crashing",
+    "serverExited": "{{name}} language server exited",
+    "serverGivingUp": "Giving up for this workspace.",
+    "clear": "Clear all"
   }
 }

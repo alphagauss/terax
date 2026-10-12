@@ -6,7 +6,8 @@ import { ActivePath } from "./ActivePath";
 
 const mocks = vi.hoisted(() => ({ copy: vi.fn(), error: vi.fn() }));
 vi.mock("@/lib/clipboard", () => ({ writeClipboardText: mocks.copy }));
-vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -69,5 +70,7 @@ it("复制失败时提示错误", async () => {
   mocks.copy.mockRejectedValueOnce(new Error("clipboard unavailable"));
   await act(async () => root.render(<ActivePath path="/project" />));
   await copyFromMenu();
-  expect(mocks.error).toHaveBeenCalledWith("common:pageMenu.copyFailed");
+  expect(mocks.error).toHaveBeenCalledWith("common:pageMenu.copyFailed", {
+    error: expect.objectContaining({ message: "clipboard unavailable" }),
+  });
 });

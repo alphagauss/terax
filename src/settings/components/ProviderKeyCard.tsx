@@ -22,6 +22,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -85,7 +86,7 @@ export function ProviderKeyCard({
       setValue("");
       setReveal(false);
     } catch (e) {
-      setError(t("models.card.failedSave", { error: String(e) }));
+      reportError(t("common:errors.saveFailed"), { error: e });
     } finally {
       setSaving(false);
     }

@@ -38,6 +38,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   inlineCompletion,
   triggerInlineCompletion,
@@ -313,8 +314,8 @@ export const EditorCore = memo(
           try {
             res = await lspFormatDocument(view);
           } catch (e) {
-            toast.error("Language server format failed", {
-              description: String(e),
+            reportError(i18n.t("common:errors.formatFailed"), {
+              error: e,
             });
           }
           if (res === "unsupported" && !warnedNoFormatRef.current) {
@@ -338,8 +339,8 @@ export const EditorCore = memo(
       try {
         saved = await saveRef.current();
       } catch (error) {
-        toast.error(i18n.t("editor:saveFailed"), {
-          description: String(error),
+        reportError(i18n.t("editor:saveFailed"), {
+          error,
         });
         return false;
       }
@@ -351,7 +352,7 @@ export const EditorCore = memo(
           prefs.editorCustomFormatCommand,
         );
         if (error) {
-          toast.error(i18n.t("editor:formatFailed", { formatter }), {
+          reportError(i18n.t("editor:formatFailed", { formatter }), {
             description: error,
           });
         } else {

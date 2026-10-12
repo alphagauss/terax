@@ -30,7 +30,10 @@ const mocks = vi.hoisted(() => ({
   saveProfile: vi.fn(),
   spawnWorkspaceProcess: vi.fn(),
   toastSuccess: vi.fn(),
+  reportError: vi.fn(),
 }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.reportError }));
 
 const profile = {
   id: "ssh-production",
@@ -290,8 +293,9 @@ describe("RemoteSection persistence and launch semantics", () => {
 
     await clickButton(container, "remote.actions.openWorkspace");
 
-    expect(container.textContent).toContain(
+    expect(mocks.reportError).toHaveBeenCalledWith(
       "remote.launch.openFailedAfterSave: Error: spawn denied",
+      { error: expect.objectContaining({ message: "spawn denied" }) },
     );
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     act(() => root.unmount());
@@ -303,8 +307,13 @@ describe("RemoteSection persistence and launch semantics", () => {
 
     await clickButton(container, "remote.actions.openWorkspace");
 
-    expect(container.textContent).toContain(
+    expect(mocks.reportError).toHaveBeenCalledWith(
       "remote.persistence.credentialsFailed: Error: keychain unavailable",
+      {
+        error: expect.objectContaining({
+          message: "Error: keychain unavailable",
+        }),
+      },
     );
     expect(mocks.spawnWorkspaceProcess).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).not.toHaveBeenCalled();

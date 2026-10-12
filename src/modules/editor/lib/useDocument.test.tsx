@@ -39,8 +39,9 @@ vi.mock("@/modules/filesystem", () => ({
 }));
 vi.mock("@/modules/lsp", () => ({ notifyDocumentSaved: vi.fn() }));
 vi.mock("sonner", () => ({
-  toast: { warning: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+  toast: { warning: vi.fn(), dismiss: vi.fn() },
 }));
+vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 
 import { resetSharedDocumentModelsForTests } from "./documentModel";
 import { useDocument } from "./useDocument";

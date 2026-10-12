@@ -131,7 +131,8 @@ vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
+vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 vi.mock("./ExplorerSearch", () => ({
   ExplorerSearch: forwardRef(() => null),
 }));

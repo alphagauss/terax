@@ -12,7 +12,8 @@ vi.mock("@/modules/file-actions/clipboard", () => ({
 vi.mock("@/modules/workspace", () => ({
   currentWorkspaceEnv: () => ({ kind: files.kind }),
 }));
-vi.mock("sonner", () => ({ toast: { info: files.info, error: files.error } }));
+vi.mock("sonner", () => ({ toast: { info: files.info } }));
+vi.mock("@/lib/errors", () => ({ reportError: files.error }));
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 const native = vi.hoisted(() => ({
   readText: vi.fn<() => Promise<string>>(),
@@ -129,6 +130,7 @@ describe("terminalClipboard", () => {
     expect(web.readText).not.toHaveBeenCalled();
     expect(files.error).toHaveBeenCalledWith(
       "common:fileActions.clipboardReadFailed",
+      { error: expect.objectContaining({ message: "occupied" }) },
     );
   });
 

@@ -6,6 +6,7 @@
 import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { WindowControls } from "@/components/WindowControls";
+import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
 import { useTheme } from "@/modules/theme";
@@ -146,6 +147,7 @@ export function Header({
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>
 
+      <ErrorHistoryButton />
       {settingsButton}
       {themeButton}
       {secondarySidebarButton}

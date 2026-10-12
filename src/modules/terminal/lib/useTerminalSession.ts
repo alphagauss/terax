@@ -6,7 +6,7 @@
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import i18n from "@/i18n";
 import { IS_WINDOWS } from "@/lib/platform";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { commandSubmission } from "../block/lib/commandSubmission";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -235,7 +235,7 @@ export async function submitToTerminal(
   const slot = getSlotForTerminal(terminalId);
   const deco = s?.blockDecorations;
   if (!s || s.shellExited || !s.pty || !slot || !deco) {
-    toast.error(i18n.t("terminal:block.notReady"));
+    reportError(i18n.t("terminal:block.notReady"));
     return false;
   }
   if (s.submissionPending || s.blockMode !== "prompt") return false;
@@ -245,7 +245,7 @@ export async function submitToTerminal(
     slot.term.modes.bracketedPasteMode,
   );
   if (data === null) {
-    toast.error(i18n.t("terminal:block.multilineUnsupported"));
+    reportError(i18n.t("terminal:block.multilineUnsupported"));
     return false;
   }
   const submission = { cancelled: false };
@@ -270,14 +270,14 @@ export async function submitToTerminal(
     markCommandSubmitted(terminalId, s);
     await pty.write(data, true);
     return true;
-  } catch {
+  } catch (cause) {
     // 失败回包不能覆盖期间已执行的命令或重新创建的会话。
     if (s.pty === pty && s.submittedCommand === text && !s.shellExited) {
       s.submittedCommand = null;
       deco.cancelSubmission();
       setTerminalCommandState(terminalId, "idle");
     }
-    toast.error(i18n.t("terminal:block.submitFailed"));
+    reportError(i18n.t("terminal:block.submitFailed"), { error: cause });
     return false;
   } finally {
     s.submissionPending = null;

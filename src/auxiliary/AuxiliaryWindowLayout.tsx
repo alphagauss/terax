@@ -4,6 +4,8 @@
  */
 
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
+import { ErrorHost } from "@/components/errors/ErrorHost";
+import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
@@ -158,6 +160,7 @@ export function AuxiliaryWindowLayout({
             <span className="truncate text-[12px] font-medium">{title}</span>
           )}
         </div>
+        <ErrorHistoryButton />
         {USE_CUSTOM_WINDOW_CONTROLS && (
           <>
             <span className="ml-1 h-5 w-px shrink-0 bg-border/60" />
@@ -169,6 +172,7 @@ export function AuxiliaryWindowLayout({
         )}
       </header>
       {children}
+      <ErrorHost />
       <ToastDismissOnClick />
       <Toaster
         position="bottom-right"

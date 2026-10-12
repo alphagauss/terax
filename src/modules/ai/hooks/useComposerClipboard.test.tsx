@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
   session: "a",
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("sonner", () => ({ toast: { info: mocks.info, error: mocks.error } }));
+vi.mock("sonner", () => ({ toast: { info: mocks.info } }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));

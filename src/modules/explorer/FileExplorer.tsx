@@ -75,7 +75,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   ExplorerSearch,
   type ExplorerSearchHandle,
@@ -467,10 +467,11 @@ export const FileExplorer = memo(
           });
           requestTransferPanel(task.id);
         } catch (error) {
-          toast.error(
+          reportError(
             t("menu.transferFailed", {
               error: formatTransferError(error, t),
             }),
+            { error },
           );
         }
       },
@@ -493,10 +494,11 @@ export const FileExplorer = memo(
           });
           requestTransferPanel(task.id);
         } catch (error) {
-          toast.error(
+          reportError(
             t("menu.transferFailed", {
               error: formatTransferError(error, t),
             }),
+            { error },
           );
         }
       },
@@ -673,7 +675,7 @@ export const FileExplorer = memo(
           if (result.kind === "unavailable") {
             setPermanentDeleteTarget(target);
           } else if (result.kind === "error") {
-            toast.error(result.reason);
+            reportError(result.reason);
           }
         });
       },
@@ -684,7 +686,7 @@ export const FileExplorer = memo(
       (path: string) => {
         void tree.deletePath(path).then((result) => {
           if (result.kind === "error") {
-            toast.error(t("menu.deleteFailed", { error: result.reason }));
+            reportError(t("menu.deleteFailed", { error: result.reason }));
           }
         });
       },
@@ -697,7 +699,10 @@ export const FileExplorer = memo(
           path,
           menuSourcePointRef.current ?? undefined,
         ).catch((error) =>
-          toast.error(t("menu.propertiesOpenFailed", { error: String(error) })),
+          reportError(
+            t("menu.propertiesOpenFailed", { error: String(error) }),
+            { error },
+          ),
         );
       },
       [t],

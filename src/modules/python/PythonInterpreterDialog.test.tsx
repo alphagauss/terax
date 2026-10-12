@@ -10,11 +10,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  reportError: vi.fn(),
   list: vi.fn(),
   open: vi.fn(),
   probe: vi.fn(),
   translate: (key: string) => key,
 }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.reportError }));
 
 vi.mock("@/components/controls/button", () => ({
   Button: ({ children, ...props }: { children: ReactNode }) =>
@@ -125,7 +128,9 @@ describe("PythonInterpreterDialog", () => {
       kind: "local",
     });
     expect(onSelect).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("selectionFailed");
+    expect(mocks.reportError).toHaveBeenCalledWith("selectionFailed", {
+      error: expect.objectContaining({ message: "store failed" }),
+    });
     expect(container.textContent).not.toContain("probeFailed");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     act(() => root.unmount());

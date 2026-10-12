@@ -71,7 +71,6 @@ it("正文变更和删除即时同步，思考空白不撑高卡片，模型错�
         sessionId="live"
         connectionId="connection"
         canRetry
-        onError={vi.fn()}
       />,
     ),
   );
@@ -213,7 +212,6 @@ it("汇总定位当前会话问题，忽略更新计数，重发新增卡片，�
         sessionId="session"
         connectionId="connection"
         canRetry
-        onError={vi.fn()}
       />,
     ),
   );

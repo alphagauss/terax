@@ -23,7 +23,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import {
   Streamdown,
   defaultRehypePlugins,
@@ -101,7 +101,7 @@ function ChatLink({ href, children }: React.ComponentProps<"a">) {
       onClick={(event) => {
         event.preventDefault();
         void openUrl(href).catch((error) =>
-          toast.error(t("fileActions.failed"), { description: String(error) }),
+          reportError(t("fileActions.failed"), { error }),
         );
       }}
     >

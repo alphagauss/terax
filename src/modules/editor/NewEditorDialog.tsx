@@ -17,6 +17,7 @@ import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -83,7 +84,7 @@ export function NewEditorDialog({
       onCreated(path);
       onOpenChange(false);
     } catch (e) {
-      setError(String(e));
+      reportError(t("common:errors.operationFailed"), { error: e });
     }
   };
 

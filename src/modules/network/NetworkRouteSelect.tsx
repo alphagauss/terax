@@ -15,6 +15,7 @@ import {
   useNetworkSettings,
 } from "@/modules/network/settings";
 import { useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 /** 展示并保存一个连接的出口，保存失败时保留原值并提供翻译后的错误。 */
@@ -31,7 +32,6 @@ export function NetworkRouteSelect({
   const routeLabel = label ?? t("network.route");
   const { values, ready, error: loadError } = useNetworkSettings();
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(false);
   const mode = values[target] === "shared" ? "shared" : "direct";
   return (
     <div className="flex flex-col gap-1.5">
@@ -43,9 +43,13 @@ export function NetworkRouteSelect({
           onValueChange={(value) => {
             if (value !== "direct" && value !== "shared") return;
             setSaving(true);
-            setError(false);
             void setNetworkRoute(target, value)
-              .catch(() => setError(true))
+              .catch((error) =>
+                reportError(t("network.saveError"), {
+                  error,
+                  source: routeLabel,
+                }),
+              )
               .finally(() => setSaving(false));
           }}
         >
@@ -61,7 +65,7 @@ export function NetworkRouteSelect({
       {mode === "shared" && !values.proxyUrl && (
         <p className="text-xs text-destructive">{t("network.missing")}</p>
       )}
-      {(error || loadError) && (
+      {loadError && (
         <p className="text-xs text-destructive">{t("network.saveError")}</p>
       )}
     </div>

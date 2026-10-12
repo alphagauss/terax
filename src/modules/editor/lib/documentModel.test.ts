@@ -21,10 +21,11 @@ vi.mock("@/modules/lsp", () => ({
 vi.mock("sonner", () => ({
   toast: {
     warning: mocks.warning,
-    error: mocks.error,
+
     dismiss: mocks.dismiss,
   },
 }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { WorkspaceEnv } from "@/modules/workspace";

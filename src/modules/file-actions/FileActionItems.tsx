@@ -11,7 +11,7 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { requestTransferPanel } from "@/modules/transfers/store";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 
 export function FileActionItems({
   target,
@@ -30,7 +30,7 @@ export function FileActionItems({
     void (async () => action(resolve ? await resolve() : target))().catch(
       (error) => {
         const code = error instanceof Error ? error.message : String(error);
-        toast.error(t("fileActions.failed"), {
+        reportError(t("fileActions.failed"), {
           description:
             code === "binary" || code === "toolarge"
               ? t(`fileActions.${code}`)
@@ -99,8 +99,8 @@ export function FileActionItems({
             const file = resolve ? await resolve().catch(() => target) : target;
             await copyFilePath(file.path);
           })().catch((error) =>
-            toast.error(t("fileActions.failed"), {
-              description: String(error),
+            reportError(t("fileActions.failed"), {
+              error,
             }),
           );
         }}

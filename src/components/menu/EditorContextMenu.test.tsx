@@ -40,7 +40,8 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
+
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 
 let root: Root;
 let host: HTMLDivElement;
@@ -264,7 +265,9 @@ it("原生请求过期时不执行 CodeMirror 历史，目标移除时只取消�
   );
   await act(async () => item("undo").click());
   await vi.waitFor(() =>
-    expect(mocks.error).toHaveBeenCalledWith("editorMenu.failed"),
+    expect(mocks.error).toHaveBeenCalledWith("editorMenu.failed", {
+      error: expect.objectContaining({ message: "editor menu expired" }),
+    }),
   );
   expect(editor.state.doc.toString()).toBe("原文修改");
   const field = input();

@@ -2,7 +2,7 @@
  * 配置单个 Channel 连接的模型使用方式，复用 AI 模型与参数组件。
  * 精确写入即时生效于后续任务，不修改连接草稿或重建接收服务。
  */
-import { useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { SectionHeading } from "@/components/layout/PageHeader";
 import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
@@ -32,7 +32,6 @@ export function ChannelModelSettings({
   const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const customProviders = usePreferencesStore((s) => s.customProviders);
   const defaultModel = usePreferencesStore((s) => s.defaultModel);
-  const [error, setError] = useState<string | null>(null);
   const id = channelModelUsageId(connectionId);
   const usage = getModelUsage(usages, id);
   const model = usage.model ?? defaultModel;
@@ -67,25 +66,24 @@ export function ChannelModelSettings({
         }
         disabled={disabled}
         onSelect={(selected) => {
-          setError(null);
           void setModelUsageModel(id, selected).catch((e) =>
-            setError(String(e)),
+            reportError(t("common:errors.saveFailed"), {
+              error: e,
+              source: connectionId,
+            }),
           );
         }}
         onParametersChange={(selections) => {
           if (!model) return;
-          setError(null);
           void setModelUsageParameters(id, model, selections).catch((e) =>
-            setError(String(e)),
+            reportError(t("common:errors.saveFailed"), {
+              error: e,
+              source: connectionId,
+            }),
           );
         }}
       />
       <p className="text-xs text-muted-foreground">{t("model.help")}</p>
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
     </section>
   );
 }

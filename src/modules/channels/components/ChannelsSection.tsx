@@ -37,6 +37,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 const CHANNEL_OPTIONS = [
@@ -59,7 +60,7 @@ export function ChannelsSection() {
   const [drafts, setDrafts] = useState<Record<string, Partial<ChannelDraft>>>(
     {},
   );
-  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loginPendingId, setLoginPendingId] = useState<string | null>(null);
   const pending = useRef(false);
@@ -84,8 +85,7 @@ export function ChannelsSection() {
         else setReady(true);
       })
       .catch(() => {
-        if (!disposed)
-          setErrors((current) => ({ ...current, page: "unavailable" }));
+        if (!disposed) setLoadError(true);
       });
     return () => {
       disposed = true;
@@ -101,19 +101,20 @@ export function ChannelsSection() {
     if (pending.current) return false;
     pending.current = true;
     setBusy(true);
-    setErrors((current) => {
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
     try {
       await work();
       return true;
     } catch (error) {
-      setErrors((current) => ({
-        ...current,
-        [key]: error instanceof Error ? error.message : "unavailable",
-      }));
+      const code = error instanceof Error ? error.message : "unavailable";
+      reportError(
+        t(`errors.${code}`, { defaultValue: t("errors.unavailable") }),
+        {
+          error,
+          source:
+            snapshots.find((item) => item.connection.id === key)?.connection
+              .name ?? key,
+        },
+      );
       return false;
     } finally {
       pending.current = false;
@@ -163,7 +164,7 @@ export function ChannelsSection() {
     });
   };
 
-  const message = errors.page ?? serviceError;
+  const message = loadError ? "unavailable" : serviceError;
   const disabled = busy || !ready || Boolean(serviceError);
   const groups = new Map<string, typeof snapshots>();
   for (const snapshot of snapshots) {
@@ -262,7 +263,6 @@ export function ChannelsSection() {
                 edits={drafts[selected.connection.id]}
                 loginPending={loginPendingId === selected.connection.id}
                 disabled={disabled}
-                error={errors[selected.connection.id]}
                 updateDraft={updateDraft}
                 run={run}
                 perform={perform}
@@ -284,7 +284,7 @@ export function ChannelsSection() {
             <Button
               variant="outline"
               onClick={() => {
-                setErrors((current) => ({ ...current, page: undefined }));
+                setLoadError(false);
                 setRetry((value) => value + 1);
               }}
             >

@@ -36,8 +36,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("sonner", () => ({
-  toast: { success: mocks.success, error: mocks.error },
+  toast: { success: mocks.success },
 }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
 
 let root: Root;
 let container: HTMLDivElement;
@@ -207,10 +208,12 @@ it("链接保存完整地址，图片来源变化时不复制替换后的图片"
   image.src = "/changed.png";
   await choose("pageMenu.copyImage");
   expect(mocks.image).not.toHaveBeenCalled();
-  expect(mocks.error).toHaveBeenCalledWith("pageMenu.copyFailed");
+  expect(mocks.error).toHaveBeenCalledWith("pageMenu.copyFailed", {
+    error: expect.objectContaining({ message: "image changed" }),
+  });
 });
 
-it("菜单挂载在真实弹窗内，Esc 只关闭菜单，点击外部也可关闭", async () => {
+it("菜单归属当前弹窗或错误浮层，Esc 和点击外部只关闭菜单", async () => {
   const dialogChanged = vi.fn();
   await act(async () =>
     root.render(
@@ -221,6 +224,9 @@ it("菜单挂载在真实弹窗内，Esc 只关闭菜单，点击外部也可关
             <DialogTitle>测试</DialogTitle>
             <DialogDescription>菜单</DialogDescription>
             <a href="https://example.com">链接</a>
+            <div data-error-host>
+              <a href="https://example.com/error">错误链接</a>
+            </div>
             <button type="button">外部按钮</button>
           </DialogContent>
         </Dialog>
@@ -256,6 +262,12 @@ it("菜单挂载在真实弹窗内，Esc 只关闭菜单，点击外部也可关
     );
   });
   expect(document.querySelector('[role="menu"]')).toBeNull();
+  const errorLink = dialog.querySelector<HTMLElement>("[data-error-host] a");
+  if (!errorLink) throw new Error("缺少错误详情链接");
+  await open(errorLink);
+  expect(
+    document.querySelector('[role="menu"]')?.closest("[data-error-host]"),
+  ).not.toBeNull();
 });
 
 it.each([true, false, "failed"])(
@@ -285,7 +297,9 @@ it.each([true, false, "failed"])(
       expect(mocks.success).toHaveBeenCalledWith("pageMenu.saved");
     else expect(mocks.success).not.toHaveBeenCalled();
     if (result === "failed")
-      expect(mocks.error).toHaveBeenCalledWith("pageMenu.saveFailed");
+      expect(mocks.error).toHaveBeenCalledWith("pageMenu.saveFailed", {
+        error: expect.objectContaining({ message: "save failed" }),
+      });
     else expect(mocks.error).not.toHaveBeenCalled();
   },
 );

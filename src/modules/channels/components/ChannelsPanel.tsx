@@ -30,6 +30,7 @@ import { Add01Icon, ArrowUp02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 
 type Draft = { text: string; paths: string[] };
@@ -60,7 +61,6 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const draft = drafts[draftKey] ?? EMPTY_DRAFT;
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
   const [chat, setChat] = useState<Chat<UIMessage>>();
   const [historyError, setHistoryError] = useState(false);
   // 注册表失效时立即停止展示旧实例，随后复用现有冷加载入口。
@@ -103,7 +103,6 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
   const submit = async () => {
     if (!canSend || !conversation) return;
     setPending(true);
-    setError("");
     try {
       await sendChannelContent({
         connectionId: id,
@@ -117,8 +116,8 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
         },
       });
       updateDraft(EMPTY_DRAFT);
-    } catch {
-      setError(t("outbound.sendFailed"));
+    } catch (error) {
+      reportError(t("outbound.sendFailed"), { error, source: id });
     } finally {
       setPending(false);
     }
@@ -168,7 +167,8 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
               <Button
                 onClick={() =>
                   void requestChannels({ action: "open", id, sessionId }).catch(
-                    () => setError(t("errors.storage")),
+                    (error) =>
+                      reportError(t("errors.storage"), { error, source: id }),
                   )
                 }
               >
@@ -201,18 +201,14 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
           sessionId={viewing}
           connectionId={id}
           canRetry={snapshot?.status === "online"}
-          onError={setError}
         />
       ) : (
         <div className="min-h-0 flex-1" />
       )}
       <div className="space-y-2 border-t border-border p-3">
-        {(error || serviceError || historyError) && (
+        {(serviceError || historyError) && (
           <p role="alert" className="text-destructive">
-            {error ||
-              (historyError
-                ? t("errors.storage")
-                : t(`errors.${serviceError}`))}
+            {historyError ? t("errors.storage") : t(`errors.${serviceError}`)}
           </p>
         )}
         {draft.paths.length > 16 && (
@@ -268,7 +264,12 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
                         };
                       });
                   })
-                  .catch(() => setError(t("outbound.fileFailed")));
+                  .catch((error) =>
+                    reportError(t("outbound.fileFailed"), {
+                      error,
+                      source: id,
+                    }),
+                  );
               }}
             >
               <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />

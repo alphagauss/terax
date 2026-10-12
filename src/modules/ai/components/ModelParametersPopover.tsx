@@ -1,5 +1,6 @@
 /** 会话参数只影响下一轮；面板复用模型定义，运行中的快照保持不变。 */
-import { useState } from "react";
+
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
 import {
@@ -34,7 +35,6 @@ export function ModelParametersPopover() {
     (s) => s.sessions.find((item) => item.id === s.activeSessionId)?.channelId,
   );
   const definitions = usePreferencesStore((s) => s.modelParameters);
-  const [error, setError] = useState<string | null>(null);
   if (
     !model ||
     !sessionId ||
@@ -91,11 +91,12 @@ export function ModelParametersPopover() {
               selections={selections}
               compact
               onChange={(next) => {
-                setError(null);
                 void useChatStore
                   .getState()
                   .setParameterSelections(sessionId, model, next)
-                  .catch((e) => setError(String(e)));
+                  .catch((e) =>
+                    reportError(t("common:errors.saveFailed"), { error: e }),
+                  );
               }}
             />
           ) : (
@@ -104,11 +105,6 @@ export function ModelParametersPopover() {
           {isBusy && (
             <p role="status" className="text-xs text-muted-foreground">
               {text("nextTurn")}
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="text-xs text-destructive">
-              {error}
             </p>
           )}
           <div className="flex justify-between gap-2 border-t border-border pt-2">
@@ -120,7 +116,9 @@ export function ModelParametersPopover() {
                 void useChatStore
                   .getState()
                   .setParameterSelections(sessionId, model, {})
-                  .catch((e) => setError(String(e)))
+                  .catch((e) =>
+                    reportError(t("common:errors.saveFailed"), { error: e }),
+                  )
               }
             >
               {text("reset")}

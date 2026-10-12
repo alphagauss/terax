@@ -3,7 +3,8 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
+import i18n from "@/i18n";
+import { reportError } from "@/lib/errors";
 import type { TeraxLspClient } from "./client";
 import { detectBinary } from "./detect";
 import { getLspNavigator } from "./navigator";
@@ -204,9 +205,13 @@ async function createSession(
   } catch (e) {
     recordCrash(key);
     store.removeSession(key, preset.id);
-    toast.error(`${preset.name} language server failed to start`, {
-      description: String(e),
-    });
+    reportError(
+      i18n.t("common:errors.serverStartFailed", { name: preset.name }),
+      {
+        error: e,
+        source: root,
+      },
+    );
     return null;
   }
 
@@ -275,9 +280,13 @@ function handleServerExit(key: string): void {
       Array.from({ length: MAX_CRASHES }, () => Date.now()),
     );
     useLspRuntimeStore.getState().setFailed(managed.preset.id, info.reason);
-    toast.error(`${managed.preset.name} language server stopped`, {
-      description: info.reason,
-    });
+    reportError(
+      i18n.t("common:errors.serverStopped", { name: managed.preset.name }),
+      {
+        description: info.reason,
+        source: managed.root,
+      },
+    );
     return;
   }
   const tail = info?.stderrTail;
@@ -288,15 +297,23 @@ function handleServerExit(key: string): void {
         managed.preset.id,
         tail ? tail.slice(-300) : "The server kept crashing.",
       );
-    toast.error(`${managed.preset.name} language server keeps crashing`, {
-      description: tail ? tail.slice(-300) : "Giving up for this workspace.",
-    });
+    reportError(
+      i18n.t("common:errors.serverCrashing", { name: managed.preset.name }),
+      {
+        description: tail || i18n.t("common:errors.serverGivingUp"),
+        source: managed.root,
+      },
+    );
     return;
   }
   if (tail) {
-    toast.error(`${managed.preset.name} language server exited`, {
-      description: tail.slice(-300),
-    });
+    reportError(
+      i18n.t("common:errors.serverExited", { name: managed.preset.name }),
+      {
+        description: tail,
+        source: managed.root,
+      },
+    );
   }
   // Delay the re-acquire trigger so an OOM-killed server doesn't respawn
   // into an instant second memory spike.

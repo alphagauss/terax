@@ -25,6 +25,8 @@ vi.mock("@/components/WindowControls", () => ({
 }));
 vi.mock("@/lib/platform", () => ({
   IS_MAC: true,
+  IS_WINDOWS: false,
+  IS_LINUX: false,
   USE_CUSTOM_WINDOW_CONTROLS: false,
 }));
 vi.mock("@/modules/theme", () => ({

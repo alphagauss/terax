@@ -24,6 +24,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import {
   emptyTunnelForm,
@@ -161,7 +162,7 @@ export function TunnelManagerDialog({
       } else {
         setSelectedId(id);
       }
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
       await refresh();
     } finally {
       setBusy(false);
@@ -179,7 +180,7 @@ export function TunnelManagerDialog({
       startNew();
       await refresh();
     } catch (cause) {
-      setError(String(cause));
+      reportError(t("common:errors.operationFailed"), { error: cause });
     } finally {
       setBusy(false);
     }

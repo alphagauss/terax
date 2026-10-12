@@ -17,6 +17,7 @@ import { DEFAULT_PREFERENCES } from "@/modules/settings/store";
 import { modelRefKey } from "@/modules/ai/config";
 
 const io = vi.hoisted(() => ({
+  reportError: vi.fn(),
   request: vi.fn(),
   route: vi.fn(),
   login: vi.fn(),
@@ -24,6 +25,8 @@ const io = vi.hoisted(() => ({
   parameters: vi.fn(),
   network: { values: {} as Record<string, unknown>, ready: true, error: false },
 }));
+
+vi.mock("@/lib/errors", () => ({ reportError: io.reportError }));
 
 vi.mock("@/modules/settings/store", async (original) => ({
   ...(await original<typeof import("@/modules/settings/store")>()),
@@ -71,6 +74,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(async () => {
+  io.reportError.mockReset();
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
   usePreferencesStore.setState(DEFAULT_PREFERENCES);
   io.model.mockReset().mockResolvedValue(undefined);
@@ -208,7 +212,13 @@ it("路由保存失败保留草稿和部分成功结果，重试只写未保存�
     throw new Error("disk failed");
   });
   await act(async () => button("save").click());
-  expect(container.textContent).toContain("errors.route-save");
+  expect(io.reportError).toHaveBeenCalledWith("errors.route-save", {
+    error: expect.objectContaining({
+      message: "route-save",
+      cause: expect.objectContaining({ message: "disk failed" }),
+    }),
+    source: "Alpha",
+  });
   expect(nameInput().value).toBe("Renamed");
   expect(useChannelsView.getState().snapshots[0].connection.name).toBe(
     "Renamed",
@@ -243,7 +253,10 @@ it("打开平台菜单不创建实例，选择平台后自动命名并授权，�
     { action: "login", id: "new" },
   ]);
   expect(nameInput().value).toBe("WeChat 1");
-  expect(container.textContent).toContain("errors.network");
+  expect(io.reportError).toHaveBeenCalledWith("errors.network", {
+    error: expect.objectContaining({ message: "network" }),
+    source: "new",
+  });
   expect(button("login").disabled).toBe(false);
 });
 

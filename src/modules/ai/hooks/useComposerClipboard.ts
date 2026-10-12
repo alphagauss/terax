@@ -7,6 +7,7 @@ import {
 } from "react";
 import { readClipboardFiles } from "@/modules/file-actions/clipboard";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { clipboardImageFiles } from "@/modules/ai/lib/clipboardImages";
 import type { useComposer } from "@/modules/ai/lib/composer";
@@ -44,7 +45,7 @@ export function useComposerClipboard(composer: ReturnType<typeof useComposer>) {
       await current.current.attachFileByPath(path);
     }
   };
-  const failed = () => toast.error(t("composer.clipboardFailed"));
+  const failed = () => reportError(t("composer.clipboardFailed"));
 
   return {
     onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -109,7 +110,7 @@ export function useComposerClipboard(composer: ReturnType<typeof useComposer>) {
           else if (images.length) await current.current.addFiles(images);
           else if (text) insertText();
           else if (fileData)
-            toast.error(t("composer.clipboardFilesUnavailable"));
+            reportError(t("composer.clipboardFilesUnavailable"));
         })
         .catch(() => {
           if (!valid()) return;

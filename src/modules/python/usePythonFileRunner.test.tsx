@@ -67,6 +67,7 @@ vi.mock("sonner", () => ({
     dismiss: mocks.toastDismiss,
   }),
 }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.toastError }));
 
 const interpreter: PythonInterpreter = {
   path: "C:/Python/python.exe",
@@ -379,7 +380,7 @@ describe("usePythonFileRunner", () => {
 
     expect(mocks.setSelection).toHaveBeenCalledOnce();
     expect(mocks.toastError).toHaveBeenCalledWith("runFailed", {
-      description: "Error: workspace failed",
+      error: expect.objectContaining({ message: "workspace failed" }),
     });
     act(() => root.unmount());
   });

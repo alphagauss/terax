@@ -14,6 +14,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { reportError } from "@/lib/errors";
 import { parentDirectory } from "@/modules/filesystem";
 
 type Options = {
@@ -77,8 +78,9 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
           requestTransferPanel(task.id);
           toast.success(t("menu.transferQueued"));
         } catch (error) {
-          toast.error(
+          reportError(
             t("menu.transferFailed", { error: formatTransferError(error, t) }),
+            { error },
           );
         }
         return;
@@ -86,7 +88,7 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
       try {
         await invoke("fs_copy", { sources, destDir: destination, workspace });
       } catch (error) {
-        toast.error(t("menu.copyFailed", { error: String(error) }));
+        reportError(t("menu.copyFailed", { error: String(error) }), { error });
       } finally {
         // 多文件复制可能部分成功，失败后也刷新实际目录。
         onCopied(destination);
@@ -106,7 +108,7 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
       }
       await importFiles(paths, destination);
     } catch (error) {
-      toast.error(t("menu.pasteFailed", { error: String(error) }));
+      reportError(t("menu.pasteFailed", { error: String(error) }), { error });
     } finally {
       pasting.current = false;
     }

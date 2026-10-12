@@ -126,7 +126,8 @@ vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+
+vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 
 import {
   TransferConflictDialog,
