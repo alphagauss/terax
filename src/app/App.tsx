@@ -841,17 +841,6 @@ export default function App() {
     [inheritedCwdForNewTab, openTerminalPage],
   );
 
-  const sendCd = useCallback(
-    (path: string) => {
-      if (activeTerminalId === null) return;
-      const term = terminalRefs.current.get(activeTerminalId);
-      if (!term) return;
-      term.write(`cd ${quoteShellArg(path)}\r`);
-      term.focus();
-    },
-    [activeTerminalId],
-  );
-
   const cdInNewTab = useCallback(
     (path: string) => {
       const tabId = newTab(path);
@@ -2183,11 +2172,9 @@ export default function App() {
             <StatusBar
               cwd={activeCwd}
               filePath={activeFilePath}
-              home={home}
               workspaceError={environmentError}
               onWorkspaceRetry={ensureWorkspaceReady}
               onWorkspaceReconnect={requestSshReconnect}
-              onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onToggleAi={toggleAiPanel}
               aiOpen={sidebar.isVisible("ai")}

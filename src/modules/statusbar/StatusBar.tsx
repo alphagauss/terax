@@ -22,18 +22,16 @@ import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon, SourceCodeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
-import { CwdBreadcrumb } from "./CwdBreadcrumb";
+import { ActivePath } from "./ActivePath";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
 
 type Props = {
   cwd: string | null;
   filePath?: string | null;
-  home: string | null;
   workspaceError: string | null;
   onWorkspaceRetry: () => Promise<string | null>;
   onWorkspaceReconnect: () => void;
-  onCd: (path: string) => void;
   onWorkspaceChange: (env: WorkspaceEnv) => void;
   onToggleAi: () => void;
   aiOpen: boolean;
@@ -43,15 +41,13 @@ type Props = {
   onSelectPython: () => void;
 };
 
-/** 组合应用级状态、后台任务入口与当前 Workspace 导航。 */
+/** 组合应用级状态、后台任务入口与活动工作页路径。 */
 export function StatusBar({
   cwd,
   filePath,
-  home,
   workspaceError,
   onWorkspaceRetry,
   onWorkspaceReconnect,
-  onCd,
   onWorkspaceChange,
   onToggleAi,
   aiOpen,
@@ -72,7 +68,7 @@ export function StatusBar({
         />
         <SshRttIndicator />
         <SshCapabilityControl />
-        <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
+        <ActivePath path={filePath ?? cwd} file={Boolean(filePath)} />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />
         {privateActive ? (

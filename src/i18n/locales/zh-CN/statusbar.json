@@ -8,10 +8,8 @@
     "label": "私密：对 AI 隐藏",
     "tooltip": "AI 无法看到此终端的输出。可用于密钥、SSH，或任何你不想发送给模型的内容。"
   },
-  "cwd": {
-    "noDirectory": "无目录",
-    "noSubfolders": "没有子文件夹",
-    "showHiddenFolders": "显示隐藏文件夹"
+  "path": {
+    "copyFullPath": "复制完整路径"
   },
   "workspace": {
     "environment": "工作区环境",
