@@ -3,7 +3,7 @@
  * 禁用时保留配置可见；参数定义与当前模型的对应关系由调用方保证。
  */
 import type { ComponentProps } from "react";
-import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
+import { ContentReveal } from "@/components/controls/content-reveal";
 import {
   modelRefKey,
   modelRefsEqual,
@@ -54,7 +54,7 @@ export function ModelRequestSettings({
             })}
           </p>
         )}
-      <ModelParameterReveal open={!!effectiveModel} transitionKey={modelKey}>
+      <ContentReveal open={!!effectiveModel} transitionKey={modelKey}>
         {effectiveModel && (
           <div className="ml-2 flex min-w-0 flex-col gap-2 border-l border-border/60 pl-3 @min-[30rem]:ml-[7.75rem]">
             {parameters.length ? (
@@ -89,7 +89,7 @@ export function ModelRequestSettings({
             )}
           </div>
         )}
-      </ModelParameterReveal>
+      </ContentReveal>
     </div>
   );
 }

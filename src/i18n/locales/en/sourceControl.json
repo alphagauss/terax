@@ -1,5 +1,13 @@
 {
+  "groups": {
+    "changes": "Changes",
+    "staged": "Staged Changes",
+    "discardAll": "Discard All Changes",
+    "stageAll": "Stage All Changes",
+    "unstageAll": "Unstage All Changes"
+  },
   "lineStats": {
+    "binary": "Binary file",
     "modified": "Modified",
     "staged": "Staged",
     "showModified": "Click to show unstaged line changes",
@@ -81,7 +89,6 @@
   "changes": "Changes",
   "all": "All",
   "stageAll": "Stage all changes",
-  "stageFile": "Stage {{path}}",
   "menu": {
     "openDiff": "Open Diff",
     "openFile": "Open File",

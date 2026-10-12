@@ -12,6 +12,8 @@ import { useRepositoryController } from "./useRepositoryController";
 const io = vi.hoisted(() => ({
   snapshot: vi.fn(),
   graphRevision: vi.fn(),
+  stage: vi.fn(),
+  unstage: vi.fn(),
 }));
 vi.mock("@/modules/ai/lib/native", async (original) => {
   const module = await original<typeof import("@/modules/ai/lib/native")>();
@@ -21,6 +23,8 @@ vi.mock("@/modules/ai/lib/native", async (original) => {
       ...module.native,
       gitPanelSnapshot: io.snapshot,
       gitGraphRevision: io.graphRevision,
+      gitStage: io.stage,
+      gitUnstage: io.unstage,
     },
   };
 });
@@ -261,6 +265,209 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
     io.graphRevision.mockReset();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps partial staging actions, diffs and tooltips scoped to each group and removes empty groups", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const controller: RepositoryController = {
+    repo: {
+      repoRoot: "/repo",
+      branch: "main",
+      upstream: null,
+      isDetached: false,
+    },
+    status: {
+      repoRoot: "/repo",
+      branch: "main",
+      headSha: "head",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      isDetached: false,
+      truncated: false,
+      changedFiles: [
+        {
+          path: "a.ts",
+          originalPath: null,
+          indexStatus: "M",
+          worktreeStatus: "M",
+          staged: true,
+          unstaged: true,
+          untracked: false,
+          statusLabel: "Modified",
+        },
+      ],
+    },
+    diffStats: null,
+    changedCount: 1,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    hasRepo: true,
+    isLoading: false,
+    localError: null,
+    busyAction: null,
+    lastRemoteError: null,
+    revision: 1,
+    graphRevision: null,
+    refresh: vi.fn(),
+    runRemoteAction: vi.fn(),
+  };
+
+  const counts = (added: number) => ({
+    added,
+    removed: 1,
+    incomplete: false,
+    isBinary: false,
+  });
+  controller.diffStats = {
+    index: { ...counts(3), files: { "a.ts": counts(3) } },
+    worktree: { ...counts(7), files: { "a.ts": counts(7) } },
+  };
+  const onOpenDiff = vi.fn();
+  const onOpenFile = vi.fn();
+  const render = () =>
+    act(async () =>
+      root.render(
+        <SourceControlViewContainer
+          open
+          sourceControl={{ ...controller }}
+          onOpenDiff={onOpenDiff}
+          onOpenFile={onOpenFile}
+        />,
+      ),
+    );
+  const row = (side: string) => document.getElementById(`scm-row-${side}:a.ts`);
+  const click = (element: Element | null | undefined) =>
+    act(async () => (element as HTMLElement)?.click());
+  try {
+    await render();
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[role="checkbox"]')).toHaveLength(0);
+    for (const [side, added, labels] of [
+      ["index", 3, ["menu.openFile", "menu.unstage"]],
+      ["worktree", 7, ["menu.openFile", "menu.discardChanges", "menu.stage"]],
+    ] as const) {
+      const fileRow = row(side);
+      if (!fileRow) throw new Error(`Missing ${side} row`);
+      expect(
+        [...fileRow.querySelectorAll("button[aria-label]")].map((button) =>
+          button.getAttribute("aria-label"),
+        ),
+      ).toEqual(labels);
+      const opened = onOpenDiff.mock.calls.length;
+      await click(fileRow.querySelector("button"));
+      await click(fileRow.querySelector("button"));
+      expect(onOpenDiff).toHaveBeenCalledTimes(opened + 2);
+      expect(onOpenDiff).toHaveBeenLastCalledWith(
+        expect.objectContaining({ path: "a.ts", side }),
+      );
+      await click(fileRow.querySelector('[aria-label="menu.openFile"]'));
+      expect(onOpenFile).toHaveBeenLastCalledWith("/repo/a.ts");
+      vi.useFakeTimers();
+      await act(async () => {
+        fileRow.querySelector("button")?.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            pointerType: "mouse",
+          }),
+        );
+        await vi.advanceTimersByTimeAsync(850);
+      });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+        `+${added}`,
+      );
+      await click(fileRow.querySelector("button"));
+      vi.useRealTimers();
+    }
+    const stagedToggle = container.querySelector<HTMLButtonElement>(
+      '[data-scm-group="index"] button[aria-expanded]',
+    );
+    await click(stagedToggle);
+    expect(stagedToggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(row("index")).toBeNull();
+    expect(row("worktree")).not.toBeNull();
+    const list = container.querySelector<HTMLElement>('[role="listbox"]');
+    await act(async () =>
+      list?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      ),
+    );
+    expect(list?.getAttribute("aria-activedescendant")).toBe(
+      "scm-row-worktree:a.ts",
+    );
+    await render();
+    expect(stagedToggle?.getAttribute("aria-expanded")).toBe("false");
+    await click(stagedToggle);
+    expect(stagedToggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(row("index")).not.toBeNull();
+    await click(row("index")?.querySelector('[aria-label="menu.unstage"]'));
+    expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts"]);
+    await click(row("worktree")?.querySelector('[aria-label="menu.stage"]'));
+    expect(io.stage).toHaveBeenLastCalledWith("/repo", ["a.ts"]);
+    await click(container.querySelector('[aria-label="groups.unstageAll"]'));
+    expect(io.unstage).toHaveBeenCalledTimes(2);
+    await click(container.querySelector('[aria-label="groups.stageAll"]'));
+    expect(io.stage).toHaveBeenCalledTimes(2);
+    expect(controller.refresh).toHaveBeenCalled();
+    if (!controller.status) throw new Error("Missing status");
+    controller.status = {
+      ...controller.status,
+      changedFiles: controller.status.changedFiles.map((file) => ({
+        ...file,
+        indexStatus: "R",
+        originalPath: "old.ts",
+      })),
+    };
+    await render();
+    await click(row("index")?.querySelector('[aria-label="menu.unstage"]'));
+    expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts", "old.ts"]);
+    await click(container.querySelector('[aria-label="groups.unstageAll"]'));
+    expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts", "old.ts"]);
+
+    if (!controller.status) throw new Error("Missing status");
+    controller.status = {
+      ...controller.status,
+      changedFiles: controller.status.changedFiles.map((file) => ({
+        ...file,
+        unstaged: false,
+        worktreeStatus: " ",
+      })),
+    };
+    await render();
+    expect(container.querySelector('[data-scm-group="worktree"]')).toBeNull();
+    expect(row("index")).not.toBeNull();
+    expect(row("worktree")).toBeNull();
+    controller.status = {
+      ...controller.status,
+      changedFiles: controller.status.changedFiles.map((file) => ({
+        ...file,
+        indexStatus: "M",
+        worktreeStatus: "D",
+        unstaged: true,
+      })),
+    };
+    await render();
+    expect(
+      row("index")?.querySelector('[aria-label="menu.openFile"]'),
+    ).toBeNull();
+    expect(
+      row("worktree")?.querySelector('[aria-label="menu.openFile"]'),
+    ).toBeNull();
+    controller.status = { ...controller.status, changedFiles: [] };
+    controller.changedCount = 0;
+    await render();
+    expect(container.querySelector('[data-scm-group="index"]')).toBeNull();
+    expect(container.querySelector('[role="option"]')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+    await act(async () => root.unmount());
+    container.remove();
     vi.unstubAllGlobals();
   }
 });

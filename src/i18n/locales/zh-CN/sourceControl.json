@@ -1,5 +1,13 @@
 {
+  "groups": {
+    "changes": "更改",
+    "staged": "暂存的更改",
+    "discardAll": "放弃所有更改",
+    "stageAll": "暂存所有更改",
+    "unstageAll": "取消暂存所有更改"
+  },
   "lineStats": {
+    "binary": "二进制文件",
     "modified": "已修改",
     "staged": "已暂存",
     "showModified": "点击查看未暂存的增删行数",
@@ -81,7 +89,6 @@
   "changes": "更改",
   "all": "全部",
   "stageAll": "暂存所有更改",
-  "stageFile": "暂存 {{path}}",
   "menu": {
     "openDiff": "打开差异",
     "openFile": "打开文件",

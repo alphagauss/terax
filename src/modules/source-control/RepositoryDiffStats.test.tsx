@@ -20,8 +20,8 @@ it("animates scope changes and refreshed counts while preserving scope until the
           <RepositoryDiffStats
             key={repo}
             stats={{
-              worktree: { added: 10, removed: 2, incomplete: false },
-              index: { added, removed: 1, incomplete: false },
+              worktree: { added: 10, removed: 2, incomplete: false, files: {} },
+              index: { added, removed: 1, incomplete: false, files: {} },
             }}
           />
         </TooltipProvider>,

@@ -254,7 +254,15 @@ export type GitCommitFileChange = {
   isBinary: boolean;
 };
 
+export type GitFileLineStats = {
+  added: number;
+  removed: number;
+  incomplete: boolean;
+  isBinary: boolean;
+};
+
 export type GitLineStats = {
+  files: Record<string, GitFileLineStats>;
   added: number;
   removed: number;
   incomplete: boolean;

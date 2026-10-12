@@ -16,8 +16,8 @@ use crate::modules::git::process::{
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitDiffSide, GitLineStats, GitLogEntry, GitLogRef,
-    GitLogRefKind, GitOutput, GitPanelDiffStats, GitPanelSnapshot, GitPushResult,
+    GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileLineStats, GitLineStats, GitLogEntry,
+    GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats, GitPanelSnapshot, GitPushResult,
     GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
     MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
@@ -208,18 +208,26 @@ fn panel_line_stats(
         return Err(GitError::command("git diff statistics", "output truncated"));
     }
     let mut stats = sum_numstat(&output.stdout)?;
-    // 未合并的索引缺少普通比较基线，不能将 Git 输出当作完整的两侧统计。
-    stats.incomplete = status.truncated
-        || status.changed_files.iter().any(|file| {
-            matches!(
-                (file.index_status.as_str(), file.worktree_status.as_str()),
-                ("U", _) | (_, "U") | ("A", "A") | ("D", "D")
-            )
-        });
+    stats.incomplete = status.truncated;
+    for file in &status.changed_files {
+        if !(if staged { file.staged } else { file.unstaged }) {
+            continue;
+        }
+        // 未合并索引没有可靠的普通比较基线，不展示看似精确的单文件数字。
+        if matches!(
+            (file.index_status.as_str(), file.worktree_status.as_str()),
+            ("U", _) | (_, "U") | ("A", "A") | ("D", "D")
+        ) {
+            stats.files.entry(file.path.clone()).or_default().incomplete = true;
+            stats.incomplete = true;
+        }
+    }
     if !staged {
         for file in status.changed_files.iter().filter(|file| file.untracked) {
+            let value = stats.files.entry(file.path.clone()).or_default();
             if !is_safe_pathspec(&file.path) {
                 stats.incomplete = true;
+                value.incomplete = true;
                 continue;
             }
             // 校验路径不越界，同时保留末级符号链接供读取器拒绝跟随。
@@ -227,22 +235,27 @@ fn panel_line_stats(
             if !repo_root.remote && resolve_within_repo(&repo_root.local_path, &file.path).is_err()
             {
                 stats.incomplete = true;
+                value.incomplete = true;
                 continue;
             }
             match read_worktree_text(repo_root, &file.path, &local_path) {
                 Ok(TextSource::Text(text)) => {
-                    stats.added += text.bytes().filter(|byte| *byte == b'\n').count() as u64
+                    value.added = text.bytes().filter(|byte| *byte == b'\n').count() as u64
                         + u64::from(!text.is_empty() && !text.ends_with('\n'));
+                    stats.added += value.added;
                 }
-                Ok(TextSource::Binary) => {}
-                Ok(TextSource::Missing) | Err(_) => stats.incomplete = true,
+                Ok(TextSource::Binary) => value.is_binary = true,
+                Ok(TextSource::Missing) | Err(_) => {
+                    value.incomplete = true;
+                    stats.incomplete = true;
+                }
             }
         }
     }
     Ok(stats)
 }
 
-/// 按 NUL 边界跳过重命名的双路径，文件名中的制表符和换行不参与统计解析。
+/// 按 NUL 边界读取文件路径，重命名使用目标路径，制表符和换行不参与统计解析。
 fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
     let invalid = || GitError::command("git diff statistics", "invalid numstat output");
     let mut stats = GitLineStats::default();
@@ -254,15 +267,26 @@ fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
         let mut columns = record.splitn(3, |byte| *byte == b'\t');
         let added = columns.next().ok_or_else(invalid)?;
         let removed = columns.next().ok_or_else(invalid)?;
-        let path = columns.next().ok_or_else(invalid)?;
+        let mut path = columns.next().ok_or_else(invalid)?;
         if path.is_empty() {
-            for _ in 0..2 {
-                if records.next().filter(|path| !path.is_empty()).is_none() {
-                    return Err(invalid());
-                }
-            }
+            records
+                .next()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(invalid)?;
+            path = records
+                .next()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(invalid)?;
         }
+        let path = String::from_utf8_lossy(path).into_owned();
         if added == b"-" && removed == b"-" {
+            stats.files.insert(
+                path,
+                GitFileLineStats {
+                    is_binary: true,
+                    ..Default::default()
+                },
+            );
             continue;
         }
         let number = |raw| {
@@ -271,14 +295,13 @@ fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
                 .and_then(|text| text.parse::<u64>().ok())
                 .ok_or_else(invalid)
         };
-        stats.added = stats
-            .added
-            .checked_add(number(added)?)
-            .ok_or_else(invalid)?;
-        stats.removed = stats
-            .removed
-            .checked_add(number(removed)?)
-            .ok_or_else(invalid)?;
+        let added = number(added)?;
+        let removed = number(removed)?;
+        stats.added = stats.added.checked_add(added).ok_or_else(invalid)?;
+        stats.removed = stats.removed.checked_add(removed).ok_or_else(invalid)?;
+        let value = stats.files.entry(path).or_default();
+        value.added = value.added.checked_add(added).ok_or_else(invalid)?;
+        value.removed = value.removed.checked_add(removed).ok_or_else(invalid)?;
     }
     Ok(stats)
 }
@@ -300,6 +323,8 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
         [
             "status",
             "--porcelain=v2",
+            // 与面板 numstat 保持相同的重命名身份，避免仓库配置导致文件统计错配。
+            "--find-renames=50%",
             "--branch",
             "-z",
             "--untracked-files=all",
@@ -1754,6 +1779,8 @@ mod tests {
     fn line_stats_parser_handles_rename_binary_and_unusual_paths() {
         let stats = sum_numstat(b"3\t1\t\0old\tname\0new\nname\0-\t-\tbinary\0").unwrap();
         assert_eq!((stats.added, stats.removed), (3, 1));
+        assert_eq!(stats.files["new\nname"].added, 3);
+        assert!(stats.files["binary"].is_binary);
         assert!(sum_numstat(b"3\t1\t\0old\0").is_err());
         assert!(sum_numstat(b"x\t1\tfile\0").is_err());
     }

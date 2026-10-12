@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { deleteSharedStoreKey } from "@/lib/sharedStore";
 import { cn } from "@/lib/utils";
-import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
+import { ContentReveal } from "@/components/controls/content-reveal";
 import { ModelPicker } from "@/modules/ai/components/ModelPicker";
 import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
@@ -1108,7 +1108,7 @@ function ModelParametersCard({
         <p className="@min-[30rem]:pl-31 text-[11px] leading-4 text-muted-foreground">
           {t("models.parameters.description")}
         </p>
-        <ModelParameterReveal
+        <ContentReveal
           open={!!selectedModel}
           transitionKey={selectedModel ? modelRefKey(selectedModel) : null}
         >
@@ -1120,7 +1120,7 @@ function ModelParametersCard({
               />
             </div>
           )}
-        </ModelParameterReveal>
+        </ContentReveal>
       </div>
     </div>
   );
@@ -1436,7 +1436,7 @@ function CustomProviderCard({
         </Hint>
       </button>
 
-      <ModelParameterReveal open={expanded} transitionKey={provider.id}>
+      <ContentReveal open={expanded} transitionKey={provider.id}>
         <div className="flex flex-col gap-field border-t border-border/40 px-3 py-2.5">
           <FieldRow label={t("models.card.name")}>
             <Input
@@ -1527,7 +1527,7 @@ function CustomProviderCard({
             )}
           </FieldRow>
         </div>
-      </ModelParameterReveal>
+      </ContentReveal>
     </div>
   );
 }

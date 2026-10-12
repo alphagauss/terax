@@ -1247,6 +1247,24 @@ fn panel_line_stats_separates_index_and_worktree_and_counts_untracked() {
     assert_eq!((index.added, index.removed), (2, 1));
     assert_eq!((worktree.added, worktree.removed), (4, 1));
     assert!(!index.incomplete && !worktree.incomplete);
+    assert_eq!(
+        (
+            index.files["tracked.txt"].added,
+            index.files["tracked.txt"].removed
+        ),
+        (2, 1)
+    );
+    assert_eq!(
+        (
+            worktree.files["tracked.txt"].added,
+            worktree.files["tracked.txt"].removed
+        ),
+        (2, 1)
+    );
+    assert_eq!(worktree.files["untracked.txt"].added, 2);
+    assert_eq!(worktree.files["empty.txt"].added, 0);
+    assert!(worktree.files["binary.dat"].is_binary);
+    assert!(!index.files.contains_key("untracked.txt"));
     assert!(snapshot
         .status
         .unwrap()
@@ -1288,6 +1306,8 @@ fn panel_line_stats_handles_unborn_head_and_unstaged_then_staged_moves() {
         .index
         .unwrap();
     assert_eq!((stats.added, stats.removed), (0, 0));
+    assert_eq!(stats.files["new.txt"].added, 0);
+    assert!(!stats.files.contains_key("old.txt"));
     fx.write_file("new.txt", "one\ntwo\nthree\nfour\nchanged\n");
     fx.run_git(&["add", "-A"]);
     let stats = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace)
@@ -1297,6 +1317,21 @@ fn panel_line_stats_handles_unborn_head_and_unstaged_then_staged_moves() {
         .index
         .unwrap();
     assert_eq!((stats.added, stats.removed), (1, 1));
+    operations::unstage(
+        &fx.registry,
+        &fx.repo_str(),
+        &["new.txt".into(), "old.txt".into()],
+        &fx.workspace,
+    )
+    .unwrap();
+    let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert!(!snapshot
+        .status
+        .unwrap()
+        .changed_files
+        .iter()
+        .any(|file| file.staged));
+    assert!(snapshot.diff_stats.unwrap().index.unwrap().files.is_empty());
 }
 
 #[test]
@@ -1308,7 +1343,9 @@ fn panel_line_stats_marks_unreadable_large_files_without_losing_status() {
     fx.write_file("large.txt", &"x".repeat(2 * 1024 * 1024 + 1));
     let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
     assert_eq!(snapshot.status.unwrap().changed_files.len(), 1);
-    assert!(snapshot.diff_stats.unwrap().worktree.unwrap().incomplete);
+    let stats = snapshot.diff_stats.unwrap().worktree.unwrap();
+    assert!(stats.incomplete);
+    assert!(stats.files["large.txt"].incomplete);
 }
 
 #[test]
@@ -1340,6 +1377,6 @@ fn panel_line_stats_marks_merge_conflicts_incomplete() {
         .iter()
         .any(|file| file.index_status == "U"));
     let stats = snapshot.diff_stats.unwrap();
-    assert!(stats.index.unwrap().incomplete);
-    assert!(stats.worktree.unwrap().incomplete);
+    assert!(stats.index.unwrap().files["conflict.txt"].incomplete);
+    assert!(stats.worktree.unwrap().files["conflict.txt"].incomplete);
 }

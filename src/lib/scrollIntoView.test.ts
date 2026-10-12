@@ -30,6 +30,12 @@ it("reveals clipped rows within their own scroll container and leaves visible ro
   bounds.mockReturnValue(new DOMRect(0, 52, 100, 24));
   scrollListRowIntoView(container, row.id);
   expect(container.scrollTop).toBe(100);
+  scrollListRowIntoView(container, row.id, 24);
+  expect(container.scrollTop).toBe(76);
+  bounds.mockReturnValue(new DOMRect(0, 76, 100, 24));
+  scrollListRowIntoView(container, row.id, 24);
+  expect(container.scrollTop).toBe(76);
+  container.scrollTop = 100;
   expect(outer.scrollTop).toBe(75);
   Object.defineProperty(container, "clientHeight", { value: 0 });
   bounds.mockReturnValue(new DOMRect(0, 200, 100, 24));

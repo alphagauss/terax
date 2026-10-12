@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
+import { ContentReveal } from "@/components/controls/content-reveal";
 
 let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
@@ -48,11 +48,11 @@ afterEach(() => {
 function render(open: boolean, key = "a", height = 100) {
   act(() =>
     root.render(
-      <ModelParameterReveal open={open} transitionKey={key}>
+      <ContentReveal open={open} transitionKey={key}>
         <div key={key} data-size={height}>
           <input defaultValue={key} />
         </div>
-      </ModelParameterReveal>,
+      </ContentReveal>,
     ),
   );
 }
@@ -105,9 +105,9 @@ it("明确边界内原本在屏外的后续内容也接续位移，边界外内�
       root.render(
         <>
           <section data-reveal-boundary>
-            <ModelParameterReveal open transitionKey={String(size)}>
+            <ContentReveal open transitionKey={String(size)}>
               <div data-size={size} />
-            </ModelParameterReveal>
+            </ContentReveal>
             <div data-follower />
           </section>
           <div data-outside />
@@ -117,19 +117,72 @@ it("明确边界内原本在屏外的后续内容也接续位移，边界外内�
   renderPanel(2000);
   const follower = host.querySelector<HTMLElement>("[data-follower]");
   if (!follower) throw new Error("缺少后续内容");
-  vi.spyOn(follower, "getBoundingClientRect").mockImplementation(
-    () =>
-      new DOMRect(
-        0,
-        Number(host.querySelector("[data-size]")?.getAttribute("data-size")),
-        200,
-        20,
-      ),
-  );
+  follower.getBoundingClientRect = () =>
+    new DOMRect(
+      0,
+      Number(host.querySelector("[data-size]")?.getAttribute("data-size")),
+      200,
+      20,
+    );
   renderPanel(100);
   expect(animate.mock.contexts).toContain(follower);
   expect(animate.mock.contexts).not.toContain(
     host.querySelector("[data-outside]"),
   );
   finish();
+});
+
+it("长列表按滚动视口揭示，后续分组与裁剪边界同步移动", () => {
+  const scrollRef = createRef<HTMLDivElement>();
+  const renderList = (open: boolean) =>
+    act(() =>
+      root.render(
+        <div ref={scrollRef} data-reveal-boundary>
+          <ContentReveal open={open} transitionKey={null} scrollRef={scrollRef}>
+            <div data-size={2000} />
+          </ContentReveal>
+          <div data-follower />
+        </div>,
+      ),
+    );
+  renderList(false);
+  const scroll = scrollRef.current;
+  const follower = host.querySelector<HTMLElement>("[data-follower]");
+  if (!scroll || !follower) throw new Error("缺少滚动视口或后续分组");
+  scroll.getBoundingClientRect = () => new DOMRect(0, 0, 200, 300);
+  follower.getBoundingClientRect = () =>
+    new DOMRect(
+      0,
+      host.querySelector('[data-state="open"]') ? 2000 : 0,
+      200,
+      24,
+    );
+  renderList(true);
+  const shell = scroll.firstElementChild as HTMLElement;
+  const viewport = shell.firstElementChild as HTMLElement;
+  const revealIndex = animate.mock.contexts.indexOf(viewport);
+  const followerIndex = animate.mock.contexts.indexOf(follower);
+  expect(viewport.style.height).toBe("300px");
+  expect(animate.mock.calls[revealIndex][0]).toEqual([
+    { offset: 0, translate: "0 -300px" },
+    { offset: 1, translate: "0 0px" },
+  ]);
+  expect(animate.mock.calls[followerIndex][0]).toEqual([
+    { translate: "0 -2000px" },
+    { translate: "0 -1700px" },
+  ]);
+  expect(shell.style.height).toBe("2000px");
+  finish();
+  expect(viewport.style.height).toBe("");
+  expect(follower.style.getPropertyValue("translate")).toBe("");
+  renderList(false);
+  finish();
+  renderList(true);
+  const pending = animations.filter(
+    (animation) => animation.onfinish || animation.oncancel,
+  );
+  act(() => scroll.dispatchEvent(new Event("scroll")));
+  expect(viewport.style.height).toBe("");
+  for (const animation of pending)
+    expect(animation.cancel).toHaveBeenCalledOnce();
 });

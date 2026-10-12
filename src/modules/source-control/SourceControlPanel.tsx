@@ -15,6 +15,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/controls/alert-dialog";
+import { AnimatedDiffStats } from "@/components/controls/animated-diff-stats";
+import { ContentReveal } from "@/components/controls/content-reveal";
 import { Button } from "@/components/controls/button";
 import { Textarea } from "@/components/controls/textarea";
 import {
@@ -39,7 +41,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
 import { IS_MAC } from "@/lib/platform";
 import { scrollListRowIntoView } from "@/lib/scrollIntoView";
@@ -58,22 +59,24 @@ import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
 import {
-  type CheckState,
   type SourceControlFileEntry,
   useSourceControlPanel,
 } from "@/modules/source-control/useSourceControlPanel";
 import {
+  Add01Icon,
   AiContentGenerator02Icon,
   Alert02Icon,
   ArrowDown01Icon,
+  ArrowTurnBackwardIcon,
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
   Download01Icon,
+  FileEditIcon,
   Folder01Icon,
   FolderCloudIcon,
   FolderGitTwoIcon,
+  MinusSignIcon,
   Refresh01Icon,
-  RemoveSquareIcon,
   Search01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -84,7 +87,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -114,11 +116,6 @@ type Props = {
   onOpenFile?: (absolutePath: string) => void;
   onNavigateToPath?: (path: string) => void;
 };
-
-type RowDescriptor =
-  | { kind: "banner-diverged"; key: string }
-  | { kind: "list-header"; key: string; count: number }
-  | { kind: "entry"; key: string; entry: SourceControlFileEntry };
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -160,12 +157,6 @@ function statusAccent(code: string): string {
     default:
       return "bg-muted-foreground/40";
   }
-}
-
-function checkboxValue(state: CheckState): boolean | "indeterminate" {
-  if (state === "checked") return true;
-  if (state === "indeterminate") return "indeterminate";
-  return false;
 }
 
 function BranchDropdown({
@@ -424,6 +415,10 @@ function SourceControlViewContainerComponent({
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState({
+    index: false,
+    worktree: false,
+  });
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
   const [graphRefreshToken, setGraphRefreshToken] = useState(0);
   const [graphSearchOpen, setGraphSearchOpen] = useState(false);
@@ -467,7 +462,7 @@ function SourceControlViewContainerComponent({
     ? t("commit.waitForAction")
     : pushHint;
   const stagedCount = scm.stagedEntries.length;
-  const changedCount = scm.fileEntries.length;
+  const changedCount = sourceControl.changedCount;
   const pushStatusLabel = upstreamBadgeLabel(
     scm.status?.upstream,
     t("noUpstream"),
@@ -536,28 +531,28 @@ function SourceControlViewContainerComponent({
     void sourceControl.runRemoteAction("pull");
   }, [sourceControl]);
 
-  const rows = useMemo<RowDescriptor[]>(() => {
-    const result: RowDescriptor[] = [];
-    if (isDiverged) {
-      result.push({ kind: "banner-diverged", key: "banner-diverged" });
-    }
-    if (changedCount > 0) {
-      result.push({
-        kind: "list-header",
-        key: "list-header",
-        count: changedCount,
-      });
-      for (const entry of scm.fileEntries) {
-        result.push({ kind: "entry", key: entry.key, entry });
-      }
-    }
-    return result;
-  }, [changedCount, isDiverged, scm.fileEntries]);
+  const groups = useMemo(
+    () =>
+      (["index", "worktree"] as const)
+        .map((side) => ({
+          side,
+          entries: scm.fileEntries.filter((entry) => entry.side === side),
+        }))
+        .filter((group) => group.entries.length > 0),
+    [scm.fileEntries],
+  );
+  const rows = useMemo(
+    () =>
+      groups.flatMap(({ side, entries }) =>
+        collapsedGroups[side] ? [] : entries,
+      ),
+    [groups, collapsedGroups],
+  );
 
   const rowKeyToIndex = useMemo(() => {
     const map = new Map<string, number>();
-    rows.forEach((row, index) => {
-      map.set(row.key, index);
+    rows.forEach((entry, index) => {
+      map.set(entry.key, index);
     });
     return map;
   }, [rows]);
@@ -569,40 +564,31 @@ function SourceControlViewContainerComponent({
     }
   }, [focusedRowKey, rowKeyToIndex]);
 
-  const focusableIndices = useMemo(() => {
-    const out: number[] = [];
-    rows.forEach((row, index) => {
-      if (row.kind === "entry") out.push(index);
-    });
-    return out;
-  }, [rows]);
-
   const moveFocus = useCallback(
     (direction: 1 | -1) => {
-      if (focusableIndices.length === 0) return;
       const currentIndex =
         focusedRowKey === null ? -1 : (rowKeyToIndex.get(focusedRowKey) ?? -1);
-      let pos = focusableIndices.indexOf(currentIndex);
-      if (pos === -1) pos = direction > 0 ? -1 : focusableIndices.length;
-      let nextPos = pos + direction;
-      if (nextPos < 0) nextPos = 0;
-      if (nextPos > focusableIndices.length - 1)
-        nextPos = focusableIndices.length - 1;
-      const targetRowIndex = focusableIndices[nextPos];
-      const target = rows[targetRowIndex];
+      const position =
+        currentIndex < 0 ? (direction > 0 ? -1 : rows.length) : currentIndex;
+      const target =
+        rows[Math.max(0, Math.min(rows.length - 1, position + direction))];
       if (!target) return;
       setFocusedRowKey(target.key);
-      scrollListRowIntoView(scrollRef.current, `scm-row-${target.key}`);
+      scrollListRowIntoView(
+        scrollRef.current,
+        `scm-row-${target.key}`,
+        scrollRef.current?.querySelector<HTMLElement>("[data-scm-group]")
+          ?.offsetHeight ?? 0,
+      );
     },
-    [focusableIndices, focusedRowKey, rowKeyToIndex, rows],
+    [focusedRowKey, rowKeyToIndex, rows],
   );
 
   const focusedEntry = useCallback((): SourceControlFileEntry | null => {
     if (!focusedRowKey) return null;
     const index = rowKeyToIndex.get(focusedRowKey);
     if (index === undefined) return null;
-    const row = rows[index];
-    return row && row.kind === "entry" ? row.entry : null;
+    return rows[index] ?? null;
   }, [focusedRowKey, rowKeyToIndex, rows]);
 
   const handlePanelKeyDown = useCallback(
@@ -642,7 +628,7 @@ function SourceControlViewContainerComponent({
         case " ":
         case "s":
         case "S": {
-          if (meta) break;
+          if (meta || scm.actionBusy !== null) break;
           const entry = focusedEntry();
           if (entry) {
             event.preventDefault();
@@ -652,9 +638,9 @@ function SourceControlViewContainerComponent({
         }
         case "d":
         case "D": {
-          if (meta) break;
+          if (meta || scm.actionBusy !== null) break;
           const entry = focusedEntry();
-          if (entry?.unstaged) {
+          if (entry?.side === "worktree") {
             event.preventDefault();
             scm.requestDiscardFile(entry);
           }
@@ -958,23 +944,48 @@ function SourceControlViewContainerComponent({
                           >
                             <div
                               ref={scrollRef}
+                              data-reveal-boundary
                               className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
                             >
-                              {rows.map((row) => (
-                                <RowRenderer
-                                  key={row.key}
-                                  row={row}
-                                  focused={focusedRowKey === row.key}
-                                  actionBusy={scm.actionBusy}
-                                  headerCheckState={scm.headerCheckState}
-                                  repoRoot={scm.repo?.repoRoot ?? null}
-                                  onFocusRow={setFocusedRowKey}
-                                  onToggleAll={scm.toggleAll}
-                                  onOpenFileDiff={scm.openFileDiff}
-                                  onToggleStageFile={scm.toggleStageFile}
-                                  onDiscardFile={scm.requestDiscardFile}
-                                  onOpenFile={onOpenFile}
-                                />
+                              {isDiverged && <DivergedBanner />}
+                              {groups.map(({ side, entries }) => (
+                                <div key={side}>
+                                  <ListHeader
+                                    side={side}
+                                    count={entries.length}
+                                    expanded={!collapsedGroups[side]}
+                                    onToggle={() =>
+                                      setCollapsedGroups((current) => ({
+                                        ...current,
+                                        [side]: !current[side],
+                                      }))
+                                    }
+                                    actionBusy={scm.actionBusy}
+                                    onStageAll={scm.stageAllEntries}
+                                    onUnstageAll={scm.unstageAllEntries}
+                                    onDiscardAll={scm.requestDiscardAll}
+                                  />
+                                  <ContentReveal
+                                    scrollRef={scrollRef}
+                                    open={!collapsedGroups[side]}
+                                    transitionKey={null}
+                                  >
+                                    {entries.map((entry) => (
+                                      <EntryRow
+                                        key={entry.key}
+                                        entry={entry}
+                                        focused={focusedRowKey === entry.key}
+                                        actionBusy={scm.actionBusy}
+                                        repoRoot={scm.repo?.repoRoot ?? null}
+                                        onFocusRow={setFocusedRowKey}
+                                        onOpenFileDiff={scm.openFileDiff}
+                                        onToggleStageFile={scm.toggleStageFile}
+                                        onDiscardFile={scm.requestDiscardFile}
+                                        onOpenFile={onOpenFile}
+                                      />
+                                    ))}
+                                  </ContentReveal>
+                                </div>
                               ))}
                             </div>
                           </div>
@@ -1124,31 +1135,17 @@ function CleanTreeHint({ repoLabel }: { repoLabel: string }) {
   );
 }
 
-type RowRendererProps = {
-  row: RowDescriptor;
+type EntryRowProps = {
+  entry: SourceControlFileEntry;
   focused: boolean;
   actionBusy: string | null;
-  headerCheckState: CheckState;
   repoRoot: string | null;
   onFocusRow: (key: string | null) => void;
-  onToggleAll: () => Promise<void> | void;
   onOpenFileDiff: (entry: SourceControlFileEntry) => void;
   onToggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
   onDiscardFile: (entry: SourceControlFileEntry) => void;
   onOpenFile?: (absolutePath: string) => void;
 };
-
-const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
-  const { row } = props;
-  switch (row.kind) {
-    case "banner-diverged":
-      return <DivergedBanner />;
-    case "list-header":
-      return <ListHeader {...props} row={row} />;
-    case "entry":
-      return <EntryRow {...props} row={row} />;
-  }
-});
 
 function DivergedBanner() {
   const { t } = useTranslation("sourceControl");
@@ -1171,50 +1168,83 @@ function DivergedBanner() {
 }
 
 function ListHeader({
-  row,
+  side,
+  count,
+  expanded,
+  onToggle,
   actionBusy,
-  headerCheckState,
-  onToggleAll,
-}: RowRendererProps & {
-  row: Extract<RowDescriptor, { kind: "list-header" }>;
+  onStageAll,
+  onUnstageAll,
+  onDiscardAll,
+}: {
+  side: GitDiffSide;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+  actionBusy: string | null;
+  onStageAll: () => Promise<void>;
+  onUnstageAll: () => Promise<void>;
+  onDiscardAll: () => void;
 }) {
-  const checkboxId = useId();
-
+  const { t } = useTranslation("sourceControl");
+  const staged = side === "index";
   return (
-    <div className="flex h-6 items-center gap-1.5 px-2">
-      <span className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-        Changes
-      </span>
-      <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
-        {row.count}
-      </span>
-      <div className="ml-auto flex shrink-0 items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground">
-        <label
-          htmlFor={checkboxId}
-          className={cn(
-            "select-none",
-            actionBusy === null
-              ? "cursor-pointer hover:text-foreground"
-              : "cursor-not-allowed opacity-50",
-          )}
+    <div data-scm-group={side} className="sticky top-0 z-10 bg-sidebar">
+      <div className="group flex h-6 items-center gap-1.5 rounded-sm px-2 transition-colors duration-feedback hover:bg-interactive-hover">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-0.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-primary/45"
         >
-          All
-        </label>
-        <Checkbox
-          id={checkboxId}
-          aria-label="Stage all changes"
-          checked={checkboxValue(headerCheckState)}
-          disabled={actionBusy !== null}
-          onCheckedChange={() => void onToggleAll()}
-          className="size-3.5"
-        />
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={12}
+            strokeWidth={2.1}
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform duration-pane ease-standard motion-reduce:transition-none",
+              expanded ? "rotate-0" : "-rotate-90",
+            )}
+          />
+          <span className="min-w-0 truncate text-[13px] font-medium leading-none text-foreground">
+            {t(staged ? "groups.staged" : "groups.changes")}
+          </span>
+          <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full border border-border/60 px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        </button>
+        <div className="pointer-events-none ml-auto flex shrink-0 items-center opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+          {!staged && (
+            <IconActionButton
+              label={t("groups.discardAll")}
+              disabled={actionBusy !== null}
+              side="top"
+              className="size-5"
+              onClick={onDiscardAll}
+            >
+              <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={13} />
+            </IconActionButton>
+          )}
+          <IconActionButton
+            label={t(staged ? "groups.unstageAll" : "groups.stageAll")}
+            disabled={actionBusy !== null}
+            side="top"
+            className="size-5"
+            onClick={() => void (staged ? onUnstageAll() : onStageAll())}
+          >
+            <HugeiconsIcon
+              icon={staged ? MinusSignIcon : Add01Icon}
+              size={13}
+            />
+          </IconActionButton>
+        </div>
       </div>
     </div>
   );
 }
 
 const EntryRow = memo(function EntryRow({
-  row,
+  entry,
   focused,
   actionBusy,
   repoRoot,
@@ -1223,15 +1253,12 @@ const EntryRow = memo(function EntryRow({
   onToggleStageFile,
   onDiscardFile,
   onOpenFile,
-}: RowRendererProps & {
-  row: Extract<RowDescriptor, { kind: "entry" }>;
-}) {
+}: EntryRowProps) {
   const { t } = useTranslation("sourceControl");
-  const entry = row.entry;
   const fileName = basename(entry.path);
   const iconUrl = fileIconUrl(fileName);
   const pathLabel = entryPathLabel(entry);
-  const showDiscard = entry.unstaged;
+  const showDiscard = entry.side === "worktree";
   const isStageBusy =
     actionBusy === `stage:${entry.path}` ||
     actionBusy === `unstage:${entry.path}`;
@@ -1241,7 +1268,6 @@ const EntryRow = memo(function EntryRow({
   const absolutePath = repoRoot
     ? joinPath(repoRoot.replace(/\\/g, "/"), entry.path.replace(/\\/g, "/"))
     : null;
-  const isDeleted = entry.statusCode === "D";
   const revealLabel = IS_MAC
     ? t("menu.revealInFinder")
     : t("menu.revealInFileManager");
@@ -1250,12 +1276,12 @@ const EntryRow = memo(function EntryRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          id={`scm-row-${row.key}`}
+          id={`scm-row-${entry.key}`}
           data-focused={focused || undefined}
           role="option"
           aria-selected={focused}
           tabIndex={-1}
-          onMouseDown={() => onFocusRow(row.key)}
+          onMouseDown={() => onFocusRow(entry.key)}
           className={cn(
             "group relative flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
             focused ? "bg-interactive-active" : "hover:bg-interactive-hover",
@@ -1269,74 +1295,97 @@ const EntryRow = memo(function EntryRow({
             )}
             aria-hidden
           />
-          <button
-            type="button"
-            onClick={() => {
-              onFocusRow(row.key);
-              onOpenFileDiff(entry);
-            }}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-          >
-            {iconUrl ? (
-              <img src={iconUrl} alt="" className="size-4 shrink-0" />
-            ) : (
-              <span className="size-4 shrink-0" />
-            )}
-            <div className="flex min-w-0 flex-1 items-baseline gap-1 leading-none">
-              <span
-                className={cn(
-                  "truncate text-[13px] leading-none",
-                  focused
-                    ? "font-semibold text-foreground"
-                    : "font-medium text-foreground",
-                  pathLabel ? "max-w-[58%] shrink-0" : "min-w-0 flex-1",
-                )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => {
+                  onFocusRow(entry.key);
+                  onOpenFileDiff(entry);
+                }}
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
               >
-                {fileName}
-              </span>
-              {pathLabel ? (
-                <span className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground">
-                  {pathLabel}
-                </span>
-              ) : null}
-            </div>
-          </button>
-
-          {showDiscard ? (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-data-[focused=true]:opacity-100">
+                {iconUrl ? (
+                  <img src={iconUrl} alt="" className="size-4 shrink-0" />
+                ) : (
+                  <span className="size-4 shrink-0" />
+                )}
+                <div className="flex min-w-0 flex-1 items-baseline gap-1 leading-none">
+                  <span
+                    className={cn(
+                      "truncate text-[13px] leading-none",
+                      focused
+                        ? "font-semibold text-foreground"
+                        : "font-medium text-foreground",
+                      "min-w-0 shrink",
+                    )}
+                  >
+                    {fileName}
+                  </span>
+                  {pathLabel ? (
+                    <span className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground">
+                      {pathLabel}
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {!entry.lineStats ? (
+                t("lineStats.unavailable")
+              ) : entry.lineStats.incomplete ? (
+                t("lineStats.incomplete")
+              ) : entry.lineStats.isBinary ? (
+                t("lineStats.binary")
+              ) : (
+                <AnimatedDiffStats stats={entry.lineStats} animate={false} />
+              )}
+            </TooltipContent>
+          </Tooltip>
+          <div className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">
+            {entry.canOpenFile && onOpenFile && absolutePath && (
               <IconActionButton
-                label={`Discard ${entry.path}`}
+                label={t("menu.openFile")}
                 disabled={disabled}
                 side="top"
-                className="size-5 rounded-sm p-0"
+                className="size-5"
+                onClick={() => onOpenFile(absolutePath)}
+              >
+                <HugeiconsIcon icon={FileEditIcon} size={13} />
+              </IconActionButton>
+            )}
+            {showDiscard && (
+              <IconActionButton
+                label={t("menu.discardChanges")}
+                disabled={disabled}
+                side="top"
+                className="size-5"
                 onClick={() => onDiscardFile(entry)}
               >
                 {isDiscardBusy ? (
                   <Spinner className="size-3" />
                 ) : (
-                  <HugeiconsIcon
-                    icon={RemoveSquareIcon}
-                    size={11}
-                    strokeWidth={1.9}
-                  />
+                  <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={13} />
                 )}
               </IconActionButton>
-            </div>
-          ) : null}
-
-          <span className="flex size-5 shrink-0 items-center justify-center">
-            {isStageBusy ? (
-              <Spinner className="size-3" />
-            ) : (
-              <Checkbox
-                aria-label={t("stageFile", { path: entry.path })}
-                checked={checkboxValue(entry.checkState)}
-                disabled={disabled}
-                onCheckedChange={() => void onToggleStageFile(entry)}
-                className="size-3.5"
-              />
             )}
-          </span>
+            <IconActionButton
+              label={t(entry.side === "index" ? "menu.unstage" : "menu.stage")}
+              disabled={disabled}
+              side="top"
+              className="size-5"
+              onClick={() => void onToggleStageFile(entry)}
+            >
+              {isStageBusy ? (
+                <Spinner className="size-3" />
+              ) : (
+                <HugeiconsIcon
+                  icon={entry.side === "index" ? MinusSignIcon : Add01Icon}
+                  size={13}
+                />
+              )}
+            </IconActionButton>
+          </div>
         </div>
       </ContextMenuTrigger>
 
@@ -1344,13 +1393,13 @@ const EntryRow = memo(function EntryRow({
         {/* Open actions */}
         <ContextMenuItem
           onSelect={() => {
-            onFocusRow(row.key);
+            onFocusRow(entry.key);
             onOpenFileDiff(entry);
           }}
         >
           {t("menu.openDiff")}
         </ContextMenuItem>
-        {!isDeleted && onOpenFile && absolutePath ? (
+        {entry.canOpenFile && onOpenFile && absolutePath ? (
           <ContextMenuItem onSelect={() => onOpenFile(absolutePath)}>
             {t("menu.openFile")}
           </ContextMenuItem>
@@ -1363,9 +1412,9 @@ const EntryRow = memo(function EntryRow({
           disabled={disabled}
           onSelect={() => void onToggleStageFile(entry)}
         >
-          {entry.checkState === "checked" ? t("menu.unstage") : t("menu.stage")}
+          {entry.side === "index" ? t("menu.unstage") : t("menu.stage")}
         </ContextMenuItem>
-        {entry.unstaged ? (
+        {entry.side === "worktree" ? (
           <ContextMenuItem
             variant="destructive"
             disabled={disabled}
@@ -1390,7 +1439,7 @@ const EntryRow = memo(function EntryRow({
         ) : null}
 
         {/* Reveal in Finder — only for existing files */}
-        {!isDeleted && absolutePath ? (
+        {entry.canOpenFile && absolutePath ? (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void revealInFinder(absolutePath)}>

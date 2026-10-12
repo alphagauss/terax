@@ -12,6 +12,7 @@ import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import {
   type GitChangedFile,
   type GitDiscardEntry,
+  type GitFileLineStats,
   type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
@@ -31,24 +32,19 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import type { GitDiffSide } from "./gitTypes";
-import { openSourceControlFileDiff } from "./openFileDiff";
 import type { RepositoryController } from "./useRepositoryController";
 
 type PanelState = "loading" | "no-repo" | "ready" | "error";
 
-/** 文件暂存复选框的三态值。 */
-export type CheckState = "checked" | "indeterminate" | "unchecked";
-
-/** 合并暂存与未暂存状态后的单个文件行。 */
+/** 按差异侧独立展示的文件行；部分暂存文件在两组各有一行。 */
 export type SourceControlFileEntry = {
   key: string;
   path: string;
   originalPath: string | null;
   statusCode: string;
-  statusLabel: string;
-  checkState: CheckState;
-  staged: boolean;
-  unstaged: boolean;
+  side: GitDiffSide;
+  lineStats: GitFileLineStats | null;
+  canOpenFile: boolean;
   untracked: boolean;
 };
 
@@ -73,20 +69,16 @@ type SourceControlPanelState = {
   stagedEntries: CommitMessageEntry[];
   unstagedEntries: CommitMessageEntry[];
   fileEntries: SourceControlFileEntry[];
-  headerCheckState: CheckState;
   allClean: boolean;
   canPush: boolean;
   pushHint: string | null;
   canGenerateCommitMessage: boolean;
   generateCommitMessageHint: string;
-  stagedEmptyText: string;
-  unstagedEmptyText: string;
   pendingDiscard: PendingDiscard | null;
   setCommitMessage: (value: string) => void;
   refresh: () => Promise<void>;
   openFileDiff: (entry: SourceControlFileEntry) => void;
   toggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
-  toggleAll: () => Promise<void>;
   requestDiscardFile: (entry: SourceControlFileEntry) => void;
   requestDiscardAll: () => void;
   confirmPendingDiscard: () => Promise<void>;
@@ -145,6 +137,19 @@ function makeEntry(
     originalPath: file.originalPath,
     untracked: file.untracked,
   };
+}
+
+/** 重命名的取消暂存必须同时恢复旧、新路径，不能留下旧路径的暂存删除。 */
+function unstagePaths(files: GitChangedFile[]): string[] {
+  return [
+    ...new Set(
+      files.flatMap((file) =>
+        file.indexStatus === "R" && file.originalPath
+          ? [file.path, file.originalPath]
+          : [file.path],
+      ),
+    ),
+  ];
 }
 
 /**
@@ -223,43 +228,22 @@ export function useSourceControlPanel(
     [status],
   );
 
-  const fileEntries = useMemo<SourceControlFileEntry[]>(() => {
-    const seen = new Set<string>();
-    const out: SourceControlFileEntry[] = [];
-    for (const file of status?.changedFiles ?? []) {
-      if (seen.has(file.path)) continue;
-      seen.add(file.path);
-      const checkState: CheckState =
-        file.staged && file.unstaged
-          ? "indeterminate"
-          : file.staged
-            ? "checked"
-            : "unchecked";
-      const statusCode = file.unstaged
-        ? statusCodeForSide("worktree", file)
-        : statusCodeForSide("index", file);
-      out.push({
-        key: file.path,
-        path: file.path,
-        originalPath: file.originalPath,
-        statusCode,
-        statusLabel: file.statusLabel,
-        checkState,
-        staged: file.staged,
-        unstaged: file.unstaged,
-        untracked: file.untracked,
-      });
-    }
-    return out;
-  }, [status]);
-
-  const headerCheckState = useMemo<CheckState>(() => {
-    if (fileEntries.length === 0) return "unchecked";
-    const allChecked = fileEntries.every((e) => e.checkState === "checked");
-    if (allChecked) return "checked";
-    const anyStaged = fileEntries.some((e) => e.staged);
-    return anyStaged ? "indeterminate" : "unchecked";
-  }, [fileEntries]);
+  const fileEntries = useMemo<SourceControlFileEntry[]>(
+    () =>
+      (["index", "worktree"] as const).flatMap((side) =>
+        (status?.changedFiles ?? [])
+          .filter((file) => (side === "index" ? file.staged : file.unstaged))
+          .map((file) => ({
+            ...makeEntry(file, side),
+            key: `${side}:${file.path}`,
+            side,
+            canOpenFile:
+              file.indexStatus !== "D" && file.worktreeStatus !== "D",
+            lineStats: controller.diffStats?.[side]?.files[file.path] ?? null,
+          })),
+      ),
+    [status, controller.diffStats],
+  );
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
   const canPush = !!status?.upstream && status.behind === 0;
@@ -317,8 +301,6 @@ export function useSourceControlPanel(
     }
     return `Pushes to ${status.upstream}.`;
   }, [status]);
-  const stagedEmptyText = "No staged changes";
-  const unstagedEmptyText = "No unstaged changes";
 
   const refresh = useCallback(async () => {
     if (!isOpen) return;
@@ -380,11 +362,13 @@ export function useSourceControlPanel(
 
   const unstageAllEntries = useCallback(async () => {
     if (!repo || stagedEntries.length === 0) return;
-    const paths = stagedEntries.map((entry) => entry.path);
+    const paths = unstagePaths(
+      (status?.changedFiles ?? []).filter((file) => file.staged),
+    );
     await runMutation("unstage:all", () =>
       native.gitUnstage(repo.repoRoot, paths),
     );
-  }, [repo, runMutation, stagedEntries]);
+  }, [repo, runMutation, stagedEntries, status]);
 
   const openFileDiff = useCallback(
     (entry: SourceControlFileEntry) => {
@@ -392,7 +376,12 @@ export function useSourceControlPanel(
       setActionError(null);
       setActionMessage(null);
       if (onOpenDiff) {
-        openSourceControlFileDiff(repo.repoRoot, entry, onOpenDiff);
+        onOpenDiff({
+          repoRoot: repo.repoRoot,
+          path: entry.path,
+          side: entry.side,
+          originalPath: entry.originalPath,
+        });
       }
       void controller.refresh();
     },
@@ -402,9 +391,16 @@ export function useSourceControlPanel(
   const toggleStageFile = useCallback(
     async (entry: SourceControlFileEntry) => {
       if (!repo) return;
-      if (entry.checkState === "checked") {
+      if (entry.side === "index") {
         await runMutation(`unstage:${entry.path}`, () =>
-          native.gitUnstage(repo.repoRoot, [entry.path]),
+          native.gitUnstage(
+            repo.repoRoot,
+            unstagePaths(
+              (status?.changedFiles ?? []).filter(
+                (file) => file.staged && file.path === entry.path,
+              ),
+            ),
+          ),
         );
       } else {
         await runMutation(`stage:${entry.path}`, () =>
@@ -412,13 +408,8 @@ export function useSourceControlPanel(
         );
       }
     },
-    [repo, runMutation],
+    [repo, runMutation, status],
   );
-
-  const toggleAll = useCallback(async () => {
-    if (headerCheckState === "checked") await unstageAllEntries();
-    else await stageAllEntries();
-  }, [headerCheckState, stageAllEntries, unstageAllEntries]);
 
   const requestDiscardFile = useCallback(
     (entry: SourceControlFileEntry) => {
@@ -544,20 +535,16 @@ export function useSourceControlPanel(
     stagedEntries,
     unstagedEntries,
     fileEntries,
-    headerCheckState,
     allClean,
     canPush,
     pushHint,
     canGenerateCommitMessage,
     generateCommitMessageHint,
-    stagedEmptyText,
-    unstagedEmptyText,
     pendingDiscard: pendingDiscardView,
     setCommitMessage,
     refresh,
     openFileDiff,
     toggleStageFile,
-    toggleAll,
     requestDiscardFile,
     requestDiscardAll,
     confirmPendingDiscard,

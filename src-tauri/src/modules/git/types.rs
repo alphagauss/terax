@@ -66,9 +66,20 @@ pub struct GitPanelDiffStats {
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitLineStats {
+    pub files: std::collections::HashMap<String, GitFileLineStats>,
     pub added: u64,
     pub removed: u64,
     pub incomplete: bool,
+}
+
+/// 单个文件的文本行统计；二进制与无法完整读取的情况分别标记。
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileLineStats {
+    pub added: u64,
+    pub removed: u64,
+    pub incomplete: bool,
+    pub is_binary: bool,
 }
 
 #[derive(serde::Deserialize)]
