@@ -35,6 +35,7 @@ const LABELS = [
   "moreAttachments",
   "attachments",
   "lines",
+  "terminalRange",
   "lineRange",
   "fromLine",
 ] as const;
@@ -167,10 +168,20 @@ export function describeToolCall(
     case "shell_list":
       if (value.include_exited === true) label("exited");
       break;
-    case "get_terminal_output":
-      if (number("lines") !== undefined || complete)
-        label("lines", { count: number("lines") ?? 80 });
+    case "get_terminal_output": {
+      const count = number("lines");
+      const offset = number("offset") ?? 0;
+      if (count !== undefined || complete) {
+        if (offset > 0) {
+          const end = offset + (count ?? 80);
+          if (Number.isSafeInteger(end))
+            label("terminalRange", { start: offset + 1, end });
+        } else {
+          label("lines", { count: count ?? 80 });
+        }
+      }
       break;
+    }
     case "run_subagent":
       if (
         typeof value.wait === "boolean" ||
@@ -264,7 +275,7 @@ export function isToolSummary(value: unknown): value is ToolSummary {
     )
       return false;
     const keys =
-      part.label === "lineRange"
+      part.label === "lineRange" || part.label === "terminalRange"
         ? ["start", "end"]
         : part.label === "fromLine"
           ? ["start"]

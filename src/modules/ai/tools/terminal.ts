@@ -12,7 +12,7 @@ export function buildTerminalTools(ctx: ToolContext) {
   return {
     get_terminal_output: tool({
       description:
-        "Return the tail of the active terminal's scrollback. Use this when the user references 'this error', 'the last command', or you need to interpret recent terminal output. Default is 80 lines; raise it only when you genuinely need more. Returns an empty string if there is no active terminal; refuses if the terminal is in Privacy mode.",
+        "Read retained output from the active terminal to inspect commands or errors. Defaults: lines=80, offset=0. offset skips lines from the end; lines=80, offset=80 reads the previous 80 lines. New output shifts offsets, so pages may overlap or miss lines. Returns up to 2000 lines and 24000 characters; character truncation keeps the end of the requested range. Returns empty output when no terminal or history is available; refuses Privacy mode.",
       inputSchema: z.object({
         lines: z
           .number()
@@ -20,27 +20,43 @@ export function buildTerminalTools(ctx: ToolContext) {
           .min(1)
           .max(2000)
           .optional()
-          .describe("Number of trailing lines to return. Default 80."),
+          .describe(
+            "Maximum lines to return after skipping offset lines. Default 80; max 2000.",
+          ),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            "Lines to skip from the end of the live buffer. Default 0.",
+          ),
       }),
-      execute: async ({ lines }) => {
+      execute: async ({ lines, offset }) => {
         if (ctx.isActiveTerminalPrivate()) {
           return {
             error:
               "active terminal is in Privacy mode; its buffer is withheld. Ask the user to switch to a regular tab if they want you to see it.",
           };
         }
-        const buffer = ctx.getTerminalContext();
-        if (!buffer) return { output: "", note: "no active terminal" };
         const n = lines ?? 80;
+        const skipped = offset ?? 0;
+        const buffer = ctx.getTerminalContext(n + skipped);
+        if (!buffer) return { output: "", note: "no active terminal" };
         const parts = buffer.split("\n");
-        const sliced =
-          parts.length <= n ? buffer : parts.slice(parts.length - n).join("\n");
+        const end = Math.max(0, parts.length - skipped);
+        const start = Math.max(0, end - n);
+        const sliced = parts.slice(start, end).join("\n");
         const MAX = 24_000;
-        const capped =
-          sliced.length > MAX
-            ? `…[truncated]…\n${sliced.slice(sliced.length - MAX)}`
-            : sliced;
-        return { output: capped, lines_returned: Math.min(parts.length, n) };
+        const marker = "…[truncated]…\n";
+        const truncated = sliced.length > MAX;
+        const body = truncated ? sliced.slice(-(MAX - marker.length)) : sliced;
+        return {
+          output: truncated ? `${marker}${body}` : body,
+          // 只统计终端正文，截断提示行不计入返回行数。
+          lines_returned: truncated ? body.split("\n").length : end - start,
+          truncated,
+        };
       },
     }),
   } as const;

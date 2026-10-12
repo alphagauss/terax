@@ -188,6 +188,7 @@
       "moreAttachments_one": "{{count}} more attachment",
       "moreAttachments_other": "{{count}} more attachments",
       "lines": "Last {{count}} lines",
+      "terminalRange": "Lines {{start}}–{{end}} from end",
       "lineRange": "Lines {{start}}–{{end}}",
       "fromLine": "From line {{start}}"
     },

@@ -89,11 +89,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const toolContext: ToolContext = {
     getMessageSender: () => getChannelMessageSender(sessionId),
     getCwd: getSessionCwd,
-    getTerminalContext: () => {
+    getTerminalContext: (maxLines) => {
       const state = useChatStore.getState();
       return !state.sessions.find((item) => item.id === sessionId)?.channelId &&
         state.activeSessionId === sessionId
-        ? state.live.getTerminalContext()
+        ? state.live.getTerminalContext(maxLines)
         : null;
     },
     isActiveTerminalPrivate: () => {

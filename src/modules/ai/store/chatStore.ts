@@ -112,7 +112,7 @@ export type Live = {
   draftProjectRoot?: string | null;
   defaultDraftCwd?: string | null;
   revealWorkingDirectory: (cwd: string) => Promise<void>;
-  getTerminalContext: () => string | null;
+  getTerminalContext: (maxLines: number) => string | null;
   isActiveTerminalPrivate: () => boolean;
 };
 

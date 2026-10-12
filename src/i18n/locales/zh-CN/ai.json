@@ -188,6 +188,7 @@
       "moreAttachments_one": "另 {{count}} 个附件",
       "moreAttachments_other": "另 {{count}} 个附件",
       "lines": "最近 {{count}} 行",
+      "terminalRange": "倒数第 {{start}} 至 {{end}} 行",
       "lineRange": "第 {{start}}–{{end}} 行",
       "fromLine": "从第 {{start}} 行开始"
     },

@@ -114,12 +114,12 @@ export function useAiLiveBridge(params: Params) {
         if (applyExisting(cwd) || applyExisting(terminalCwd)) return;
         ref.current.newTab(terminalCwd);
       },
-      getTerminalContext: () => {
+      getTerminalContext: (maxLines) => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
         if (t?.kind !== "terminal") return null;
         if (t.private) return null;
-        const buf = terminalRefs.current.get(t.id)?.getBuffer(300);
+        const buf = terminalRefs.current.get(t.id)?.getBuffer(maxLines);
         return buf ? redactSensitive(buf) : null;
       },
       isActiveTerminalPrivate: () => {

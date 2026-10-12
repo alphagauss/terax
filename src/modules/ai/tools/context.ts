@@ -12,8 +12,8 @@ export type ToolContext = {
     | undefined;
   /** 当前会话固定 cwd，用于解析所有相对路径。 */
   getCwd: () => string;
-  /** 读取活动非隐私终端的尾部缓冲区，没有可读终端时返回 null。 */
-  getTerminalContext: () => string | null;
+  /** 按指定行数读取活动非隐私终端的尾部缓冲区，没有可读终端时返回 null。 */
+  getTerminalContext: (maxLines: number) => string | null;
   /** 活动标签是否为隐私终端。 */
   isActiveTerminalPrivate: () => boolean;
   /** 当前聊天会话 ID，供待办事项等按会话持久化的工具使用。 */

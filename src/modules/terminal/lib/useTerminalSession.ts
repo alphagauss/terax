@@ -1288,21 +1288,25 @@ export function useTerminalSession({
       const slot = getLiveSlotForTerminal(terminalId);
       if (slot) {
         const buf = slot.term.buffer.active;
-        const total = buf.length;
+        let total = buf.length;
+        // 先排除未使用的末尾空行，避免按不同读取长度分页时漏行。
+        while (
+          total > 0 &&
+          (buf.getLine(total - 1)?.translateToString(true) ?? "") === ""
+        )
+          total--;
         const lines: string[] = [];
         const start = Math.max(0, total - maxLines);
         for (let i = start; i < total; i++) {
           lines.push(buf.getLine(i)?.translateToString(true) ?? "");
         }
-        while (lines.length && lines[lines.length - 1] === "") lines.pop();
         return lines.join("\n");
       }
       if (!s.snapshot) return "";
       const plain = stripAnsi(s.snapshot);
       const lines = plain.split(/\r?\n/);
-      const tail = lines.slice(-maxLines);
-      while (tail.length && tail[tail.length - 1] === "") tail.pop();
-      return tail.join("\n");
+      while (lines.length && lines[lines.length - 1] === "") lines.pop();
+      return lines.slice(-maxLines).join("\n");
     },
     [terminalId],
   );

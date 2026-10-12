@@ -93,6 +93,20 @@ describe("tool call summaries", () => {
       summary("shell_process", { action: "terminate", process_id: "id" }),
     ).toBe("Terminate · id");
     expect(summary("get_terminal_output", {})).toBe("Last 80 lines");
+    const terminalRange = describeToolCall("get_terminal_output", {
+      lines: 80,
+      offset: 80,
+    });
+    expect(isToolSummary(terminalRange)).toBe(true);
+    expect(formatToolSummary(terminalRange, i18n.getFixedT("en", "ai"))).toBe(
+      "Lines 81–160 from end",
+    );
+    expect(
+      formatToolSummary(terminalRange, i18n.getFixedT("zh-CN", "ai")),
+    ).toBe("倒数第 81 至 160 行");
+    expect(summary("get_terminal_output", { offset: 80 })).toBe(
+      "Lines 81–160 from end",
+    );
     expect(summary("run_subagent", { task: "Inspect", wait: false })).toBe(
       "Background · Inspect",
     );
