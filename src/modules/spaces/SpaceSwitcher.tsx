@@ -17,7 +17,6 @@ import { useShortcutLabel } from "@/modules/shortcuts";
 import { labelFor, TabIcon } from "@/modules/tabs";
 import type { Tab } from "@/modules/workbench";
 import {
-  ArrowDown01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
   Delete02Icon,
@@ -28,14 +27,14 @@ import {
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { InlineRename } from "./components/InlineRename";
+import { SpaceSwitcherMotion } from "./components/SpaceSwitcherMotion";
 import { accentFor } from "./lib/spaceColor";
 import type { SpaceMeta } from "./lib/store";
 import { useSpaces } from "./lib/useSpaces";
-import { SpaceAvatar } from "./SpaceAvatar";
 
 type Props = {
   open: boolean;
@@ -127,6 +126,15 @@ export function SpaceSwitcher({
   const [overlay, setOverlay] = useState<{ x: number; y: number } | null>(null);
 
   const current = spaces.find((s) => s.id === activeId);
+  const motion = useRef<SpaceSwitcherMotion>(null);
+  const order = useMemo(
+    () =>
+      JSON.stringify([
+        spaces.map((space) => space.id),
+        tabs.map((tab) => [tab.spaceId, tab.id]),
+      ]),
+    [spaces, tabs],
+  );
 
   const tabsBySpace = useMemo(() => {
     const m = new Map<string, Tab[]>();
@@ -180,6 +188,7 @@ export function SpaceSwitcher({
   ) => {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    motion.current?.finish();
     drag.current = {
       pointerId: e.pointerId,
       startX: e.clientX,
@@ -244,8 +253,20 @@ export function SpaceSwitcher({
       if (idx < 0) return;
       if (dt.edge === "bottom") idx += 1;
       without.splice(idx, 0, st.id as string);
+      motion.current?.prepareMove(`space:${st.id}`);
       onReorderSpaces(without);
     } else if (st.kind === "tab") {
+      const targetSpace =
+        dt.kind === "tab"
+          ? tabs.find((tab) => tab.id === dt.tabId)?.spaceId
+          : dt.spaceId;
+      motion.current?.prepareMove(`tab:${st.id}`);
+      if (targetSpace)
+        setExpanded((previous) =>
+          previous.has(targetSpace)
+            ? previous
+            : new Set(previous).add(targetSpace),
+        );
       if (dt.kind === "tab") onReorderTab(st.id as number, dt.tabId, dt.edge);
       else if (dt.kind === "into-space")
         onMoveTabToSpace(st.id as number, dt.spaceId);
@@ -288,77 +309,113 @@ export function SpaceSwitcher({
           </button>
         </Hint>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-[20rem] p-1.5">
-        <div className="flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
-          <span className="text-xs font-semibold text-foreground">
-            {t("heading")}
-          </span>
-          {shortcut && (
-            <Kbd className="h-5 bg-muted/70 text-[10px]">{shortcut}</Kbd>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-[20rem] gap-0 bg-transparent p-0 shadow-none ring-0 dark:ring-0"
+      >
+        <SpaceSwitcherMotion
+          ref={motion}
+          expanded={expanded}
+          open={open}
+          order={order}
+        >
+          {(present) => (
+            <>
+              <div className="relative flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
+                <span className="text-xs font-semibold text-foreground">
+                  {t("heading")}
+                </span>
+                {shortcut && (
+                  <Kbd className="h-5 bg-muted/70 text-[10px]">{shortcut}</Kbd>
+                )}
+              </div>
+              <div data-space-reveal className="relative -mx-0.5 min-w-0">
+                <div>
+                  <div
+                    data-space-scroller
+                    className="max-h-[60vh] overflow-y-auto px-0.5"
+                  >
+                    <div>
+                      {spaces.map((sp) => (
+                        <SpaceRow
+                          key={sp.id}
+                          space={sp}
+                          tabs={tabsBySpace.get(sp.id) ?? []}
+                          isActive={sp.id === activeId}
+                          canDelete={sp.id !== DEFAULT_SPACE_ID}
+                          expanded={expanded.has(sp.id)}
+                          present={present.has(sp.id)}
+                          editing={editingId === sp.id}
+                          dragging={dragging}
+                          drop={drop}
+                          draggingTabFromOther={
+                            draggedTab !== null && draggedTab.spaceId !== sp.id
+                          }
+                          onPointerDown={onPointerDown}
+                          onPointerMove={onPointerMove}
+                          onPointerUp={onPointerUp}
+                          onToggle={() => toggleExpand(sp.id)}
+                          onSwitch={() => {
+                            setActive(sp.id);
+                            onOpenChange(false);
+                          }}
+                          onToggleRootLock={() => onToggleRootLock(sp.id)}
+                          onStartRename={() => setEditingId(sp.id)}
+                          onCommitRename={(name) => {
+                            const v = name.trim();
+                            if (v) rename(sp.id, v);
+                            setEditingId(null);
+                          }}
+                          onCancelRename={() => setEditingId(null)}
+                          onDelete={() => onDeleteSpace(sp.id)}
+                          onNewTab={() => onNewTabInSpace(sp.id)}
+                          onJumpTab={onJumpTab}
+                          onCloseTab={onCloseTab}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                data-space-position="footer"
+                className="relative mt-1.5 grid grid-cols-2 gap-1 border-t border-border/60 pt-1.5"
+              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-h-7 min-w-0 justify-start py-1.5"
+                  onClick={onNewSpaceFromDirectory}
+                >
+                  <HugeiconsIcon
+                    icon={FolderOpenIcon}
+                    size={14}
+                    strokeWidth={1.75}
+                  />
+                  <span className="min-w-0 whitespace-normal text-left">
+                    {t("newFromDirectory")}
+                  </span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-h-7 min-w-0 justify-start py-1.5"
+                  onClick={onNewSpace}
+                >
+                  <HugeiconsIcon
+                    icon={PlusSignIcon}
+                    size={14}
+                    strokeWidth={1.75}
+                  />
+                  <span className="min-w-0 whitespace-normal text-left">
+                    {t("newSpace")}
+                  </span>
+                </Button>
+              </div>
+            </>
           )}
-        </div>
-        <div className="-mx-0.5 max-h-[60vh] overflow-y-auto px-0.5">
-          {spaces.map((sp) => (
-            <SpaceRow
-              key={sp.id}
-              space={sp}
-              tabs={tabsBySpace.get(sp.id) ?? []}
-              isActive={sp.id === activeId}
-              canDelete={sp.id !== DEFAULT_SPACE_ID}
-              expanded={expanded.has(sp.id)}
-              editing={editingId === sp.id}
-              dragging={dragging}
-              drop={drop}
-              draggingTabFromOther={
-                draggedTab !== null && draggedTab.spaceId !== sp.id
-              }
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onToggle={() => toggleExpand(sp.id)}
-              onSwitch={() => {
-                setActive(sp.id);
-                onOpenChange(false);
-              }}
-              onToggleRootLock={() => onToggleRootLock(sp.id)}
-              onStartRename={() => setEditingId(sp.id)}
-              onCommitRename={(name) => {
-                const v = name.trim();
-                if (v) rename(sp.id, v);
-                setEditingId(null);
-              }}
-              onCancelRename={() => setEditingId(null)}
-              onDelete={() => onDeleteSpace(sp.id)}
-              onNewTab={() => onNewTabInSpace(sp.id)}
-              onJumpTab={onJumpTab}
-              onCloseTab={onCloseTab}
-            />
-          ))}
-        </div>
-        <div className="mt-1.5 grid grid-cols-2 gap-1 border-t border-border/60 pt-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-auto min-h-7 min-w-0 justify-start py-1.5"
-            onClick={onNewSpaceFromDirectory}
-          >
-            <HugeiconsIcon icon={FolderOpenIcon} size={14} strokeWidth={1.75} />
-            <span className="min-w-0 whitespace-normal text-left">
-              {t("newFromDirectory")}
-            </span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-auto min-h-7 min-w-0 justify-start py-1.5"
-            onClick={onNewSpace}
-          >
-            <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.75} />
-            <span className="min-w-0 whitespace-normal text-left">
-              {t("newSpace")}
-            </span>
-          </Button>
-        </div>
+        </SpaceSwitcherMotion>
       </PopoverContent>
       {overlay &&
         (draggedSpace || draggedTab) &&
@@ -388,6 +445,7 @@ type SpaceRowProps = {
   isActive: boolean;
   canDelete: boolean;
   expanded: boolean;
+  present: boolean;
   editing: boolean;
   dragging: { kind: "space" | "tab"; id: string | number } | null;
   drop: DropTarget | null;
@@ -417,6 +475,7 @@ function SpaceRow({
   isActive,
   canDelete,
   expanded,
+  present,
   editing,
   dragging,
   drop,
@@ -436,13 +495,18 @@ function SpaceRow({
   onCloseTab,
 }: SpaceRowProps) {
   const { t } = useTranslation("spaces");
+  const contentId = useId();
   const isDragging = dragging?.kind === "space" && dragging.id === space.id;
   const moveTarget = drop?.kind === "into-space" && drop.spaceId === space.id;
   const reorderEdge =
     drop?.kind === "space" && drop.spaceId === space.id ? drop.edge : null;
 
   return (
-    <div className={cn("relative", isDragging && "opacity-50")}>
+    <div
+      data-space-motion-row
+      data-space-position={`space:${space.id}`}
+      className={cn("relative", isDragging && "opacity-50")}
+    >
       {reorderEdge && <DropLine edge={reorderEdge} />}
       {/* biome-ignore lint/a11y/useSemanticElements: drag row hosts nested buttons, cannot be a <button> */}
       <div
@@ -476,6 +540,8 @@ function SpaceRow({
           type="button"
           data-no-drag
           aria-label={expanded ? t("collapse") : t("expand")}
+          aria-expanded={expanded}
+          aria-controls={contentId}
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
@@ -483,20 +549,13 @@ function SpaceRow({
           className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
         >
           <HugeiconsIcon
-            icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
+            icon={ArrowRight01Icon}
+            className="transition-transform duration-control ease-emphasized motion-reduce:transition-none"
+            style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
             size={13}
             strokeWidth={2}
           />
         </button>
-        <SpaceAvatar
-          space={
-            space.id === DEFAULT_SPACE_ID
-              ? { ...space, name: t("defaultSpace") }
-              : space
-          }
-          size="sm"
-          active={isActive}
-        />
         {editing ? (
           <InlineRename
             initial={
@@ -577,28 +636,42 @@ function SpaceRow({
         )}
       </div>
 
-      {expanded && (
-        <div className="flex flex-col gap-px py-0.5 pl-10 pr-0.5">
-          {tabs.map((t) => (
-            <TabRow
-              key={t.id}
-              tab={t}
-              dragging={dragging}
-              drop={drop}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onJump={() => onJumpTab(t.id)}
-              onClose={() => onCloseTab(t.id)}
-            />
-          ))}
-          {tabs.length === 0 && (
-            <span className="px-2 py-1 text-[10.5px] text-muted-foreground">
-              {draggingTabFromOther ? t("dropToMoveHere") : t("noTabs")}
-            </span>
-          )}
+      <div
+        id={contentId}
+        data-space-reveal
+        data-expanded={expanded}
+        className="relative"
+        style={expanded ? undefined : { height: 0, overflow: "hidden" }}
+        inert={!expanded}
+        aria-hidden={!expanded}
+      >
+        <div>
+          <div className="flow-root">
+            {present && (
+              <div className="flex flex-col gap-px py-0.5 pl-5 pr-0.5">
+                {tabs.map((t) => (
+                  <TabRow
+                    key={t.id}
+                    tab={t}
+                    dragging={dragging}
+                    drop={drop}
+                    onPointerDown={onPointerDown}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onJump={() => onJumpTab(t.id)}
+                    onClose={() => onCloseTab(t.id)}
+                  />
+                ))}
+                {tabs.length === 0 && (
+                  <span className="px-2 py-1 text-[10.5px] text-muted-foreground">
+                    {draggingTabFromOther ? t("dropToMoveHere") : t("noTabs")}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -633,7 +706,7 @@ function TabRow({
     drop?.kind === "tab" && drop.tabId === tab.id ? drop.edge : null;
 
   return (
-    <div className="relative">
+    <div data-space-position={`tab:${tab.id}`} className="relative">
       {reorderEdge && <DropLine edge={reorderEdge} />}
       {/* biome-ignore lint/a11y/useSemanticElements: drag row hosts a nested close button, cannot be a <button> */}
       <div

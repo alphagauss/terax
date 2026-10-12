@@ -21,15 +21,15 @@ export class RevealMotion {
 
   constructor(
     private complete: () => void = () => {},
-    pane = false,
+    preset: "control" | "pane" | "surface" = "control",
   ) {
     this.options = {
       duration: readMotionDurationMs(
-        pane ? "--dur-pane" : "--dur-control",
-        pane ? 150 : 160,
+        `--dur-${preset}`,
+        preset === "pane" ? 150 : preset === "surface" ? 240 : 160,
       ),
       easing: readMotionEasing(
-        pane ? "--ease-standard" : "--ease-emphasized",
+        preset === "pane" ? "--ease-standard" : "--ease-emphasized",
         "ease",
       ),
       fill: "both",

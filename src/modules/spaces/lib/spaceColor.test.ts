@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accentFor, SPACE_COLORS, spaceInitial } from "./spaceColor";
+import { accentFor, SPACE_COLORS } from "./spaceColor";
 
 describe("accentFor", () => {
   it("returns the palette color for an in-range index", () => {
@@ -13,17 +13,5 @@ describe("accentFor", () => {
     expect(accentFor({ color: SPACE_COLORS.length })).toBe("var(--primary)");
     expect(accentFor({ color: -1 })).toBe("var(--primary)");
     expect(accentFor({})).toBe("var(--primary)");
-  });
-});
-
-describe("spaceInitial", () => {
-  it("uppercases the first non-whitespace character", () => {
-    expect(spaceInitial("hi")).toBe("H");
-    expect(spaceInitial("  bar")).toBe("B");
-  });
-
-  it("returns a placeholder for empty or whitespace-only names", () => {
-    expect(spaceInitial("")).toBe("?");
-    expect(spaceInitial("   ")).toBe("?");
   });
 });

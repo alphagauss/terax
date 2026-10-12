@@ -18,8 +18,3 @@ export function accentFor(space: Pick<SpaceMeta, "color">): string {
   if (c != null && c >= 0 && c < SPACE_COLORS.length) return SPACE_COLORS[c];
   return "var(--primary)";
 }
-
-export function spaceInitial(name: string): string {
-  const ch = name.trim()[0];
-  return ch ? ch.toUpperCase() : "?";
-}

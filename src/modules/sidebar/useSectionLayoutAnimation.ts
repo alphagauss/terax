@@ -62,7 +62,7 @@ export function useSectionLayoutAnimation(
     const motion = new RevealMotion(() => {
       cleanupRef.current = null;
       setAnimating(false);
-    }, true);
+    }, "pane");
     // 先批量测量最终布局，再设置临时外壳，避免读写交错强制布局。
     const targets = snapshots.map((snapshot) => ({
       ...snapshot,
