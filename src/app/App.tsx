@@ -2008,7 +2008,7 @@ export default function App() {
                   ) : null}
                   <div
                     data-sidebar-view-host="primary"
-                    className="relative min-h-0 flex-1"
+                    className="relative min-h-0 flex-1 overflow-clip"
                   />
                   {sidebar.activityBar.position === "bottom" ? (
                     <SidebarActivityBar
@@ -2140,7 +2140,7 @@ export default function App() {
                     ) : null}
                     <div
                       data-sidebar-view-host="secondary"
-                      className="relative min-h-0 flex-1"
+                      className="relative min-h-0 flex-1 overflow-clip"
                     />
                     {sidebar.activityBar.position === "bottom" ? (
                       <SecondarySidebarTabs
