@@ -80,6 +80,7 @@
     "copyFailed": "复制失败，请选中详情复制",
     "repeated": "发生 {{count}} 次",
     "dismiss": "关闭：{{title}}",
+    "dismissNotice": "关闭提示",
     "operationFailed": "操作失败",
     "saveFailed": "保存设置失败",
     "workspaceOpenFailed": "打开 Workspace 窗口失败",

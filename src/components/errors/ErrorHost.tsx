@@ -23,14 +23,25 @@ import {
 function ErrorCard({
   report,
   historical,
+  reveal,
   pause,
 }: {
   report: ErrorReport;
   historical: boolean;
+  reveal: { id: string } | null;
   pause: (id: string, paused: boolean) => void;
 }) {
   const { t } = useTranslation("common");
   const [expanded, setExpanded] = useState(false);
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!reveal) return;
+    setExpanded(true);
+  }, [reveal]);
+  useEffect(() => {
+    if (reveal && expanded)
+      card.current?.scrollIntoView?.({ block: "nearest" });
+  }, [reveal, expanded]);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [copyState, setCopyState] = useState<"copy" | "copied" | "copyFailed">(
@@ -70,6 +81,7 @@ function ErrorCard({
 
   return (
     <section
+      ref={card}
       aria-label={report.title}
       className="rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-2 duration-surface"
       onMouseEnter={() => setHovered(true)}
@@ -119,6 +131,7 @@ function ErrorCard({
         </button>
         {!historical && (
           <Button
+            type="button"
             size="xs"
             variant="ghost"
             onClick={() => dismissError(report.id)}
@@ -129,6 +142,7 @@ function ErrorCard({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1">
         <Button
+          type="button"
           size="xs"
           variant="ghost"
           aria-expanded={expanded}
@@ -136,7 +150,12 @@ function ErrorCard({
         >
           {t(expanded ? "errors.hideDetails" : "errors.details")}
         </Button>
-        <Button size="xs" variant="ghost" onClick={() => void copy()}>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() => void copy()}
+        >
           {t(`errors.${copyState}`)}
         </Button>
         {report.count > 1 && (
@@ -166,6 +185,7 @@ export function ErrorHost() {
   const { t } = useTranslation("common");
   const reports = useStore(errorStore, (state) => state.reports);
   const history = useStore(errorStore, (state) => state.historyOpen);
+  const target = useStore(errorStore, (state) => state.historyTarget);
   const hasVisibleErrors = reports.some((report) => report.visible);
   const showing = hasVisibleErrors || (history && reports.length > 0);
   const [mount] = useState(() => document.createElement("div"));
@@ -274,10 +294,11 @@ export function ErrorHost() {
           <span className="mr-auto">
             {t("errors.history", { count: reports.length })}
           </span>
-          <Button size="xs" variant="ghost" onClick={clearErrors}>
+          <Button type="button" size="xs" variant="ghost" onClick={clearErrors}>
             {t("errors.clear")}
           </Button>
           <Button
+            type="button"
             size="xs"
             variant="ghost"
             onClick={() => setErrorHistoryOpen(false)}
@@ -298,6 +319,7 @@ export function ErrorHost() {
               key={report.id}
               report={report}
               historical={history}
+              reveal={history && target?.id === report.id ? target : null}
               pause={pause}
             />
           ),

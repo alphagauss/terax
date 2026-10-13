@@ -80,6 +80,7 @@
     "copyFailed": "Copy failed; select details to copy",
     "repeated": "{{count}} occurrences",
     "dismiss": "Dismiss: {{title}}",
+    "dismissNotice": "Dismiss notice",
     "operationFailed": "Operation failed",
     "saveFailed": "Could not save settings",
     "workspaceOpenFailed": "Failed to open Workspace window",

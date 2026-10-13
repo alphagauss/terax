@@ -8,10 +8,15 @@ export type ErrorOptions = {
   error?: unknown;
   description?: string;
   source?: string;
+  /** 一次操作或任务运行的身份；不同身份不按相同文案合并。 */
+  identity?: string;
+  /** 主动查看原位详情时仅加入历史，不触发浮层。 */
+  overlay?: boolean;
 };
 
 export type ErrorReport = {
   id: string;
+  identity?: string;
   title: string;
   source: string;
   details: string;
@@ -23,22 +28,82 @@ export type ErrorReport = {
 // 倒计时不是展示数据，只有到期收起时才通知订阅者。
 const remainingById = new Map<string, number>();
 
+type ErrorNoticeState = "reported" | "dismissed";
+
 export const errorStore = createStore<{
   reports: ErrorReport[];
   historyOpen: boolean;
+  historyTarget: { id: string } | null;
+  notices: ReadonlyMap<string, ErrorNoticeState>;
 }>(() => ({
   reports: [],
   historyOpen: false,
+  historyTarget: null,
+  // 只保存窗口内的运行身份和关闭状态，不保存诊断；清空历史不能让旧提示复活。
+  notices: new Map(),
 }));
 
 /** 历史只属于当前窗口内存；清空不改变任何运行任务。 */
 export function clearErrors(): void {
   remainingById.clear();
-  errorStore.setState({ reports: [], historyOpen: false });
+  errorStore.setState({ reports: [], historyOpen: false, historyTarget: null });
 }
 
 export function setErrorHistoryOpen(historyOpen: boolean): void {
-  errorStore.setState({ historyOpen });
+  errorStore.setState({ historyOpen, historyTarget: null });
+}
+
+function setNotice(identity: string, notice: ErrorNoticeState): void {
+  errorStore.setState(({ notices }) => ({
+    notices: new Map(notices).set(identity, notice),
+  }));
+}
+
+/** 同一次失败只主动提醒一次，清空或淘汰历史后也不由轮询恢复。 */
+export function reportErrorNotice(
+  identity: string,
+  title: string,
+  options: ErrorOptions,
+): void {
+  const { notices, reports } = errorStore.getState();
+  if (notices.has(identity)) return;
+  if (!reports.some((report) => report.identity === identity))
+    reportError(title, { ...options, identity });
+  setNotice(identity, "reported");
+}
+
+/** 只隐藏本次提示并收起关联浮层，不修改业务错误，也不删除诊断。 */
+export function dismissErrorNotice(identity: string): void {
+  const { notices, reports } = errorStore.getState();
+  const reportId = reports.find((report) => report.identity === identity)?.id;
+  if (reportId) dismissError(reportId);
+  if (notices.get(identity) !== "dismissed") setNotice(identity, "dismissed");
+}
+
+/** 恢复只收起已知的错误，不把尚未失败的运行提前标记为已关闭。 */
+export function resolveErrorNotice(identity: string): void {
+  const { notices, reports } = errorStore.getState();
+  if (
+    notices.has(identity) ||
+    reports.some((report) => report.identity === identity)
+  )
+    dismissErrorNotice(identity);
+}
+
+/** 原位详情复用已有记录；缺失时仅恢复历史，不弹窗、不累计查看次数。 */
+export function showErrorNoticeDetails(
+  identity: string,
+  title: string,
+  options: ErrorOptions,
+): void {
+  const { notices, reports } = errorStore.getState();
+  const notice = notices.get(identity);
+  const reportId =
+    reports.find((report) => report.identity === identity)?.id ??
+    reportError(title, { ...options, identity, overlay: false });
+  if (!notice) setNotice(identity, "reported");
+  // 每次主动查看都生成定位请求，即使目标未变也重新展开并滚动。
+  errorStore.setState({ historyOpen: true, historyTarget: { id: reportId } });
 }
 
 /** 提取有限的诊断字段，保留原因链和换行，不复制请求正文或任意业务对象。 */
@@ -111,22 +176,27 @@ export function reportError(title: string, options: ErrorOptions = {}): string {
     .join("\n")
     .slice(0, 16000);
   const reports = errorStore.getState().reports;
-  const previous = reports.find(
-    (report) =>
-      report.title === safeTitle &&
-      report.source === source &&
-      report.details === details &&
-      timestamp - report.timestamp < 10000,
+  const previous = reports.find((report) =>
+    options.identity !== undefined
+      ? report.identity === options.identity
+      : report.identity === undefined &&
+        report.title === safeTitle &&
+        report.source === source &&
+        report.details === details &&
+        timestamp - report.timestamp < 10000,
   );
   const report: ErrorReport = {
     id: previous?.id ?? crypto.randomUUID(),
+    identity: options.identity,
     title: safeTitle,
     source,
     details,
     timestamp,
     count: (previous?.count ?? 0) + 1,
     visible:
-      previous?.visible ?? reports.filter((item) => item.visible).length < 3,
+      previous?.visible ??
+      (options.overlay !== false &&
+        reports.filter((item) => item.visible).length < 3),
   };
   if (!previous && report.visible) remainingById.set(report.id, 8000);
   const next = [report, ...reports.filter((item) => item.id !== report.id)];
