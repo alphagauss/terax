@@ -7,6 +7,7 @@ vi.mock("@/modules/workspace", () => ({
   currentWorkspaceEnv: () => ({ kind: mocks.kind }),
 }));
 vi.mock("@/components/menu/context-menu", () => ({
+  ContextMenuSeparator: () => <hr />,
   ContextMenuItem: ({ children }: { children: React.ReactNode }) => (
     <button type="button">{children}</button>
   ),
@@ -42,8 +43,40 @@ describe("shared file menu capabilities", () => {
       );
       for (const name of ["open", "saveAs", "copyPath", "copyContent"])
         expect(html).toContain(`fileActions.${name}`);
+      expect(html).not.toContain("explorer:menu.copyRelativePath");
       for (const name of ["openWith", "reveal"])
         expect(html.includes(`fileActions.${name}`)).toBe(kind === "local");
+    },
+  );
+  it.each(["local", "ssh", "wsl"])(
+    "keeps path copies adjacent after opening actions in %s",
+    (kind) => {
+      mocks.kind = kind;
+      for (const isDir of [false, true]) {
+        const html = renderToStaticMarkup(
+          <FileActionItems
+            target={{ path: "/project/item", isDir }}
+            onCopyRelativePath={vi.fn()}
+            onOpen={vi.fn()}
+            onOpenDirectory={vi.fn()}
+            onOpenTerminal={vi.fn()}
+          />,
+        );
+        const menu = document.createElement("div");
+        menu.innerHTML = html;
+        expect(Array.from(menu.children, (item) => item.textContent)).toEqual([
+          isDir ? "spaces:openInNewSpace" : "fileActions.open",
+          ...(kind === "local" && !isDir ? ["fileActions.openWith"] : []),
+          ...(kind === "local" ? ["fileActions.reveal"] : []),
+          ...(isDir ? ["explorer:menu.openInTerminal"] : []),
+          "",
+          "fileActions.copyPath",
+          "explorer:menu.copyRelativePath",
+          ...(!isDir
+            ? ["fileActions.copyContent", "", "fileActions.saveAs"]
+            : []),
+        ]);
+      }
     },
   );
   it("hides content and export actions for directories", () => {

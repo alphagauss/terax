@@ -1,5 +1,8 @@
 /** 共用文件菜单；远端环境只暴露现有文件访问和下载能力。 */
-import { ContextMenuItem } from "@/components/menu/context-menu";
+import {
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/menu/context-menu";
 import {
   copyFileContent,
   copyFilePath,
@@ -17,9 +20,13 @@ export function FileActionItems({
   target,
   onOpen,
   onOpenDirectory,
+  onOpenTerminal,
+  onCopyRelativePath,
   resolve,
 }: {
   target: FileTarget;
+  onCopyRelativePath?: () => void;
+  onOpenTerminal?: (path: string) => void;
   onOpen: (path: string, line?: number) => void | Promise<void>;
   resolve?: () => Promise<FileTarget>;
   onOpenDirectory?: (path: string) => void | Promise<void>;
@@ -78,20 +85,18 @@ export function FileActionItems({
           {t("fileActions.openWith")}
         </ContextMenuItem>
       )}
-      {!target.isDir && (
-        <ContextMenuItem
-          onSelect={() =>
-            run(async (file) => {
-              const queued = await invoke<string | null>("file_save_as", {
-                path: file.path,
-                title: t("fileActions.saveAs"),
-              });
-              if (queued && !local) requestTransferPanel(queued);
-            })
-          }
-        >
-          {t("fileActions.saveAs")}
+      {local && (
+        <ContextMenuItem onSelect={() => run((file) => revealFile(file.path))}>
+          {t("fileActions.reveal")}
         </ContextMenuItem>
+      )}
+      {target.isDir && onOpenTerminal && (
+        <ContextMenuItem onSelect={() => onOpenTerminal(target.path)}>
+          {t("explorer:menu.openInTerminal")}
+        </ContextMenuItem>
+      )}
+      {(!target.isDir || local || onOpenDirectory || onOpenTerminal) && (
+        <ContextMenuSeparator />
       )}
       <ContextMenuItem
         onSelect={() => {
@@ -107,6 +112,11 @@ export function FileActionItems({
       >
         {t("fileActions.copyPath")}
       </ContextMenuItem>
+      {onCopyRelativePath && (
+        <ContextMenuItem onSelect={onCopyRelativePath}>
+          {t("explorer:menu.copyRelativePath")}
+        </ContextMenuItem>
+      )}
       {!target.isDir && (
         <ContextMenuItem
           onSelect={() => run((file) => copyFileContent(file.path))}
@@ -114,9 +124,20 @@ export function FileActionItems({
           {t("fileActions.copyContent")}
         </ContextMenuItem>
       )}
-      {local && (
-        <ContextMenuItem onSelect={() => run((file) => revealFile(file.path))}>
-          {t("fileActions.reveal")}
+      {!target.isDir && <ContextMenuSeparator />}
+      {!target.isDir && (
+        <ContextMenuItem
+          onSelect={() =>
+            run(async (file) => {
+              const queued = await invoke<string | null>("file_save_as", {
+                path: file.path,
+                title: t("fileActions.saveAs"),
+              });
+              if (queued && !local) requestTransferPanel(queued);
+            })
+          }
+        >
+          {t("fileActions.saveAs")}
         </ContextMenuItem>
       )}
     </>

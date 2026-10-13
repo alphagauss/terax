@@ -1251,69 +1251,19 @@ export const FileExplorer = memo(
                 <FileActionItems
                   onOpenDirectory={onOpenInNewSpace}
                   target={menuTarget}
+                  onCopyRelativePath={() =>
+                    void copyToClipboard(
+                      relativePath(rootPath, menuTarget.path),
+                    )
+                  }
+                  onOpenTerminal={onRevealInTerminal}
                   onOpen={(path) => onOpenFile(path, false)}
                 />
-                {!menuTarget.isDir &&
-                  isPythonFile(menuTarget.path) &&
-                  onRunPythonFile && (
-                    <ContextMenuItem
-                      onSelect={() =>
-                        onRunPythonFile(menuTarget.path, rootPath)
-                      }
-                    >
-                      {t("menu.runPythonFile")}
-                    </ContextMenuItem>
-                  )}
+                {menuTarget.isDir && <ContextMenuSeparator />}
                 <ContextMenuItem
                   onSelect={() => tree.beginRename(menuTarget.path)}
                 >
                   {t("common:rename")}
-                </ContextMenuItem>
-                {menuTarget.isDir && onRevealInTerminal && (
-                  <ContextMenuItem
-                    onSelect={() => onRevealInTerminal(menuTarget.path)}
-                  >
-                    {t("menu.openInTerminal")}
-                  </ContextMenuItem>
-                )}
-                {workspaceEnv.kind !== "local" ? (
-                  <>
-                    {menuTarget.isDir && (
-                      <ContextMenuItem
-                        onSelect={() => setSyncPath(menuTarget.path)}
-                      >
-                        {t("sync.title")}
-                      </ContextMenuItem>
-                    )}
-                    <TransferStrategyMenu
-                      label={t("menu.downloadToLocal")}
-                      onSelect={(strategy) =>
-                        void enqueueDownload(menuTarget.path, strategy)
-                      }
-                    />
-                    {(["files", "folders"] as const).map((kind) => (
-                      <TransferStrategyMenu
-                        key={kind}
-                        label={t(
-                          kind === "files"
-                            ? "menu.uploadFiles"
-                            : "menu.uploadFolder",
-                        )}
-                        onSelect={(strategy) => {
-                          const remoteDir = menuTarget.isDir
-                            ? menuTarget.path
-                            : parentOf(menuTarget.path, rootPath);
-                          void enqueueUpload(remoteDir, kind, strategy);
-                        }}
-                      />
-                    ))}
-                  </>
-                ) : null}
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
-                >
-                  {t("menu.paste")}
                 </ContextMenuItem>
                 <ContextMenuItem
                   onSelect={() =>
@@ -1339,26 +1289,64 @@ export const FileExplorer = memo(
                 >
                   {t("menu.newFolder")}
                 </ContextMenuItem>
-                <ContextMenuSeparator />
                 <ContextMenuItem
-                  onSelect={() =>
-                    void copyToClipboard(
-                      relativePath(rootPath, menuTarget.path),
-                    )
-                  }
+                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
                 >
-                  {t("menu.copyRelativePath")}
+                  {t("menu.paste")}
                 </ContextMenuItem>
+                {!menuTarget.isDir && <ContextMenuSeparator />}
+                {!menuTarget.isDir &&
+                  isPythonFile(menuTarget.path) &&
+                  onRunPythonFile && (
+                    <ContextMenuItem
+                      onSelect={() =>
+                        onRunPythonFile(menuTarget.path, rootPath)
+                      }
+                    >
+                      {t("menu.runPythonFile")}
+                    </ContextMenuItem>
+                  )}
                 {!menuTarget.isDir && (
+                  <ContextMenuItem
+                    onSelect={() => onAttachToAgent?.(menuTarget.path)}
+                  >
+                    {t("menu.attachToAgent")}
+                  </ContextMenuItem>
+                )}
+                {workspaceEnv.kind !== "local" ? (
                   <>
                     <ContextMenuSeparator />
-                    <ContextMenuItem
-                      onSelect={() => onAttachToAgent?.(menuTarget.path)}
-                    >
-                      {t("menu.attachToAgent")}
-                    </ContextMenuItem>
+                    <TransferStrategyMenu
+                      label={t("menu.downloadToLocal")}
+                      onSelect={(strategy) =>
+                        void enqueueDownload(menuTarget.path, strategy)
+                      }
+                    />
+                    {(["files", "folders"] as const).map((kind) => (
+                      <TransferStrategyMenu
+                        key={kind}
+                        label={t(
+                          kind === "files"
+                            ? "menu.uploadFiles"
+                            : "menu.uploadFolder",
+                        )}
+                        onSelect={(strategy) => {
+                          const remoteDir = menuTarget.isDir
+                            ? menuTarget.path
+                            : parentOf(menuTarget.path, rootPath);
+                          void enqueueUpload(remoteDir, kind, strategy);
+                        }}
+                      />
+                    ))}
+                    {menuTarget.isDir && (
+                      <ContextMenuItem
+                        onSelect={() => setSyncPath(menuTarget.path)}
+                      >
+                        {t("sync.title")}
+                      </ContextMenuItem>
+                    )}
                   </>
-                )}
+                ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem
                   variant="destructive"
@@ -1387,20 +1375,26 @@ export const FileExplorer = memo(
                 <FileActionItems
                   onOpenDirectory={onOpenInNewSpace}
                   target={{ path: rootPath, isDir: true }}
+                  onOpenTerminal={onRevealInTerminal}
                   onOpen={(path) => onOpenFile(path, false)}
                 />
-                {onRevealInTerminal && (
-                  <ContextMenuItem
-                    onSelect={() => onRevealInTerminal(rootPath)}
-                  >
-                    {t("menu.openInTerminal")}
-                  </ContextMenuItem>
-                )}
-                {workspaceEnv.kind !== "local" && (
-                  <ContextMenuItem onSelect={() => setSyncPath(rootPath)}>
-                    {t("sync.title")}
-                  </ContextMenuItem>
-                )}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => tree.beginCreate(rootPath, "file")}
+                >
+                  {t("menu.newFile")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() => tree.beginCreate(rootPath, "dir")}
+                >
+                  {t("menu.newFolder")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
+                >
+                  {t("menu.paste")}
+                </ContextMenuItem>
+                {workspaceEnv.kind !== "local" && <ContextMenuSeparator />}
                 {workspaceEnv.kind !== "local"
                   ? (["files", "folders"] as const).map((kind) => (
                       <TransferStrategyMenu
@@ -1416,22 +1410,11 @@ export const FileExplorer = memo(
                       />
                     ))
                   : null}
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
-                >
-                  {t("menu.paste")}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  onSelect={() => tree.beginCreate(rootPath, "file")}
-                >
-                  {t("menu.newFile")}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  onSelect={() => tree.beginCreate(rootPath, "dir")}
-                >
-                  {t("menu.newFolder")}
-                </ContextMenuItem>
+                {workspaceEnv.kind !== "local" && (
+                  <ContextMenuItem onSelect={() => setSyncPath(rootPath)}>
+                    {t("sync.title")}
+                  </ContextMenuItem>
+                )}
                 <ContextMenuSeparator />
                 <ContextMenuItem onSelect={() => tree.refresh(rootPath)}>
                   {t("menu.refresh")}

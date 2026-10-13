@@ -525,17 +525,6 @@ export function TabBar({
                     className="min-w-48 p-1"
                     onCloseAutoFocus={(e) => e.preventDefault()}
                   >
-                    {t.kind === "editor" && isPythonFile(t.path) && (
-                      <>
-                        <ContextMenuItem
-                          className="rounded-xl px-2.5 py-1.5 text-[13px]"
-                          onSelect={() => onRunPythonFile(t.id, groupId)}
-                        >
-                          {tr("runPythonFile")}
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                      </>
-                    )}
                     {filePath && (
                       <>
                         {workspace.kind === "local" && (
@@ -543,9 +532,10 @@ export function TabBar({
                             className="rounded-xl px-2.5 py-1.5 text-[13px]"
                             onSelect={() => void revealInFinder(filePath)}
                           >
-                            {tr("explorer:menu.revealInFinder")}
+                            {tr("common:fileActions.reveal")}
                           </ContextMenuItem>
                         )}
+                        {workspace.kind === "local" && <ContextMenuSeparator />}
                         <ContextMenuItem
                           className="rounded-xl px-2.5 py-1.5 text-[13px]"
                           onSelect={() => void copyToClipboard(filePath)}
@@ -563,6 +553,15 @@ export function TabBar({
                         >
                           {tr("explorer:menu.copyRelativePath")}
                         </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        {t.kind === "editor" && isPythonFile(t.path) && (
+                          <ContextMenuItem
+                            className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                            onSelect={() => onRunPythonFile(t.id, groupId)}
+                          >
+                            {tr("runPythonFile")}
+                          </ContextMenuItem>
+                        )}
                         <ContextMenuItem
                           className="rounded-xl px-2.5 py-1.5 text-[13px]"
                           onSelect={() => onAttachFileToAgent(filePath)}

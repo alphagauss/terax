@@ -50,7 +50,7 @@ describe("TabBar editor icon", () => {
 
 describe("TabBar file actions", () => {
   it("offers only the requested Explorer actions for file tabs", () => {
-    expect(source).toContain('tr("explorer:menu.revealInFinder")');
+    expect(source).toContain('tr("common:fileActions.reveal")');
     expect(source).toContain('tr("explorer:menu.copyPath")');
     expect(source).toContain('tr("explorer:menu.copyRelativePath")');
     expect(source).toContain('tr("explorer:menu.attachToAgent")');

@@ -300,14 +300,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                         <FileActionItems
                           target={{ path: hit.path, isDir: hit.is_dir }}
                           onOpen={onOpenFile}
+                          onOpenTerminal={onRevealInTerminal}
                         />
-                        {hit.is_dir && onRevealInTerminal && (
-                          <ContextMenuItem
-                            onSelect={() => onRevealInTerminal(hit.path)}
-                          >
-                            {t("menu.openInTerminal")}
-                          </ContextMenuItem>
-                        )}
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           onSelect={() => onAttachToAgent?.(hit.path)}
