@@ -1129,9 +1129,21 @@ fn build_local_command(
             _ => {
                 let mut command_line = Command::new(&identity.executable);
                 command_line.args(["-NoLogo", "-NoProfile", "-Command"]);
-                // 无窗口启动时 PowerShell 7 也可能使用系统代码页，须与管道的 UTF-8 契约对齐。
+                // 在格式化管道完成前保存命令状态；直接 exit 会丢失延迟格式化的对象输出。
+                // 动态解析使语法错误也能进入 catch，避免 -Command 静默退出。
+                let script = format!(
+                    "{command}\n\n$__terax_rc = if ($?) {{ 0 }} elseif ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }}"
+                );
+                // PowerShell 将弯引号也视为单引号分隔符，嵌入源码时一并双写。
+                let mut quoted = String::new();
+                for character in script.chars() {
+                    quoted.push(character);
+                    if matches!(character, '\'' | '‘' | '’' | '‚' | '‛') {
+                        quoted.push(character);
+                    }
+                }
                 command_line.arg(format!(
-                    "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n{command}\n\n$__terax_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\nWrite-Output \"{marker}$($PWD.Path)\"\nexit $__terax_rc"
+                    "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\ntry {{\n$__terax_script = [scriptblock]::Create('{quoted}')\n}} catch {{\n[Console]::Error.WriteLine($_.ToString())\nexit 1\n}}\n. $__terax_script | Out-Default\n[Console]::WriteLine(\"{marker}$($PWD.Path)\")\nexit $__terax_rc"
                 ));
                 command_line
             }
@@ -1240,6 +1252,7 @@ fn apply_minimal_environment(command: &mut Command) {
     }
     command
         .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .env("TERAX_AGENT_SHELL", "1");
 }
 
@@ -1660,6 +1673,110 @@ mod tests {
                 assert_eq!(stdout.lines().nth(2), Some(version.as_str()));
             }
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_objects_errors_and_native_status_survive_wrapping() {
+        let directory = tempfile::tempdir().unwrap();
+        for shell in [ShellKind::Pwsh, ShellKind::Powershell] {
+            if select_shell(&agent_shells(&WorkspaceEnv::Local).unwrap(), shell).is_err() {
+                continue;
+            }
+            for (command, code, stdout, stderr) in [
+                (
+                    "[pscustomobject]@{Name='hello';Value=1}; 'after'",
+                    0,
+                    "after",
+                    "",
+                ),
+                (
+                    "cmd /c exit 0; missing_terax_test_command",
+                    1,
+                    "",
+                    "missing_terax_test_command",
+                ),
+                ("cmd /c exit 7", 7, "", ""),
+                ("cmd /c exit 7; 'recovered'", 0, "recovered", ""),
+                (
+                    "missing_terax_test_command; 'recovered'",
+                    0,
+                    "recovered",
+                    "missing_terax_test_command",
+                ),
+                (
+                    "Write-Output \"don't ‘quote’ me\"",
+                    0,
+                    "don't ‘quote’ me",
+                    "",
+                ),
+                ("Write-Error 'test failure'", 1, "", "test failure"),
+                ("throw 'test throw'", 1, "", "test throw"),
+                ("foreach ($x in 'x') { 'hello'", 1, "", "}"),
+            ] {
+                let process = AgentProcess::spawn_local(
+                    uuid::Uuid::new_v4().to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                    WorkspaceEnv::Local,
+                    command.into(),
+                    directory.path().to_string_lossy().into_owned(),
+                    shell,
+                    false,
+                    ProcessPurpose::Shell,
+                )
+                .unwrap();
+                let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
+                assert_eq!(
+                    response.exit_code,
+                    Some(code),
+                    "{shell:?}: {command}: {}",
+                    response.stderr
+                );
+                assert!(
+                    response.stdout.contains(stdout),
+                    "{shell:?}: {command}: {}",
+                    response.stdout
+                );
+                assert!(
+                    response.stderr.contains(stderr),
+                    "{shell:?}: {command}: {}",
+                    response.stderr
+                );
+                if !command.starts_with("throw ") && !command.starts_with("foreach ") {
+                    assert_eq!(
+                        response.cwd_after,
+                        Some(directory.path().to_string_lossy().replace('\\', "/")),
+                        "{shell:?}: {command}"
+                    );
+                }
+                if command.starts_with("[pscustomobject]") {
+                    assert!(response.stdout.contains("hello"));
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn python_pipe_output_is_utf8() {
+        if which::which("python").is_err() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            WorkspaceEnv::Local,
+            "python -c \"import sys; print(chr(0x4e2d)+chr(0x6587)); sys.stderr.write(chr(0x4e2d)+chr(0x6587))\"".into(),
+            directory.path().to_string_lossy().into_owned(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::Shell,
+        ).unwrap();
+        let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
+        assert_eq!(response.exit_code, Some(0), "{}", response.stderr);
+        assert_eq!(response.stdout.trim(), "中文");
+        assert_eq!(response.stderr, "中文");
     }
 
     #[cfg(windows)]

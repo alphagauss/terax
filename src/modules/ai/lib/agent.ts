@@ -50,6 +50,7 @@ import {
   REASONING_DURATION_PART_TYPE,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
+import { reportInvalidToolInput } from "@/modules/ai/lib/errors";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import { describeToolCall } from "@/modules/ai/lib/toolSummary";
 import type {
@@ -456,6 +457,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               let reasoningStartedAt: number | undefined;
               let cycleSteps = 0;
               const result = streamText({
+                repairToolCall: reportInvalidToolInput,
                 ...buildParameterOptions(
                   opts.modelParameters ?? [],
                   getProvider(provider).runtime.adapter,
@@ -771,6 +773,7 @@ function buildSubagentTaskRunner({
     });
     let lastChildMessages = prompt.messages;
     const result = streamText({
+      repairToolCall: reportInvalidToolInput,
       ...buildParameterOptions(
         config.modelParameters ?? [],
         getProvider(provider).runtime.adapter,
@@ -859,6 +862,7 @@ function buildSubagentTaskRunner({
           tools,
         });
         const summary = streamText({
+          repairToolCall: reportInvalidToolInput,
           ...buildParameterOptions(
             config.modelParameters ?? [],
             getProvider(provider).runtime.adapter,

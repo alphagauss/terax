@@ -32,6 +32,14 @@ function formatInvalidToolInput(error: unknown): string | null {
   )
     return null;
   const validation = errorRecord(input.cause);
+  if (validation?.name === "AI_JSONParseError") {
+    const cause = errorRecord(validation.cause);
+    const position =
+      typeof cause?.message === "string"
+        ? cause.message.match(/\bposition \d+/)?.[0]
+        : undefined;
+    return `Invalid input for tool ${input.toolName}: input is not valid JSON${position ? ` at ${position}` : ""}. Call the tool again with complete JSON matching the schema. The tool was not executed.`;
+  }
   if (validation?.name !== "AI_TypeValidationError" || !("value" in validation))
     return null;
   const issue = firstValidationIssue(validation.cause);
@@ -49,6 +57,17 @@ function formatInvalidToolInput(error: unknown): string | null {
     ? " Pass JSON arrays and objects directly, not as JSON-encoded strings."
     : "";
   return `Invalid input for tool ${input.toolName}: ${detail}.${retryHint} Call the tool again with input that matches the schema. The tool was not executed.`;
+}
+
+/** 在 SDK 生成工具回执前压缩参数错误；返回 null 保持拒绝，不修复或执行输入。 */
+export async function reportInvalidToolInput({
+  error,
+}: {
+  error: Error;
+}): Promise<null> {
+  const message = formatInvalidToolInput(error);
+  if (message) error.message = message;
+  return null;
 }
 
 function errorRecord(value: unknown): Record<string, unknown> | null {
