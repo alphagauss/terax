@@ -171,7 +171,7 @@ function isActivityBarSize(value: string): value is ActivityBarSize {
 function Badge({ value }: { value: number | undefined }) {
   if (!value || value <= 0) return null;
   return (
-    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-muted-foreground">
+    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-sidebar-primary px-1 text-[9px] font-semibold leading-none tabular-nums text-white">
       {value > 99 ? "99+" : value}
     </span>
   );
