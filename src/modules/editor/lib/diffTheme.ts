@@ -39,6 +39,11 @@ const UNIFIED_CHANGE_RULES = {
     paddingTop: "1px",
     paddingBottom: "1px",
   },
+  // 纯新增也会生成空删除占位块，清除内边距以免撑出红色 gutter 标记。
+  ".cm-deletedChunk:empty": {
+    paddingTop: "0",
+    paddingBottom: "0",
+  },
   "&.cm-merge-b .cm-changedLineGutter, .cm-changedLineGutter": {
     background: ADDED_GUTTER,
   },

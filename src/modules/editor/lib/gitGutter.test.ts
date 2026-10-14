@@ -6,11 +6,13 @@
 
 // @vitest-environment happy-dom
 
+import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView, highlightActiveLineGutter } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   gitChangeGutter,
+  gitChangeOverview,
   renderGitChangeOverview,
   setQuickDiffBaseline,
 } from "./gitGutter";
@@ -24,6 +26,58 @@ afterEach(() => {
 });
 
 describe("gitChangeGutter", () => {
+  it.each([
+    { original: "", modified: "new\nfile", kinds: ["added"] },
+    {
+      original: "one\nold\nthree",
+      modified: "one\nnew\nthree",
+      kinds: ["deleted", "added"],
+    },
+    { original: "one\ntwo\nthree", modified: "one\nthree", kinds: ["deleted"] },
+  ])(
+    "renders unified overview lanes for $kinds",
+    ({ original, modified, kinds }) => {
+      const parent = document.createElement("div");
+      document.body.append(parent);
+      view = new EditorView({
+        parent,
+        state: EditorState.create({
+          doc: original,
+          extensions: [
+            unifiedMergeView({ original, mergeControls: false }),
+            gitChangeOverview,
+          ],
+        }),
+      });
+      let scrollHeight = 200;
+      Object.defineProperties(view.scrollDOM, {
+        scrollHeight: { get: () => scrollHeight },
+        clientHeight: { get: () => 100 },
+      });
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: modified },
+      });
+
+      const rail = view.dom.querySelector<HTMLDivElement>(".cm-changeOverview");
+      expect(rail?.hidden).toBe(false);
+      expect(
+        Array.from(rail?.children ?? [], (marker) => marker.className),
+      ).toEqual(kinds.map((kind) => `cm-changeOverview-${kind}`));
+
+      // 内容恢复基线后移除标记；重新产生差异但无纵向溢出时仍隐藏概览。
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: original },
+      });
+      expect(rail?.hidden).toBe(true);
+      expect(rail?.children).toHaveLength(0);
+      scrollHeight = 100;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: modified },
+      });
+      expect(rail?.hidden).toBe(true);
+    },
+  );
+
   it.each([
     {
       kind: "added",

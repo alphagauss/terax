@@ -141,7 +141,8 @@ class ChangeOverview {
     const merge = snapshot ? null : getChunks(this.view.state);
     const ranges = snapshot
       ? snapshot.ranges
-      : merge?.side === null
+      : // 内联 MergeView 使用修改侧 b；分栏概览由外层滚动容器单独绘制。
+        merge?.side === "b"
         ? rangesFromChunks(
             getOriginalDoc(this.view.state),
             this.view.state.doc,
