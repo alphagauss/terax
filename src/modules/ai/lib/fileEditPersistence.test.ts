@@ -63,7 +63,6 @@ describe("文件改动的保存与恢复", async () => {
       cursor(),
       materializeRunFailure([message], "turn-1", "connection reset", 2000),
       "error",
-      [],
     );
     const records = commit.mock.lastCall?.[0].messages as SessionMessage[];
     const display = projectConversationDisplay(
@@ -94,7 +93,6 @@ describe("文件改动的保存与恢复", async () => {
       position,
       [message],
       "cancelled",
-      [],
     );
     await Promise.resolve();
     expect(commit).not.toHaveBeenCalled();
@@ -103,7 +101,7 @@ describe("文件改动的保存与恢复", async () => {
     expect(position.persistedMessages).toBe(0);
     expect(runtime.pending().snapshot.calls).toHaveLength(1);
     commit.mockResolvedValue(undefined);
-    await persistCompletedTurn(session, position, [message], "cancelled", []);
+    await persistCompletedTurn(session, position, [message], "cancelled");
     const records = commit.mock.lastCall?.[0].messages as SessionMessage[];
     expect(records.find((record) => record.role === "assistant")).toMatchObject(
       { turn_status: "cancelled" },
@@ -147,7 +145,7 @@ describe("文件改动的保存与恢复", async () => {
         { type: "text", text: "Final answer" },
       ],
     };
-    await persistCompletedTurn(session, position, [completed], "completed", []);
+    await persistCompletedTurn(session, position, [completed], "completed");
     const history = projectSessionMessages(session.id, saved);
     const display = projectConversationDisplay(history);
     const assistants = display.filter((item) => item.role === "assistant");

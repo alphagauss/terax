@@ -16,10 +16,10 @@ import {
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import {
-  loadChat,
+  canReviseHistory,
   editLastMessage,
   forkSession,
-  canReviseHistory,
+  loadChat,
   sendChatMessage,
   startChatMessage,
   steerChatMessage,
@@ -984,7 +984,7 @@ describe("chat store multi-process lifecycle", () => {
     ).toEqual(await convertToAgentModelMessages([completed]));
   });
 
-  it("persists final subagent display snapshots once and materializes the active chat", async () => {
+  it("materializes subagent cards without persisting a second display authority", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const messages = [
       {
@@ -1045,22 +1045,9 @@ describe("chat store multi-process lifecycle", () => {
         messages: [
           expect.objectContaining({ role: "assistant" }),
           expect.objectContaining({ role: "tool", name: "run_subagent" }),
-          expect.objectContaining({
-            role: "display",
-
-            content: expect.objectContaining({
-              taskId: "task-1",
-              status: "completed",
-            }),
-          }),
         ],
       }),
     );
-    const displayRecord = io.commit.mock.calls[0][0].messages.find(
-      (record: { role?: string }) => record.role === "display",
-    );
-    expect(displayRecord.content).not.toHaveProperty("task");
-    expect(displayRecord.content).not.toHaveProperty("result");
     expect(
       (chats.get(first.id)?.messages[1].parts ?? []).map((part) => part.type),
     ).toEqual(["tool-run_subagent", "data-subagent-display"]);

@@ -1348,7 +1348,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
         cursor,
         messages,
         outcome,
-        snapshots,
       );
       applySessionCommitCursor(id, cursor);
       const chat = chats.get(id);

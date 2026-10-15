@@ -1,6 +1,6 @@
 /**
- * 本文件定义 Subagent 的前端展示状态和持久化快照。
- * 展示数据只记录工具生命周期摘要，不包含推理正文、完整工具输出或模型上下文。
+ * 本文件定义 Subagent 的前端展示状态和派生快照。
+ * 展示数据从子会话执行事实派生，不包含推理正文或完整模型上下文，不单独持久化。
  */
 
 import { isToolSummary, type ToolSummary } from "@/modules/ai/lib/toolSummary";
@@ -37,11 +37,13 @@ type SubagentDisplaySnapshotStep = Omit<SubagentDisplayStep, "status"> & {
   status: Exclude<SubagentDisplayStatus, "running">;
 };
 
-/** JSONL 中只服务历史展示的终态快照。 */
+/** 从子会话事实派生、只服务历史展示的终态快照。 */
 export type SubagentDisplaySnapshot = Pick<
   SubagentDisplayState,
   "taskId" | "toolCallId" | "label"
 > & {
+  result?: string;
+  error?: string;
   version: 2;
   status: Exclude<SubagentDisplayStatus, "running">;
   durationMs: number;
@@ -49,6 +51,8 @@ export type SubagentDisplaySnapshot = Pick<
 };
 
 const SNAPSHOT_KEYS = new Set([
+  "result",
+  "error",
   "version",
   "taskId",
   "toolCallId",
@@ -68,7 +72,7 @@ export function isSubagentToolErrorOutput(output: unknown): boolean {
   );
 }
 
-/** 将实时状态收敛为不重复 task 和结果正文的终态展示快照。 */
+/** 将实时状态收敛为内存展示快照，结果正文不另行持久化。 */
 export function toSubagentDisplaySnapshot(
   state: SubagentDisplayState,
   interruptedStatus: "failed" | "cancelled",
@@ -76,6 +80,8 @@ export function toSubagentDisplaySnapshot(
 ): SubagentDisplaySnapshot {
   const status = state.status === "running" ? interruptedStatus : state.status;
   return {
+    ...(state.result === undefined ? {} : { result: state.result }),
+    ...(state.error === undefined ? {} : { error: state.error }),
     version: 2,
     taskId: state.taskId,
     toolCallId: state.toolCallId,
@@ -96,7 +102,7 @@ export function toSubagentDisplaySnapshot(
   };
 }
 
-/** 校验来自 JSONL 的 display-only Subagent 快照。 */
+/** 校验内存中的 Subagent 展示快照。 */
 export function isSubagentDisplaySnapshot(
   value: unknown,
 ): value is SubagentDisplaySnapshot {
@@ -105,13 +111,14 @@ export function isSubagentDisplaySnapshot(
   if (
     Object.keys(snapshot).some((key) => !SNAPSHOT_KEYS.has(key)) ||
     snapshot.version !== 2 ||
+    (snapshot.result !== undefined && typeof snapshot.result !== "string") ||
+    (snapshot.error !== undefined && typeof snapshot.error !== "string") ||
     !isBoundedText(snapshot.taskId, 128) ||
     !isBoundedText(snapshot.toolCallId, 256) ||
     !isBoundedText(snapshot.label, 60) ||
     !isTerminalStatus(snapshot.status) ||
     !isNonNegativeNumber(snapshot.durationMs) ||
-    !Array.isArray(snapshot.steps) ||
-    snapshot.steps.length > 200
+    !Array.isArray(snapshot.steps)
   ) {
     return false;
   }
@@ -136,8 +143,7 @@ function isDisplayStep(value: unknown): value is SubagentDisplaySnapshotStep {
     !Object.keys(step).some((key) => !SNAPSHOT_STEP_KEYS.has(key)) &&
     isBoundedText(step.id, 256) &&
     isBoundedText(step.toolName, 128) &&
-    (step.summary === undefined ||
-      isToolSummary(step.summary)) &&
+    (step.summary === undefined || isToolSummary(step.summary)) &&
     (step.status === "completed" ||
       step.status === "incomplete" ||
       step.status === "failed" ||

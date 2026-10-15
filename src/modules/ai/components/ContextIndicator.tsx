@@ -1,4 +1,4 @@
-/** 随主 Agent 调用完成更新上下文用量与缓存复用状态；压缩请求不覆盖主请求统计。 */
+/** 随主 Agent 调用完成更新上下文用量，按独立主子会话展示缓存复用诊断；压缩请求不覆盖主请求统计。 */
 
 import {
   Context,
@@ -18,7 +18,10 @@ import { getModelContextWindow } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { estimateUiMessageTokens } from "@/modules/ai/lib/chatRendering";
 import { estimateTokens } from "@/modules/ai/lib/usage";
-import { analyzeCacheUsage } from "@/modules/ai/lib/usageAnalysis";
+import {
+  analyzeSessionCacheUsage,
+  type CacheAnalysis,
+} from "@/modules/ai/lib/usageAnalysis";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
@@ -39,15 +42,20 @@ export function ContextIndicator({
   const draftSessionId = useChatStore((state) => state.draftSessionId);
   const providerModels = usePreferencesStore((state) => state.providerModels);
   const records = useUsageRecords(sessionId ?? "");
-  const cacheAnalysis = useMemo(() => analyzeCacheUsage(records), [records]);
-  const cacheIncident =
-    cacheAnalysis.incidents[cacheAnalysis.incidents.length - 1];
-  const cacheNoticeKey =
-    cacheAnalysis.status === "suspected"
-      ? "miniWindow.context.cacheAnomaly"
-      : cacheAnalysis.status === "recovered"
-        ? "miniWindow.context.cacheRecovered"
-        : "miniWindow.context.cacheAnomalyHistory";
+  const cacheWarnings = useMemo(
+    () =>
+      analyzeSessionCacheUsage(records).filter(
+        (analysis) => analysis.incidents.length,
+      ),
+    [records],
+  );
+  const cacheNoticeKey = cacheWarnings.some(
+    (analysis) => analysis.status === "suspected",
+  )
+    ? "miniWindow.context.cacheAnomaly"
+    : cacheWarnings.some((analysis) => analysis.status === "recovered")
+      ? "miniWindow.context.cacheRecovered"
+      : "miniWindow.context.cacheAnomalyHistory";
   const latest = [...records]
     .reverse()
     .find((record) => !record.taskId && !record.purpose);
@@ -86,10 +94,10 @@ export function ContextIndicator({
       <ContextTrigger
         className={cn(
           "h-6 shrink-0 gap-1 px-0 text-[10.5px]",
-          cacheIncident &&
+          cacheWarnings.length > 0 &&
             "relative after:absolute after:right-0 after:top-0.5 after:size-1.5 after:rounded-full after:bg-warning",
         )}
-        aria-label={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}${cacheIncident ? ` · ${t(cacheNoticeKey)}` : ""}`}
+        aria-label={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}${cacheWarnings.length ? ` · ${t(cacheNoticeKey)}` : ""}`}
       />
       <ContextContent className="w-80 max-h-[70vh] overflow-y-auto text-[11px]">
         <ContextContentHeader />
@@ -101,23 +109,13 @@ export function ContextIndicator({
               t("statusBar.noModels")
             )}
           </div>
-          {cacheIncident && (
-            <div className="rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-muted-foreground">
-              <p className="font-medium text-warning">{t(cacheNoticeKey)}</p>
-              <p className="mt-1">
-                {t("miniWindow.context.cacheAnomalyDetails", {
-                  actual: formatTokens(cacheIncident.cacheReadTokens),
-                  expected: formatTokens(cacheIncident.expectedTokens),
-                  coverage: `${(cacheIncident.prefixReuseCoverage * 100).toFixed(0)}%`,
-                })}
-              </p>
-              <p>
-                {t("miniWindow.context.cacheAnomalyCount", {
-                  count: cacheAnalysis.incidents.length,
-                })}
-              </p>
-            </div>
-          )}
+          {cacheWarnings.map((analysis) => (
+            <CacheWarning
+              key={analysis.incidents[0].taskId ?? "main"}
+              analysis={analysis}
+              sessionId={sessionId ?? ""}
+            />
+          ))}
           {approximate && (
             <p className="text-muted-foreground">
               {t("miniWindow.context.footerApprox")}
@@ -133,5 +131,74 @@ export function ContextIndicator({
         </ContextContentBody>
       </ContextContent>
     </Context>
+  );
+}
+
+/** 缓存异常共用上下文浮窗，保留定位原始会话所需的调用身份。 */
+function CacheWarning({
+  analysis,
+  sessionId,
+}: {
+  analysis: CacheAnalysis;
+  sessionId: string;
+}) {
+  const { t } = useTranslation("ai");
+  const incident = analysis.incidents[analysis.incidents.length - 1];
+  const notice =
+    analysis.status === "suspected"
+      ? "cacheAnomaly"
+      : analysis.status === "recovered"
+        ? "cacheRecovered"
+        : "cacheAnomalyHistory";
+  return (
+    <div className="rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-muted-foreground">
+      <p className="font-medium text-warning">
+        {t(`miniWindow.context.${notice}`)}
+      </p>
+      <p className="mt-1">
+        {t("miniWindow.context.cacheAnomalyDetails", {
+          actual: formatTokens(incident.cacheReadTokens),
+          expected: formatTokens(incident.expectedTokens),
+          coverage: `${(incident.prefixReuseCoverage * 100).toFixed(0)}%`,
+        })}
+      </p>
+      <p>
+        {t(
+          incident.taskId
+            ? "miniWindow.context.cacheSubagent"
+            : "miniWindow.context.cacheMainAgent",
+        )}
+        {incident.taskId ? `: ${incident.taskId}` : ""}
+      </p>
+      <details className="mt-1 break-all">
+        <summary className="cursor-pointer">
+          {t("miniWindow.context.cacheAnomalyCount", {
+            count: analysis.incidents.length,
+          })}
+        </summary>
+        <p>
+          {t("miniWindow.context.cacheSessionId")}: {sessionId}
+        </p>
+        {analysis.incidents.map((item) => (
+          <div key={item.currentCallId} className="mt-1 font-mono text-[10px]">
+            <p>
+              {t("miniWindow.context.cacheTurnId")}: {item.turnId}
+            </p>
+            {item.runId && (
+              <p>
+                {t("miniWindow.context.cacheRunId")}: {item.runId}
+              </p>
+            )}
+            <p>
+              {t("miniWindow.context.cachePreviousCallId")}:{" "}
+              {item.previousCallId}
+            </p>
+            <p>
+              {t("miniWindow.context.cacheCurrentCallId")}: {item.currentCallId}
+            </p>
+          </div>
+        ))}
+      </details>
+    </div>
   );
 }

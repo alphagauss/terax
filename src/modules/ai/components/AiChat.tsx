@@ -13,6 +13,7 @@ import {
   formatToolSummary,
 } from "@/modules/ai/lib/toolSummary";
 import { Button } from "@/components/controls/button";
+import { Hint } from "@/components/controls/tooltip";
 import { Textarea } from "@/components/controls/textarea";
 import { reportError } from "@/lib/errors";
 import {
@@ -942,12 +943,11 @@ function MessageEditor({
         className="min-h-[22px] rounded-none border-0 bg-transparent p-0 text-[14px] leading-[22px] text-inherit md:text-[14px]"
       />
       <div className="flex items-center gap-2">
-        <p
-          className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-          title={t("chat.editNotice")}
-        >
-          {t("chat.editNotice")}
-        </p>
+        <Hint content={t("chat.editNotice")}>
+          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {t("chat.editNotice")}
+          </p>
+        </Hint>
         <Button
           size="xs"
           variant="ghost"
@@ -1422,7 +1422,7 @@ function subagentResultForPart(
     "output" in part ? part.output : undefined,
     "taskId",
   );
-  return taskId ? resultsByTaskId?.get(taskId) : undefined;
+  return resultsByTaskId?.get(toolCallIdFromPart(part)) ?? (taskId ? resultsByTaskId?.get(taskId) : undefined);
 }
 
 function toolCallIdFromPart(part: AnyPart): string {
@@ -1621,7 +1621,11 @@ const RenderedPart = memo(function RenderedPart({
       toolPart.type === "dynamic-tool"
         ? toolPart.toolName
         : toolPart.type.replace(/^tool-/, "");
-    if (toolName === "run_subagent") {
+    const managedTask = toolName === "subagent_task" &&
+      (toolPart.input as { action?: string })?.action === "send" &&
+      Boolean((toolPart.output as { taskId?: string })?.taskId) &&
+      (toolPart.output as { status?: string })?.status !== "queued";
+    if (toolName === "run_subagent" || managedTask) {
       return (
         <LiveSubagentCard
           sessionId={sessionId}

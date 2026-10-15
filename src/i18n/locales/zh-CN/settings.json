@@ -600,6 +600,7 @@
       "shell_process": "读取受管进程输出、发送输入或停止进程。",
       "shell_list": "列出受管 Shell 进程。",
       "get_terminal_output": "读取活动非隐私终端的历史输出。",
+      "subagent_task": "查看、停止或继续子智能体任务。",
       "run_subagent": "将任务委派给子智能体。",
       "message": "向当前 Channel 发送文本与附件。"
     }

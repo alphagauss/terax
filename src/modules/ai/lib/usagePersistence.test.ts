@@ -48,7 +48,7 @@ describe("usage persistence", () => {
     recordUsage(session.id, record("first"));
     commit.mockRejectedValueOnce(new Error("disk full"));
     await expect(
-      persistCompletedTurn(session, cursor, [], "cancelled", []),
+      persistCompletedTurn(session, cursor, [], "cancelled"),
     ).rejects.toThrow("disk full");
     expect(pendingUsage(session.id, "now")).toHaveLength(1);
     commit.mockImplementation(async (input: SessionFile) => {
@@ -66,8 +66,8 @@ describe("usage persistence", () => {
     expect(usageRecords(session.id, true)).toHaveLength(0);
     // 此测试没有响应正文；用量批次独立于正文游标。
     cursor.committedParts = 0;
-    await persistCompletedTurn(session, cursor, [], "cancelled", []);
-    await persistCompletedTurn(session, cursor, [], "cancelled", []);
+    await persistCompletedTurn(session, cursor, [], "cancelled");
+    await persistCompletedTurn(session, cursor, [], "cancelled");
     expect(saved.filter((item) => item.role === "usage")).toHaveLength(2);
     expect(
       saved.filter((item) => item.role === "usage").map((item) => item.call_id),

@@ -5,7 +5,6 @@
 
 import type { ToolExecutionOptions } from "ai";
 import { describe, expect, it, vi } from "vitest";
-
 import { buildSubagentTools } from "./subagent";
 
 const toolOptions: ToolExecutionOptions<never> = {
@@ -51,10 +50,53 @@ describe("run_subagent", () => {
     });
   });
 
-  it("支持 wait=true 且 schema 不接受旧字段", async () => {
+  it("支持 wait=true 同步等待", async () => {
     const { start } = await run({ task: "review it", wait: true });
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({ task: "review it", wait: true }),
     );
   });
+});
+
+it("validates explicit wait timeouts and requires an owned task identifier", async () => {
+  const manage = vi
+    .fn()
+    .mockResolvedValue({ status: "completed", result: "done" });
+  const tool = buildSubagentTools(undefined, manage).subagent_task;
+  const schema = tool.inputSchema as unknown as {
+    safeParse: (value: unknown) => { success: boolean };
+  };
+  for (const timeoutMs of [0, 999, 300001, 1500.5])
+    expect(
+      schema.safeParse({ action: "wait", taskId: "task", timeoutMs }).success,
+    ).toBe(false);
+  expect(schema.safeParse({ action: "wait" }).success).toBe(false);
+  expect(
+    schema.safeParse({
+      action: "send",
+      taskId: "task",
+      message: "continue",
+      timeoutMs: 1000,
+    }).success,
+  ).toBe(false);
+  expect(
+    schema.safeParse({ action: "get", taskId: "task", wait: true }).success,
+  ).toBe(false);
+  for (const timeoutMs of [undefined, 1000, 300000])
+    expect(
+      schema.safeParse({ action: "wait", taskId: "task", timeoutMs }).success,
+    ).toBe(true);
+  if (!tool.execute) throw new Error("Missing tool");
+  expect(await tool.execute({ action: "wait" }, toolOptions)).toMatchObject({
+    status: "rejected",
+  });
+  expect(manage).not.toHaveBeenCalled();
+  await tool.execute(
+    { action: "wait", taskId: "task", timeoutMs: 1000 },
+    toolOptions,
+  );
+  expect(manage).toHaveBeenCalledWith(
+    { action: "wait", taskId: "task", timeoutMs: 1000 },
+    toolOptions,
+  );
 });

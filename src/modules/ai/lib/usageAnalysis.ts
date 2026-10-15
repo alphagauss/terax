@@ -12,6 +12,8 @@ export type CacheComparison = {
   previousCallId: string;
   currentCallId: string;
   turnId: string;
+  taskId?: string;
+  runId?: string;
   previousInputTokens: number;
   currentInputTokens: number;
   cacheReadTokens: number;
@@ -39,11 +41,12 @@ export type CacheAnalysis = {
 };
 
 /**
- * 诊断主 Agent 的缓存复用是否相对近期健康基线明显下降。
+ * 诊断一个独立会话的缓存复用是否相对近期健康基线明显下降。
  * 当前缓存读取与上次总输入比较，避免本次新增的大型工具结果拉低命中率时误报。
  */
 export function analyzeCacheUsage(
   records: readonly UsageRecord[],
+  taskId?: string,
 ): CacheAnalysis {
   let previous: UsageRecord | undefined;
   let latest: CacheComparison | undefined;
@@ -58,11 +61,12 @@ export function analyzeCacheUsage(
   };
 
   for (const current of records) {
+    if (current.taskId !== taskId) continue;
     if (current.purpose === "compaction") {
       reset();
       continue;
     }
-    if (current.taskId || current.purpose) continue;
+    if (current.purpose) continue;
     if (current.values.cacheReadTokens != null) cacheReported = true;
 
     if (!previous) {
@@ -94,6 +98,8 @@ export function analyzeCacheUsage(
       previousCallId: previous.callId,
       currentCallId: current.callId,
       turnId: current.turnId,
+      ...(current.taskId ? { taskId: current.taskId } : {}),
+      ...(current.runId ? { runId: current.runId } : {}),
       previousInputTokens: previous.values.inputTokens,
       currentInputTokens: current.values.inputTokens,
       cacheReadTokens: cached,
@@ -178,4 +184,17 @@ function median(values: readonly number[]): number | undefined {
   return sorted.length % 2
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/** 主子会话各自比较；子任务续跑延续其历史基线，其他任务和父会话压缩不会干扰。 */
+export function analyzeSessionCacheUsage(
+  records: readonly UsageRecord[],
+): CacheAnalysis[] {
+  const groups = new Map<string | undefined, UsageRecord[]>();
+  for (const record of records) {
+    const group = groups.get(record.taskId) ?? [];
+    group.push(record);
+    groups.set(record.taskId, group);
+  }
+  return [...groups].map(([taskId, calls]) => analyzeCacheUsage(calls, taskId));
 }

@@ -68,6 +68,20 @@ export class TurnInbox {
     this.notify();
   }
 
+  /** 显式等待已交付的执行结果不再后台回传；不触碰已接入的历史或其他执行。 */
+  consumeSubagentResult(toolCallId: string): void {
+    this.entries = this.entries.flatMap((entry) => {
+      if (entry.event.event !== "subagent_result") return [entry];
+      const results = entry.event.results.filter(
+        (result) => result.toolCallId !== toolCallId,
+      );
+      return results.length
+        ? [{ ...entry, event: { ...entry.event, results } }]
+        : [];
+    });
+    this.notify();
+  }
+
   /** 用户消息之间保持 FIFO，后台完成结果只在没有用户引导时消费。 */
   take(): {
     event: TurnEvent;

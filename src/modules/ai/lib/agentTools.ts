@@ -15,6 +15,7 @@ export const AGENT_TOOL_IDS = [
   "shell_list",
   "get_terminal_output",
   "run_subagent",
+  "subagent_task",
   "message",
 ] as const;
 
@@ -39,7 +40,7 @@ export const AGENT_TOOL_GROUPS = [
   },
   {
     id: "subagents",
-    tools: ["run_subagent"],
+    tools: ["run_subagent", "subagent_task"],
   },
   { id: "channels", tools: ["message"] },
 ] as const satisfies readonly {
@@ -104,6 +105,7 @@ export function resolveSubagentTools(
   return normalizeAgentTools(parentTools).filter(
     (tool) =>
       tool !== "run_subagent" &&
+      tool !== "subagent_task" &&
       tool !== "message" &&
       (permissionMode === "full-access" || SUBAGENT_READ_ONLY_TOOLS.has(tool)),
   );

@@ -6,8 +6,8 @@
 import { asSchema, type FlexibleSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import type { ToolContext } from "./context";
-import { buildTools } from "./tools";
 import { buildShellTools } from "./shell";
+import { buildTools } from "./tools";
 
 const context: ToolContext = {
   getCwd: () => "/workspace",
@@ -47,6 +47,7 @@ describe("AI tool provider schemas", () => {
     shell_process: ["process_id", "action"],
     shell_list: [],
     run_subagent: ["task"],
+    subagent_task: ["action"],
     get_terminal_output: [],
     message: [],
   } satisfies Record<keyof typeof tools, readonly string[]>;

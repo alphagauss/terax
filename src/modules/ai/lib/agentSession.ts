@@ -224,7 +224,6 @@ export async function createAgentSession(options: {
         cursor,
         messages,
         outcome,
-        savedDisplays,
       );
       persisted = true;
       if (savedDisplays.length)

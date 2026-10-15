@@ -600,6 +600,7 @@
       "shell_process": "Read output, send input, or stop a managed process.",
       "shell_list": "List managed shell processes.",
       "get_terminal_output": "Read the active non-private terminal scrollback.",
+      "subagent_task": "Inspect, stop, or continue subagent tasks.",
       "run_subagent": "Delegate a task to a subagent.",
       "message": "Send text and attachments to the current channel."
     }

@@ -3,18 +3,22 @@
  * 工具按会话白名单过滤，Subagent 协调能力只注入主 Agent 的运行请求。
  */
 
-import { buildFsTools } from "./fs";
 import { buildMessageTools } from "@/modules/ai/tools/message";
+import {
+  AGENT_TOOL_IDS,
+  type AgentToolId,
+  normalizeAgentTools,
+} from "../lib/agentTools";
+import { buildFsTools } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
-import { buildSubagentTools, type SubagentStarter } from "./subagent";
-import { buildTerminalTools } from "./terminal";
 import {
-  AGENT_TOOL_IDS,
-  normalizeAgentTools,
-  type AgentToolId,
-} from "../lib/agentTools";
+  buildSubagentTools,
+  type SubagentManager,
+  type SubagentStarter,
+} from "./subagent";
+import { buildTerminalTools } from "./terminal";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -29,6 +33,7 @@ export function buildTools(
   ctx: import("./context").ToolContext,
   allowedTools: readonly AgentToolId[] = AGENT_TOOL_IDS,
   startSubagent?: SubagentStarter,
+  manageSubagent?: SubagentManager,
 ) {
   const all = {
     ...buildMessageTools(ctx),
@@ -36,7 +41,7 @@ export function buildTools(
     ...buildPatchTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
-    ...buildSubagentTools(startSubagent),
+    ...buildSubagentTools(startSubagent, manageSubagent),
     ...buildTerminalTools(ctx),
   } as const;
   const allowed = new Set(normalizeAgentTools(allowedTools));

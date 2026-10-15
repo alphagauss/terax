@@ -15,7 +15,6 @@ import {
   projectSessionMessages,
   type SessionMessage,
   serializeSessionMessages,
-  serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
   TOOL_APPROVAL_DENIED_REASON,
 } from "@/modules/ai/lib/conversation";
@@ -844,22 +843,6 @@ describe("AI session message conversion", () => {
   });
 
   it("restores display-only subagent progress without changing provider messages", async () => {
-    const snapshot = {
-      version: 2 as const,
-      taskId: "task-1",
-      toolCallId: "call-1",
-      label: "Inspector",
-      status: "completed" as const,
-      durationMs: 900,
-      steps: [
-        {
-          id: "child-call-1",
-          toolName: "grep",
-          summary: ["subagent_result"],
-          status: "completed" as const,
-        },
-      ],
-    };
     const records: SessionMessage[] = [
       {
         role: "assistant",
@@ -891,10 +874,26 @@ describe("AI session message conversion", () => {
         timestamp,
         turn_id: "turn-1",
       },
-      ...serializeSubagentDisplaySnapshots([snapshot], {
+      {
+        role: "subagent",
         timestamp,
-        turnId: "turn-1",
-      }),
+        turn_id: "turn-1",
+        content: {
+          taskId: "task-1",
+          runId: "run-1",
+          label: "Inspector",
+          toolCallId: "call-1",
+          status: "completed",
+          records: [
+            {
+              role: "model",
+              content: [{ role: "assistant", content: "done" }],
+              timestamp,
+              turn_id: "run-1",
+            },
+          ],
+        },
+      },
     ];
 
     const messages = projectSessionMessages("session-1", records);
@@ -905,14 +904,15 @@ describe("AI session message conversion", () => {
       "data-subagent-display",
     ]);
 
-    expect(
-      serializeSessionMessages(messages, { timestamp, turnId: "turn-1" }),
-    ).toContainEqual({
-      role: "display",
-      content: snapshot,
+    const saved = serializeSessionMessages(messages, {
       timestamp,
-      turn_id: "turn-1",
+      turnId: "turn-1",
     });
+    expect(
+      saved.some(
+        (record) => record.role === "display" || record.role === "subagent",
+      ),
+    ).toBe(false);
 
     const withoutDisplay: UIMessage[] = messages.map((message) => ({
       ...message,

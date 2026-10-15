@@ -9,8 +9,8 @@ import {
 import { recordUsage, usageRecords } from "@/modules/ai/lib/usageRuntime";
 import {
   asSchema,
-  type LanguageModelUsage,
   type LanguageModelCallEndEvent,
+  type LanguageModelUsage,
   type ModelMessage,
   type ToolSet,
 } from "ai";
@@ -19,6 +19,7 @@ export async function createContextUsage(options: {
   sessionId: string;
   turnId: string;
   taskId?: string;
+  runId?: string;
   model: ModelRef;
   contextWindow: number;
   instructions: unknown;
@@ -112,6 +113,7 @@ export async function createContextUsage(options: {
       callId: pending.callId,
       turnId: options.turnId,
       taskId: options.taskId,
+      ...(options.runId ? { runId: options.runId } : {}),
       ...(options.purpose ? { purpose: options.purpose } : {}),
       model: options.model,
       contextWindow: options.contextWindow,

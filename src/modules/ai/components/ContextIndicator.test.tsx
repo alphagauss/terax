@@ -286,3 +286,81 @@ it("shows a cache regression beside the context indicator and keeps its history 
     "miniWindow.context.cacheAnomalyCount",
   );
 });
+
+it("shows child cache incidents with diagnostic IDs without replacing the main context", async () => {
+  restoreUsage(
+    id,
+    [
+      record({
+        callId: "main",
+        values: {
+          inputTokens: 12000,
+          cacheReadTokens: 9000,
+          outputTokens: 100,
+        },
+      }),
+      record({
+        callId: "child-before",
+        taskId: "task-identity",
+        runId: "run-before",
+        values: {
+          inputTokens: 50000,
+          cacheReadTokens: 40000,
+          outputTokens: 100,
+        },
+      }),
+      record({
+        callId: "child-after",
+        taskId: "task-identity",
+        runId: "run-after",
+        turnId: "parent-after",
+        values: {
+          inputTokens: 51000,
+          cacheReadTokens: 1000,
+          outputTokens: 100,
+        },
+      }),
+    ].map(({ callId, ...content }) => ({
+      role: "usage",
+      call_id: callId,
+      content,
+      timestamp: "now",
+    })),
+  );
+  await act(async () =>
+    root.render(
+      <ContextIndicator sessionId={id} isBusy={false} messages={[]} />,
+    ),
+  );
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("12K / 128K");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("miniWindow.context.cacheAnomaly");
+  for (const value of [
+    id,
+    "task-identity",
+    "run-after",
+    "parent-after",
+    "child-before",
+    "child-after",
+  ])
+    expect(document.body.textContent).toContain(value);
+  await act(async () =>
+    recordUsage(
+      id,
+      record({
+        callId: "main-healthy",
+        values: {
+          inputTokens: 14000,
+          cacheReadTokens: 12000,
+          outputTokens: 100,
+        },
+      }),
+    ),
+  );
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("miniWindow.context.cacheAnomaly");
+});

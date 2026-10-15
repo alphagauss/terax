@@ -3,15 +3,6 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
-import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
-
-import {
-  describeToolCall,
-  formatToolSummary,
-  type ToolSummary,
-} from "@/modules/ai/lib/toolSummary";
-import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
-import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
@@ -19,6 +10,15 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
+import { FileEditStats } from "@/modules/ai/components/FileEditStats";
+import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
+import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
+import {
+  describeToolCall,
+  formatToolSummary,
+  type ToolSummary,
+} from "@/modules/ai/lib/toolSummary";
 import {
   ArrowRight01Icon,
   Cancel01Icon,
@@ -35,13 +35,12 @@ import type {
   SubagentDisplayStatus,
   SubagentDisplayStep,
 } from "../agents/subagentDisplay";
-import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 type Display = SubagentDisplayState | SubagentDisplaySnapshot;
 
 export type SubagentResultView = {
-  status: "completed" | "incomplete" | "failed";
+  status: "completed" | "incomplete" | "failed" | "cancelled";
   result?: string;
   error?: string;
 };
@@ -81,9 +80,14 @@ export function SubagentCard({
   backgroundResult,
 }: Props) {
   const { t } = useTranslation("ai");
+  const toolName =
+    part.type === "tool-subagent_task" ||
+    ("toolName" in part && part.toolName === "subagent_task")
+      ? "subagent_task"
+      : "run_subagent";
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
-  const task = stringValue(input?.task) ?? "";
+  const task = stringValue(input?.task) ?? stringValue(input?.message) ?? "";
   const status = resolveStatus(part, display, backgroundResult);
   const actualHeadline = useMemo(
     () => resolveHeadline(status, display),
@@ -121,12 +125,15 @@ export function SubagentCard({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="shrink-0 text-[12px] font-medium text-foreground">
-              run_subagent
+              {toolName}
             </span>
             <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
               {formatToolSummary(
-                describeToolCall("run_subagent", input ?? { label: display?.label },
-                  part.state !== "input-streaming"),
+                describeToolCall(
+                  toolName,
+                  input ?? { label: display?.label },
+                  part.state !== "input-streaming",
+                ),
                 t,
               )}
             </span>
@@ -450,9 +457,13 @@ function useStableHeadline(actual: Headline): Headline {
     const current = shownRef.current;
     if (sameHeadline(current, actual)) return;
     // 同一调用补全摘要时立即更新，不能延长该工具动作的最短展示时间。
-    if (current.kind === "running" && actual.kind === "running" &&
-      current.action.kind === "tool" && actual.action.kind === "tool" &&
-      current.action.key === actual.action.key) {
+    if (
+      current.kind === "running" &&
+      actual.kind === "running" &&
+      current.action.kind === "tool" &&
+      actual.action.kind === "tool" &&
+      current.action.key === actual.action.key
+    ) {
       shownRef.current = actual;
       setShown(actual);
       return;
@@ -495,7 +506,8 @@ function sameHeadline(left: Headline, right: Headline): boolean {
     (left.action.kind !== "tool" ||
       right.action.kind !== "tool" ||
       (left.action.toolName === right.action.toolName &&
-        JSON.stringify(left.action.summary) === JSON.stringify(right.action.summary)))
+        JSON.stringify(left.action.summary) ===
+          JSON.stringify(right.action.summary)))
   );
 }
 
@@ -508,6 +520,7 @@ function resolveStatus(
   if (backgroundResult) return backgroundResult.status;
   const output = objectValue("output" in part ? part.output : undefined);
   const outputStatus = stringValue(output?.status);
+  if (outputStatus === "cancelled") return "cancelled";
   if (outputStatus === "completed") return "completed";
   if (outputStatus === "incomplete") return "incomplete";
   if (outputStatus === "failed" || outputStatus === "rejected") return "failed";
@@ -520,7 +533,7 @@ function resolveStatus(
 function liveResult(
   display: Display | undefined,
 ): SubagentResultView | undefined {
-  if (!display || !("phase" in display)) return undefined;
+  if (!display) return undefined;
   if (display.result !== undefined) {
     return {
       status: display.status === "incomplete" ? "incomplete" : "completed",
@@ -544,17 +557,20 @@ function resultFromObject(
     status !== "completed" &&
     status !== "incomplete" &&
     status !== "failed" &&
+    status !== "cancelled" &&
     status !== "rejected"
   ) {
     return undefined;
   }
   return {
     status:
-      status === "completed"
-        ? "completed"
-        : status === "incomplete"
-          ? "incomplete"
-          : "failed",
+      status === "cancelled"
+        ? "cancelled"
+        : status === "completed"
+          ? "completed"
+          : status === "incomplete"
+            ? "incomplete"
+            : "failed",
     ...(stringValue(output?.result) === undefined
       ? {}
       : { result: stringValue(output?.result) }),

@@ -208,3 +208,97 @@ describe("AgentTurnCoordinator", () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe("explicit subagent wait", () => {
+  async function start(
+    coordinator: AgentTurnCoordinator,
+    deferred: ReturnType<typeof deferredResult>,
+    taskId = "task",
+    call = "spawn",
+  ) {
+    await coordinator.start({
+      taskId,
+      task: "inspect",
+      toolCallId: call,
+      wait: false,
+      limit: 3,
+      run: () => deferred.promise,
+    });
+  }
+
+  it("times out without cancellation or consuming the eventual background result", async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = new AgentTurnCoordinator();
+      const deferred = deferredResult();
+      await start(coordinator, deferred);
+      const waiting = coordinator.wait("task", 1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await waiting).toEqual({
+        taskId: "task",
+        status: "running",
+        timedOut: true,
+      });
+      expect(coordinator.runningCount).toBe(1);
+      deferred.resolve({ status: "completed", result: "done" });
+      await coordinator.waitForAll();
+      expect(coordinator.inbox.hasPending).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("consumes only the waited execution, including already finished results", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const first = deferredResult();
+    const second = deferredResult();
+    await start(coordinator, first);
+    await start(coordinator, second, "other", "other-call");
+    const waiting = coordinator.wait("task", 30000);
+    first.resolve({ status: "completed", result: "first" });
+    second.resolve({ status: "failed", error: "second" });
+    expect(await waiting).toMatchObject({ taskId: "task", result: "first" });
+    await coordinator.waitForAll();
+    expect(await coordinator.wait("other", 30000)).toMatchObject({
+      status: "failed",
+      error: "second",
+    });
+    expect(coordinator.inbox.hasPending).toBe(false);
+    expect(await coordinator.wait("task", 30000)).toMatchObject({
+      result: "first",
+    });
+  });
+
+  it("binds waiting to the captured execution rather than a later resume", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const first = deferredResult();
+    await start(coordinator, first);
+    const waiting = coordinator.wait("task", 30000);
+    first.resolve({ status: "completed", result: "first" });
+    await coordinator.waitForAll();
+    const second = deferredResult();
+    await start(coordinator, second, "task", "resume");
+    expect(await waiting).toMatchObject({ result: "first" });
+    second.resolve({ status: "completed", result: "second" });
+    await coordinator.waitForAll();
+    expect(coordinator.inbox.take()?.event).toMatchObject({
+      results: [{ toolCallId: "resume", result: "second" }],
+    });
+  });
+
+  it("cancels waiting promptly even before the child finishes its cleanup", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const deferred = deferredResult();
+    await start(coordinator, deferred);
+    const waiting = coordinator.wait("task", 30000);
+    const assertion = expect(waiting).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    const cancelling = coordinator.cancelAll();
+    await assertion;
+    deferred.resolve({ status: "cancelled" });
+    await cancelling;
+    expect(coordinator.inbox.hasPending).toBe(false);
+  });
+});

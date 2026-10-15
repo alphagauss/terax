@@ -3,20 +3,16 @@
  * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
-import {
-  isSubagentToolErrorOutput,
-  type SubagentDisplayState,
-} from "@/modules/ai/agents/subagentDisplay";
+import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
 import {
   type AgentTurnCoordinator,
   releaseAgentTurnCoordinator,
-  type SubagentTaskRunner,
 } from "@/modules/ai/agents/subagentRuntime";
+import type { SubagentSessions } from "@/modules/ai/agents/subagentSession";
+import { buildManagedSubagentTools } from "@/modules/ai/agents/subagentTools";
 import {
-  clampAgentSteps,
   getModelContextWindow,
   MAX_AGENT_STEPS_DEFAULT,
-  MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelRef,
   modelRefsEqual,
   normalizeMainAgentSteps,
@@ -25,10 +21,7 @@ import {
   type ProviderModels,
   resolveModel,
 } from "@/modules/ai/config";
-import {
-  type AgentToolId,
-  resolveSubagentTools,
-} from "@/modules/ai/lib/agentTools";
+import type { AgentToolId } from "@/modules/ai/lib/agentTools";
 import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import {
   compactionInstruction,
@@ -45,14 +38,12 @@ import {
   conversationEventPart,
   convertToAgentModelMessages,
   expandConversationMessages,
-  modelHistoryPart,
   modelCallPart,
+  modelHistoryPart,
   REASONING_DURATION_PART_TYPE,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import { reportInvalidToolInput } from "@/modules/ai/lib/errors";
-import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
-import { describeToolCall } from "@/modules/ai/lib/toolSummary";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
@@ -70,10 +61,9 @@ import {
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
 import { usageRecords } from "@/modules/ai/lib/usageRuntime";
-import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
 import { getProvider } from "@/modules/ai/providerRegistry";
 import { buildToolApproval } from "@/modules/ai/tools/approval";
-import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
+import type { ToolContext } from "@/modules/ai/tools/tools";
 import {
   createUIMessageStream,
   type FinishReason,
@@ -89,6 +79,7 @@ import {
 } from "ai";
 
 export type RunAgentOptions = {
+  openSubagentSessions?: () => Promise<SubagentSessions>;
   modelParameters?: ParameterAssignment[];
   getSubagentConfiguration?: (
     parentModel: ModelRef,
@@ -139,7 +130,6 @@ export type SubagentModelConfiguration = Pick<
   | "providerInstanceKeys"
 >;
 
-const SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT = `The Subagent has reached its tool-step limit. Do not call any more tools. Based only on the task, conversation, and tool results already available, provide a concise partial report with: completed work, confirmed findings or evidence, unresolved items, and recommended next steps. Clearly state that the task is incomplete and do not claim full completion.`;
 const EMPTY_RESPONSE_RECOVERY_PROMPT = `The previous response did not include a valid tool call or a user-visible final answer. Continue the current task. Use the provided structured tools if more work is needed; otherwise provide the final answer to the user.`;
 const EMPTY_RESPONSE_ERROR =
   "The model returned neither a valid tool call nor a final response after retrying.";
@@ -191,26 +181,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
 
   const coordinator = opts.turnCoordinator;
-  const rootTools = buildTools(
-    opts.toolContext,
-    opts.allowedTools,
-    ({ task, label, toolCallId, wait, abortSignal }) => {
-      const permissionMode = opts.toolContext.getPermissionMode();
-      return coordinator.start({
-        task,
-        label,
-        toolCallId,
-        wait,
-        limit: opts.maxConcurrentSubagents,
-        parentAbortSignal: abortSignal,
-        onDisplay: opts.onSubagentDisplay,
-        run: buildSubagentTaskRunner({
-          opts,
-          permissionMode,
-        }),
-      });
-    },
-  );
+  const rootTools = buildManagedSubagentTools(opts);
 
   return {
     toUIMessageStream({
@@ -698,229 +669,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
       return coalesceStream(stream);
     },
-  };
-}
-
-/** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
-function buildSubagentTaskRunner({
-  opts,
-  permissionMode,
-}: {
-  opts: RunAgentOptions;
-  permissionMode: "ask" | "full-access";
-}): SubagentTaskRunner {
-  const maxSubagentSteps = clampAgentSteps(
-    opts.maxSubagentSteps ?? MAX_SUBAGENT_STEPS_DEFAULT,
-    MAX_SUBAGENT_STEPS_DEFAULT,
-  );
-  const allowedTools = resolveSubagentTools(opts.allowedTools, permissionMode);
-  const toolContext: ToolContext = {
-    ...opts.toolContext,
-    getPermissionMode: () => permissionMode,
-    // Subagent 没有独立审批通道，越界调用应由原生边界返回明确错误。
-    supportsApprovals: false,
-  };
-  return async ({ taskId, task, abortSignal, onProgress }) => {
-    // 通过并发检查后的每次任务启动读取一次；首次 await 前冻结，后续步骤保持不变。
-    const config: SubagentModelConfiguration = structuredClone(
-      opts.getSubagentConfiguration?.(opts.model) ?? {
-        model: opts.model,
-        keys: opts.keys,
-        providerBaseURLs: opts.providerBaseURLs,
-        providerModels: opts.providerModels,
-        customProviders: opts.customProviders,
-        providerInstanceKeys: opts.providerInstanceKeys,
-      },
-    );
-    const model = config.model;
-    const childModel = await buildConfiguredLanguageModel(model, config.keys, {
-      providerBaseURLs: config.providerBaseURLs,
-      customProviders: config.customProviders,
-      providerInstanceKeys: config.providerInstanceKeys,
-    });
-    const provider = resolveModel(model, {
-      customProviders: config.customProviders,
-      providerBaseURLs: config.providerBaseURLs,
-    }).provider;
-    const prompt = prepareAgentPrompt(
-      `${opts.systemPrompt}\n\n${SUBAGENT_PROMPT}`,
-      [{ role: "user", content: task }],
-      provider,
-    );
-    const tools = buildTools(
-      {
-        ...toolContext,
-        fileEditTaskId: taskId,
-        onFileEditInput: (id, toolName, input) => {
-          onProgress({
-            type: "tool-start",
-            id,
-            toolName,
-            summary: describeToolCall(toolName, input, false),
-          });
-        },
-      },
-      allowedTools,
-    );
-    const contextUsage = await createContextUsage({
-      sessionId: opts.toolContext.getSessionId(),
-      turnId: opts.turnId,
-      taskId,
-      model,
-      contextWindow: getModelContextWindow(model, config.providerModels ?? {}),
-      instructions: prompt.instructions,
-      tools,
-    });
-    let lastChildMessages = prompt.messages;
-    const result = streamText({
-      repairToolCall: reportInvalidToolInput,
-      ...buildParameterOptions(
-        config.modelParameters ?? [],
-        getProvider(provider).runtime.adapter,
-        provider,
-      ),
-      prepareStep: ({ messages }) => {
-        lastChildMessages = prepareAgentPrompt("", messages, provider).messages;
-        return contextUsage.prepareStep({ messages: lastChildMessages });
-      },
-      model: childModel,
-      experimental_download: createProviderDownload(
-        model.providerId,
-        abortSignal,
-      ),
-      instructions: prompt.instructions,
-      messages: prompt.messages,
-      tools,
-      toolApproval: buildToolApproval(toolContext),
-      stopWhen: isStepCount(maxSubagentSteps),
-      abortSignal,
-      onStepStart: () => {
-        onProgress({ type: "thinking" });
-      },
-      onToolExecutionStart: ({ toolCall }) => {
-        onProgress({
-          type: "tool-start",
-          id: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          summary: describeToolCall(
-            toolCall.toolName,
-            toolCall.input,
-          ),
-        });
-      },
-      onToolExecutionEnd: ({ toolCall, toolOutput }) => {
-        onProgress({
-          type: "tool-finish",
-          id: toolCall.toolCallId,
-          status:
-            toolOutput.type === "tool-result" &&
-            !isSubagentToolErrorOutput(toolOutput.output)
-              ? "completed"
-              : "failed",
-        });
-      },
-      onLanguageModelCallEnd: (event) =>
-        contextUsage.finish(event.usage, event.content, event.performance),
-    });
-    try {
-      for await (const chunk of result.stream) {
-        contextUsage.observe(chunk);
-        if (chunk.type === "error") throw chunk.error;
-        if (
-          chunk.type === "tool-error" ||
-          chunk.type === "tool-output-denied"
-        ) {
-          peekFileEditRuntime(opts.toolContext.getSessionId())?.fail(
-            chunk.toolCallId,
-            taskId,
-          );
-          onProgress({
-            type: "tool-finish",
-            id: chunk.toolCallId,
-            status: "failed",
-          });
-        }
-      }
-      abortSignal.throwIfAborted();
-      const [text, finishReason, responseMessages] = await Promise.all([
-        result.text,
-        result.finishReason,
-        result.responseMessages,
-      ]);
-      if (finishReason === "tool-calls") {
-        onProgress({ type: "thinking" });
-        const summaryUsage = await createContextUsage({
-          sessionId: opts.toolContext.getSessionId(),
-          turnId: opts.turnId,
-          taskId,
-          model,
-          contextWindow: getModelContextWindow(
-            model,
-            config.providerModels ?? {},
-          ),
-          instructions: prompt.instructions,
-          tools,
-        });
-        const summary = streamText({
-          repairToolCall: reportInvalidToolInput,
-          ...buildParameterOptions(
-            config.modelParameters ?? [],
-            getProvider(provider).runtime.adapter,
-            provider,
-          ),
-          prepareStep: summaryUsage.prepareStep,
-          model: childModel,
-          experimental_download: createProviderDownload(
-            model.providerId,
-            abortSignal,
-          ),
-          instructions: prompt.instructions,
-          messages: [
-            ...lastChildMessages,
-            ...[...prompt.messages, ...responseMessages].slice(
-              lastChildMessages.length,
-            ),
-            { role: "user", content: SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT },
-          ],
-          tools: Object.fromEntries(
-            Object.entries(tools).map(([name, definition]) => {
-              const { execute: _execute, ...tool } = definition;
-              delete tool.onInputStart;
-              delete tool.onInputDelta;
-              delete tool.onInputAvailable;
-              return [name, tool];
-            }),
-          ),
-          stopWhen: isStepCount(1),
-          abortSignal,
-          onLanguageModelCallEnd: (event) =>
-            summaryUsage.finish(event.usage, event.content, event.performance),
-        });
-        try {
-          for await (const chunk of summary.stream) {
-            summaryUsage.observe(chunk);
-            if (chunk.type === "error") throw chunk.error;
-          }
-          abortSignal.throwIfAborted();
-          const summaryText = await summary.text;
-          return {
-            status: "incomplete",
-            ...(summaryText || text ? { result: summaryText || text } : {}),
-            error:
-              "Subagent reached its step limit before completing the task.",
-          };
-        } finally {
-          summaryUsage.finish();
-        }
-      }
-      return {
-        status: "completed",
-        result: text || "Task completed but no final response was generated.",
-      };
-    } finally {
-      contextUsage.finish();
-      peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(taskId);
-    }
   };
 }
 

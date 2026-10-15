@@ -14,8 +14,8 @@ import {
   convertToAgentModelMessages,
   modelHistoryPart,
   projectSessionMessages,
-  serializeSessionMessages,
   type SessionMessage,
+  serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
 import {
   getFileEditRuntime,
@@ -23,8 +23,8 @@ import {
 } from "@/modules/ai/lib/fileEditRuntime";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
-import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { type ModelMessage, readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -541,7 +541,9 @@ describe.sequential("Agent background subagents", () => {
             : [],
         );
         expect(calls).toEqual(
-          usageRecords("approval-session").slice(-2).map((record) => record.callId),
+          usageRecords("approval-session")
+            .slice(-2)
+            .map((record) => record.callId),
         );
         expect(restored).toEqual(JSON.parse(JSON.stringify(live)));
         expect(
@@ -1180,10 +1182,23 @@ describe.sequential("Agent background subagents", () => {
         });
         expect(call.tools).toEqual(firstChild?.tools);
       }
+      // 请求仅保留系统和当前尾部两个断点，不能随工具循环累积。
+      for (const call of childRequests)
+        expect(
+          (JSON.stringify(call.prompt).match(/cacheControl/g) ?? []).length,
+        ).toBe(2);
       const previous = childRequests[childRequests.length - 2];
-      expect(summaryCall?.prompt.slice(0, previous.prompt.length)).toEqual(
-        previous.prompt,
-      );
+      const content = (value: unknown) =>
+        JSON.parse(
+          JSON.stringify(value, (key, value) =>
+            key === "providerOptions" && value?.anthropic?.cacheControl
+              ? undefined
+              : value,
+          ),
+        );
+      expect(
+        content(summaryCall?.prompt.slice(0, previous.prompt.length)),
+      ).toEqual(content(previous.prompt));
       if (!summaryCallsTool)
         expect(JSON.stringify(rootCalls().slice(-1)[0]?.prompt)).toContain(
           "Incomplete: inspected the available output; further checks remain.",

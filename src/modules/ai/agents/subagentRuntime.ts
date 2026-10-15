@@ -7,13 +7,14 @@ import type {
   SubagentDisplayState,
   SubagentDisplayStep,
 } from "@/modules/ai/agents/subagentDisplay";
+import type { SubagentSessions } from "@/modules/ai/agents/subagentSession";
 import type { ToolSummary } from "@/modules/ai/lib/toolSummary";
 import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 
 export type SubagentTaskResult = {
   taskId: string;
   label: string;
-  status: "completed" | "incomplete" | "failed";
+  status: "completed" | "incomplete" | "failed" | "cancelled";
   result?: string;
   error?: string;
   durationMs: number;
@@ -33,6 +34,7 @@ export type SubagentStartResult =
     };
 
 export type SubagentTaskRunner = (options: {
+  toolCallId: string;
   taskId: string;
   task: string;
   label: string;
@@ -55,6 +57,7 @@ type SubagentProgressEvent =
     };
 
 type RunningTask = {
+  toolCallId: string;
   order: number;
   controller: AbortController;
   done: Promise<SubagentTaskResult>;
@@ -102,9 +105,24 @@ export async function clearAgentTurnCoordinator(
  */
 export class AgentTurnCoordinator {
   private readonly running = new Map<string, RunningTask>();
+  private readonly finished = new Map<
+    string,
+    { toolCallId: string; result: SubagentTaskResult }
+  >();
+  private waitController = new AbortController();
+  private sessions: Promise<SubagentSessions> | undefined;
+  readonly acceptingSubagents = new Set<string>();
   readonly inbox = new TurnInbox();
   private order = 0;
   private cancelled = false;
+
+  /** 审批恢复会重建工具集合，但仍须使用本轮正在运行的子会话。 */
+  getSessions(
+    open: () => Promise<SubagentSessions>,
+  ): Promise<SubagentSessions> {
+    this.sessions ??= open();
+    return this.sessions;
+  }
 
   get runningCount(): number {
     return this.running.size;
@@ -116,6 +134,7 @@ export class AgentTurnCoordinator {
 
   /** 启动一个同步等待或后台 Subagent，超过当前聊天额度时立即拒绝。 */
   async start(options: {
+    taskId?: string;
     task: string;
     label?: string;
     toolCallId: string;
@@ -142,7 +161,9 @@ export class AgentTurnCoordinator {
       };
     }
 
-    const taskId = crypto.randomUUID();
+    const taskId = options.taskId ?? crypto.randomUUID();
+    if (this.running.has(taskId))
+      return { status: "rejected", error: "Task is already running." };
     const label = normalizeLabel(options.label, options.task);
     const controller = new AbortController();
     const order = this.order++;
@@ -190,6 +211,7 @@ export class AgentTurnCoordinator {
     publishDisplay();
     const done = options
       .run({
+        toolCallId: options.toolCallId,
         taskId,
         task: options.task,
         label,
@@ -218,16 +240,24 @@ export class AgentTurnCoordinator {
         return {
           taskId,
           label,
-          status: "failed",
+          status: controller.signal.aborted ? "cancelled" : "failed",
           error: String(error),
           durationMs: now - startedAt,
         };
       })
       .finally(detachAbort);
 
-    this.running.set(taskId, { order, controller, done, cancelDisplay });
+    this.finished.delete(taskId);
+    this.running.set(taskId, {
+      toolCallId: options.toolCallId,
+      order,
+      controller,
+      done,
+      cancelDisplay,
+    });
     void done.then((result) => {
       this.running.delete(taskId);
+      this.finished.set(taskId, { toolCallId: options.toolCallId, result });
       if (!options.wait && !this.cancelled) {
         this.inbox.push(
           {
@@ -236,6 +266,7 @@ export class AgentTurnCoordinator {
             results: [
               {
                 taskId: result.taskId,
+                toolCallId: options.toolCallId,
                 label: result.label,
                 status: result.status,
                 ...(result.result === undefined
@@ -262,6 +293,69 @@ export class AgentTurnCoordinator {
     return await done;
   }
 
+  isRunning(taskId: string): boolean {
+    return this.running.has(taskId);
+  }
+
+  /** 捕获当前执行再等待；超时只释放等待者，成功时按原工具调用消费后台事件。 */
+  async wait(
+    taskId: string,
+    timeoutMs: number,
+    abortSignal?: AbortSignal,
+  ): Promise<
+    | SubagentTaskResult
+    | { taskId: string; status: "running"; timedOut: true }
+    | undefined
+  > {
+    abortSignal?.throwIfAborted();
+    this.waitController.signal.throwIfAborted();
+    const running = this.running.get(taskId);
+    if (!running) {
+      const finished = this.finished.get(taskId);
+      if (finished) this.inbox.consumeSubagentResult(finished.toolCallId);
+      return finished?.result;
+    }
+    const signals = [
+      this.waitController.signal,
+      ...(abortSignal ? [abortSignal] : []),
+    ];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let abort = () => {};
+    try {
+      const result = await Promise.race([
+        running.done,
+        new Promise<undefined>((resolve, reject) => {
+          timer = setTimeout(() => resolve(undefined), timeoutMs);
+          abort = () =>
+            reject(
+              new DOMException(
+                "Waiting for subagent was cancelled.",
+                "AbortError",
+              ),
+            );
+          for (const signal of signals)
+            signal.addEventListener("abort", abort, { once: true });
+        }),
+      ]);
+      for (const signal of signals) signal.throwIfAborted();
+      if (!result) return { taskId, status: "running", timedOut: true };
+      this.inbox.consumeSubagentResult(running.toolCallId);
+      return result;
+    } finally {
+      clearTimeout(timer);
+      for (const signal of signals) signal.removeEventListener("abort", abort);
+    }
+  }
+
+  /** 等待取消收尾，确保续跑不会与旧执行重叠。 */
+  async stop(taskId: string): Promise<void> {
+    const task = this.running.get(taskId);
+    if (!task) return;
+    task.cancelDisplay();
+    task.controller.abort();
+    await task.done;
+  }
+
   /** 等待当前聊天已经登记的全部 Subagent 完成。 */
   async waitForAll(): Promise<void> {
     while (this.running.size > 0) {
@@ -272,6 +366,7 @@ export class AgentTurnCoordinator {
   /** 取消本聊天的全部 Subagent，并丢弃尚未消费的用户输入和后台结果。 */
   async cancelAll(): Promise<void> {
     this.cancelled = true;
+    this.waitController.abort();
     this.inbox.cancel();
     const tasks = [...this.running.values()];
     for (const task of tasks) {
@@ -286,6 +381,10 @@ export class AgentTurnCoordinator {
   reset(): void {
     if (this.running.size > 0 || this.inbox.hasPending) return;
     this.order = 0;
+    this.finished.clear();
+    this.sessions = undefined;
+    this.acceptingSubagents.clear();
+    this.waitController = new AbortController();
     this.cancelled = false;
   }
 }

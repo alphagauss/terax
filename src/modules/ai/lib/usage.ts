@@ -1,7 +1,7 @@
 /** 模型调用用量事实与汇总。未知细分项不视作零，本地估算只补输入与可见输出。 */
 
 import type { ModelRef } from "@/modules/ai/config";
-import type { ModelMessage, LanguageModelUsage } from "ai";
+import type { LanguageModelUsage, ModelMessage } from "ai";
 
 type UsageField = "inputTokens" | "outputTokens";
 type UsageValues = {
@@ -13,6 +13,7 @@ export type UsageRecord = {
   callId: string;
   turnId: string;
   taskId?: string;
+  runId?: string;
   purpose?: "compaction";
   model: ModelRef;
   contextWindow: number;

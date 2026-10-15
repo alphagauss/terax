@@ -3,10 +3,15 @@
  * 摘要只保留操作标记和脱敏对象，翻译在 UI 中完成，不进入模型请求或保存完整参数。
  */
 
-import type { TFunction } from "i18next";
 import { redactSensitive } from "@/modules/ai/lib/redact";
+import type { TFunction } from "i18next";
 
 const LABELS = [
+  "taskList",
+  "taskGet",
+  "taskStop",
+  "taskSend",
+  "taskWait",
   "list",
   "recursive",
   "hidden",
@@ -182,6 +187,14 @@ export function describeToolCall(
       }
       break;
     }
+    case "subagent_task":
+      if (value.action === "list") label("taskList");
+      if (value.action === "get") label("taskGet");
+      if (value.action === "stop") label("taskStop");
+      if (value.action === "send") label("taskSend");
+      if (value.action === "wait") label("taskWait");
+      parts.push(text("taskId"));
+      break;
     case "run_subagent":
       if (
         typeof value.wait === "boolean" ||

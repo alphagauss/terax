@@ -3,22 +3,20 @@
  * 用户输入先落盘，checkpoint 保留运行锁；游标只在原子提交成功后推进。
  */
 
-import type { UIMessage } from "ai";
-import type { SubagentDisplaySnapshot } from "@/modules/ai/agents/subagentDisplay";
 import {
   conversationEventPart,
   serializeSessionMessages,
-  serializeSubagentDisplaySnapshots,
-  uncommittedConversationMessages,
   type TurnEvent,
+  uncommittedConversationMessages,
 } from "@/modules/ai/lib/conversation";
-import { commitSession, type SessionFile } from "@/modules/ai/lib/sessions";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
+import { commitSession, type SessionFile } from "@/modules/ai/lib/sessions";
 import {
   acknowledgeUsage,
   pendingUsage,
   settleUsage,
 } from "@/modules/ai/lib/usageRuntime";
+import type { UIMessage } from "ai";
 
 export type SessionCommitCursor = {
   persistedMessages: number;
@@ -98,13 +96,12 @@ export async function persistTurnCheckpoint(
   return result;
 }
 
-/** 提交未保存的终态与展示快照；后续解锁失败重试也不会重复追加响应。 */
+/** 提交未保存的终态与文件改动快照；后续解锁失败重试也不会重复追加响应。 */
 export async function persistCompletedTurn(
   session: SessionFile,
   cursor: SessionCommitCursor,
   messages: UIMessage[],
   outcome: string,
-  snapshots: SubagentDisplaySnapshot[],
 ) {
   assertHistory(cursor, messages);
   await peekFileEditRuntime(session.id)?.settled();
@@ -134,7 +131,6 @@ export async function persistCompletedTurn(
     messages: [
       ...usage,
       ...terminal.filter((record) => !failures.includes(record)),
-      ...serializeSubagentDisplaySnapshots(snapshots, options),
       ...(edits?.snapshot.calls.length
         ? [
             {

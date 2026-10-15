@@ -5,6 +5,7 @@
 
 import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
 import { getAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
+import { openSubagentSessions } from "@/modules/ai/agents/subagentSession";
 import type {
   ModelRef,
   ProviderBaseURLs,
@@ -15,7 +16,7 @@ import type {
   ExternalAgentBinding,
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
-import { runAgentStream, type RunAgentOptions } from "@/modules/ai/lib/agent";
+import { type RunAgentOptions, runAgentStream } from "@/modules/ai/lib/agent";
 import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
@@ -194,6 +195,8 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     const frozenModel = modelSnapshot;
     const { systemPrompt, agent, shells } = await getRuntime();
     const result = await runAgentStream({
+      openSubagentSessions: () =>
+        openSubagentSessions(deps.toolContext.getSessionId(), turnId),
       keys: deps.getKeys(),
       model: frozenModel.model,
       modelParameters: frozenModel.modelParameters,

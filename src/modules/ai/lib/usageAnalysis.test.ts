@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { UsageRecord } from "./usage";
-import { analyzeCacheUsage } from "./usageAnalysis";
+import { analyzeCacheUsage, analyzeSessionCacheUsage } from "./usageAnalysis";
 
 function record(
   callId: string,
@@ -153,4 +153,49 @@ it("reports unavailable when the provider never reports cache usage", () => {
       record("second", 11000, undefined),
     ]).status,
   ).toBe("unavailable");
+});
+
+it("isolates interleaved task baselines and diagnoses the first resumed call", () => {
+  const analysis = analyzeSessionCacheUsage([
+    record("main-a", 10000, 9000),
+    record("child-a", 20000, 18000, { taskId: "child", runId: "run-1" }),
+    record("other-a", 50000, 40000, { taskId: "other" }),
+    record("child-b", 22000, 19000, { taskId: "child", runId: "run-1" }),
+    record("main-compact", 11000, 0, { purpose: "compaction" }),
+    record("main-b", 12000, 0),
+    record("resumed", 24000, 1000, {
+      taskId: "child",
+      runId: "run-2",
+      turnId: "later-turn",
+    }),
+    record("other-b", 51000, 45000, { taskId: "other" }),
+  ]);
+  expect(analysis.flatMap((item) => item.incidents)).toEqual([
+    expect.objectContaining({
+      taskId: "child",
+      runId: "run-2",
+      turnId: "later-turn",
+      previousCallId: "child-b",
+      currentCallId: "resumed",
+    }),
+  ]);
+  const recovered = analyzeCacheUsage(
+    [
+      record("a", 10000, 9000, { taskId: "child" }),
+      record("b", 11000, 0, { taskId: "child" }),
+      record("c", 12000, 11000, { taskId: "child" }),
+    ],
+    "child",
+  );
+  expect(recovered.status).toBe("recovered");
+});
+
+it("does not compare new tasks or treat missing subagent cache usage as a miss", () => {
+  expect(
+    analyzeSessionCacheUsage([
+      record("a", 10000, 9000, { taskId: "a" }),
+      record("b", 11000, 0, { taskId: "b" }),
+      record("a-missing", 12000, undefined, { taskId: "a" }),
+    ]).flatMap((item) => item.incidents),
+  ).toEqual([]);
 });
