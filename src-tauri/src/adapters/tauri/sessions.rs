@@ -87,3 +87,23 @@ pub fn ai_session_run_acquire(
 pub fn ai_session_run_release(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
     service::release(state.inner(), &id)
 }
+
+/// 编辑或复制已保存的会话前缀。
+#[tauri::command]
+pub fn ai_session_revise_history(
+    state: State<'_, AiSessionsState>,
+    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
+    id: String,
+    fingerprint: String,
+    action: HistoryAction,
+    now: String,
+) -> Result<HistoryRevision, String> {
+    service::revise_history(
+        state.inner(),
+        &workspace_state.bootstrap().environment_key,
+        id,
+        fingerprint,
+        action,
+        now,
+    )
+}

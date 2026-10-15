@@ -129,6 +129,14 @@
     "steer": "Guide the current task"
   },
   "chat": {
+    "edit": "Edit message",
+    "fork": "Fork conversation",
+    "forkTitle": "Fork",
+    "cancelEdit": "Cancel",
+    "resend": "Resend",
+    "editNotice": "Deletes later messages; actions aren't undone.",
+    "historyActionFailed": "Could not update conversation",
+
     "metrics": {
       "output": "Turn output",
       "tokens": "{{value}} token",

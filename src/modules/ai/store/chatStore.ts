@@ -79,6 +79,7 @@ import {
   releaseSessionRun,
   resolveSessionCwd,
   type SessionData,
+  type SessionFile,
   type SessionMeta,
 } from "@/modules/ai/lib/sessions";
 import { releaseUsage, restoreUsage } from "@/modules/ai/lib/usageRuntime";
@@ -232,6 +233,7 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   activeSessionRevision: number;
+  editingMessage: { sessionId: string; messageId: string } | null;
   chatViewVisible: boolean;
   setChatViewVisible: (visible: boolean) => void;
   runLockSessionIds: Record<string, true>;
@@ -479,6 +481,8 @@ export function releaseUnusedChats() {
     )
       continue;
     chats.delete(id);
+    if (useChatStore.getState().editingMessage?.sessionId === id)
+      useChatStore.setState({ editingMessage: null });
     clearSessionCommands(id);
     setDeliveryHistory(id);
     releaseUsage(id);
@@ -570,11 +574,16 @@ export async function seedSession(id: string): Promise<void> {
     (before && (!after || before.fingerprint !== after.fingerprint))
   )
     return;
+  seedMessages.set(id, restoreSession(session));
+}
+
+/** 从已提交记录统一恢复消息、游标及展示缓存，避免截断后残留旧投递或统计。 */
+export function restoreSession(session: SessionFile): UIMessage[] {
+  const id = session.id;
   const messages = projectSessionMessages(id, session.messages);
   setSessionCommands(id, projectCommands(session.messages));
   setDeliveryHistory(id, projectDeliveries(session.messages));
   persistedMessageCounts.set(id, messages.length);
-  seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
   useChatStore.setState((state) => ({
     parameterSelectionsBySession: {
@@ -583,6 +592,7 @@ export async function seedSession(id: string): Promise<void> {
     },
   }));
   restoreUsage(id, session.messages);
+  return messages;
 }
 
 /** 判断持久化会话是否属于当前 Workspace 进程。 */
@@ -615,6 +625,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   providerInstanceKeys: {},
   setProviderInstanceKeys: (keys) => set({ providerInstanceKeys: keys }),
 
+  editingMessage: null,
   selectedModel: null,
   parameterSelectionsBySession: {},
   modelSnapshotsBySession: {},
@@ -1354,7 +1365,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
           cursor.turnId,
         );
       if (chat)
-        chat.messages = materializeTurnMetadata(chat.messages, cursor.turnId);
+        chat.messages = materializeTurnMetadata(
+          chat.messages,
+          cursor.turnId,
+          outcome,
+        );
       releaseFileEditRuntime(id);
       set((state) => {
         const subagentDisplaysBySession = {
@@ -1391,6 +1406,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
 }));
 
 useChatStore.subscribe((state, previous) => {
+  if (
+    state.editingMessage &&
+    state.editingMessage === previous.editingMessage &&
+    (state.activeSessionId !== previous.activeSessionId ||
+      state.activeSessionRevision !== previous.activeSessionRevision)
+  )
+    useChatStore.setState({ editingMessage: null });
   if (
     state.activeSessionId !== previous.activeSessionId ||
     state.activeSessionRevision !== previous.activeSessionRevision ||

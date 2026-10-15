@@ -362,6 +362,7 @@ fn commit_session(
         return Err("session belongs to another workspace environment".to_string());
     }
     let path = session_path(root, id);
+    let mut business_metadata = update.metadata.clone();
     let mut messages = if path.exists() {
         let existing = read_session(root, id)?;
         if existing.environment_key != environment_key {
@@ -398,6 +399,14 @@ fn commit_session(
             }
             _ => return Err("session External Agent binding must not change".into()),
         }
+        // 分叉身份与计数由原生层拥有，旧窗口的 metadata 快照不能覆盖它们。
+        for key in ["forkCount", "forkPath", "forkTitle"] {
+            if let Some(value) = existing.metadata.get(key) {
+                business_metadata.insert(key.into(), value.clone());
+            } else {
+                business_metadata.remove(key);
+            }
+        }
         existing.messages
     } else {
         Vec::new()
@@ -406,6 +415,7 @@ fn commit_session(
     write_session(
         root,
         &SessionFile {
+            metadata: business_metadata,
             messages,
             ..update.clone()
         },
@@ -675,6 +685,168 @@ pub fn commit(
     })
 }
 
+/// 显式历史操作只能在调用方持有运行锁时执行，并校验界面所见版本。
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HistoryAction {
+    Edit {
+        message_id: String,
+        text: String,
+        turn_id: String,
+    },
+    Fork {
+        turn_id: String,
+        label: String,
+    },
+}
+
+/// 返回已提交的记录，调用方无需再次读盘即可安装一致的内存历史。
+#[derive(Serialize)]
+pub struct HistoryRevision {
+    pub meta: SessionMetadata,
+    pub session: SessionFile,
+}
+
+/// 持有源会话锁期间校验版本并原子提交历史变更。
+pub fn revise_history(
+    state: &AiSessionsState,
+    environment_key: &str,
+    id: String,
+    fingerprint: String,
+    action: HistoryAction,
+    now: String,
+) -> Result<HistoryRevision, String> {
+    let root = sessions_dir()?;
+    let uuid = strict_uuid(&id)?;
+    let locks = state
+        .run_locks
+        .lock()
+        .map_err(|_| "AI session lock state is poisoned")?;
+    if !locks.contains_key(&uuid) {
+        return Err("Session is not locked".into());
+    }
+    revise_history_file(&root, uuid, environment_key, &fingerprint, action, now)
+}
+
+fn revise_history_file(
+    root: &Path,
+    id: Uuid,
+    environment_key: &str,
+    fingerprint: &str,
+    action: HistoryAction,
+    now: String,
+) -> Result<HistoryRevision, String> {
+    if metadata(root, id)?.fingerprint != fingerprint {
+        return Err("Session changed; reopen it before editing or forking".into());
+    }
+    let mut session = read_session(root, id)?;
+    if session.environment_key != environment_key
+        || session.metadata.contains_key("channelId")
+        || session.metadata.contains_key("externalAgent")
+    {
+        return Err("History actions require a desktop built-in Agent session".into());
+    }
+    validate_timestamps(&now, &now)?;
+    match action {
+        HistoryAction::Edit {
+            message_id,
+            text,
+            turn_id,
+        } => {
+            let index = session
+                .messages
+                .iter()
+                .rposition(|r| r["role"] == "user")
+                .ok_or("No user message")?;
+            let record = &session.messages[index];
+            let fallback = format!("{}:user:{}", session.id, index);
+            if record["message_id"].as_str().unwrap_or(&fallback) != message_id
+                || record.get("command_id").is_some()
+            {
+                return Err("Only the latest user message can be edited".into());
+            }
+            if text.trim().is_empty()
+                && record["media"].as_array().is_none_or(Vec::is_empty)
+                && record["attachments"].as_array().is_none_or(Vec::is_empty)
+            {
+                return Err("Message is empty".into());
+            }
+            session.messages.truncate(index + 1);
+            let record = &mut session.messages[index];
+            record["content"] = Value::String(text);
+            record["timestamp"] = Value::String(now.clone());
+            record["turn_id"] = Value::String(turn_id);
+            record.as_object_mut().unwrap().remove("guided");
+        }
+        HistoryAction::Fork { turn_id, label } => {
+            let end = session
+                .messages
+                .iter()
+                .rposition(|r| r["turn_id"] == turn_id)
+                .ok_or("Final reply is unavailable")?;
+            let final_record = session.messages[..=end]
+                .iter()
+                .rev()
+                .find(|r| {
+                    r["turn_id"] == turn_id && (r["role"] == "model" || r["role"] == "assistant")
+                })
+                .ok_or("Final reply is unavailable")?;
+            if final_record["turn_status"] != "completed" {
+                return Err("Reply is not complete".into());
+            }
+            let number = session
+                .metadata
+                .get("forkCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + 1;
+            session
+                .metadata
+                .insert("forkCount".into(), Value::from(number));
+            // 先预留序号；创建失败允许跳号，删除子会话也不复用编号。
+            write_session(root, &session)?;
+            let mut path = session
+                .metadata
+                .get("forkPath")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            path.push(Value::from(number));
+            let title = session
+                .metadata
+                .get("forkTitle")
+                .or_else(|| session.metadata.get("title"))
+                .and_then(Value::as_str)
+                .unwrap_or("New chat")
+                .to_string();
+            let suffix: String = path
+                .iter()
+                .map(|v| format!("({})", v.as_u64().unwrap()))
+                .collect();
+            session.metadata.insert(
+                "title".into(),
+                Value::String(format!("{label}{suffix}·{title}")),
+            );
+            session
+                .metadata
+                .insert("forkTitle".into(), Value::String(title));
+            session
+                .metadata
+                .insert("forkPath".into(), Value::Array(path));
+            session.metadata.remove("forkCount");
+            session.messages.truncate(end + 1);
+            session.id = Uuid::new_v4().to_string();
+            session.created_at = now.clone();
+        }
+    }
+    session.updated_at = now;
+    write_session(root, &session)?;
+    Ok(HistoryRevision {
+        meta: metadata(root, strict_uuid(&session.id)?)?,
+        session,
+    })
+}
+
 /// 删除指定会话文件，运行中的会话不可删除。
 pub fn ai_session_delete(state: &AiSessionsState, id: String) -> Result<(), String> {
     delete_session(&sessions_dir()?, state, strict_uuid(&id)?)
@@ -843,6 +1015,129 @@ mod tests {
             }),
         );
         value
+    }
+
+    #[test]
+    fn history_edit_keeps_prefix_and_attachments_and_rejects_stale_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut file = session(id, "original");
+        file.messages.extend(vec![
+            json!({"role":"model","turn_id":"first","content":[{"role":"assistant","content":"answer","providerOptions":{"test":{"signature":"signed"}}}],"turn_status":"completed"}),
+            json!({"role":"user","message_id":"last","content":"old","guided":true,"attachments":[{"kind":"snippet","text":"snapshot"}],"media":[{"url":"data:image/png;base64,AA"}]}),
+            json!({"role":"model","turn_id":"last","content":[],"turn_status":"cancelled"}),
+            json!({"role":"event","content":{"event":"compaction","summary":"later"}}),
+        ]);
+        write_session(dir.path(), &file).unwrap();
+        let fingerprint = metadata(dir.path(), id).unwrap().fingerprint;
+        let action = || HistoryAction::Edit {
+            message_id: "last".into(),
+            text: "new".into(),
+            turn_id: "replacement".into(),
+        };
+        assert!(revise_history_file(
+            dir.path(),
+            id,
+            "local",
+            "stale",
+            action(),
+            file.updated_at.clone()
+        )
+        .is_err());
+        assert_eq!(read_session(dir.path(), id).unwrap(), file);
+        assert!(revise_history_file(
+            dir.path(),
+            id,
+            "wsl:Ubuntu",
+            &fingerprint,
+            action(),
+            file.updated_at.clone()
+        )
+        .is_err());
+        assert_eq!(read_session(dir.path(), id).unwrap(), file);
+        revise_history_file(
+            dir.path(),
+            id,
+            "local",
+            &fingerprint,
+            action(),
+            file.updated_at.clone(),
+        )
+        .unwrap();
+        let edited = read_session(dir.path(), id).unwrap();
+        assert_eq!(edited.messages.len(), 3);
+        assert_eq!(edited.messages[..2], file.messages[..2]);
+        assert_eq!(
+            edited.messages[2]["attachments"],
+            file.messages[2]["attachments"]
+        );
+        assert_eq!(edited.messages[2]["media"], file.messages[2]["media"]);
+        assert_eq!(edited.messages[2]["content"], "new");
+        assert!(edited.messages[2].get("guided").is_none());
+        assert_eq!(edited.metadata, file.metadata);
+    }
+
+    #[test]
+    fn forks_copy_complete_prefix_and_allocate_independent_monotonic_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut file = session(id, "original");
+        file.messages.extend(vec![
+            json!({"role":"model","turn_id":"first","content":[{"role":"assistant","content":"answer"}],"turn_status":"completed"}),
+            json!({"role":"display","turn_id":"first","content":{"snapshot":true}}),
+            json!({"role":"user","message_id":"later","content":"later"}),
+            json!({"role":"model","turn_id":"later","content":[],"turn_status":"cancelled"}),
+        ]);
+        write_session(dir.path(), &file).unwrap();
+        let fork = |source| {
+            revise_history_file(
+                dir.path(),
+                source,
+                "local",
+                &metadata(dir.path(), source).unwrap().fingerprint,
+                HistoryAction::Fork {
+                    turn_id: "first".into(),
+                    label: "分叉".into(),
+                },
+                file.updated_at.clone(),
+            )
+            .unwrap()
+            .meta
+        };
+        let first = fork(id);
+        let first_id = strict_uuid(&first.id).unwrap();
+        assert_eq!(first.title, "分叉(1)·original");
+        let mut stale = file.clone();
+        stale.messages.clear();
+        commit_session(dir.path(), &stale, "local").unwrap();
+        assert_eq!(
+            read_session(dir.path(), id).unwrap().metadata["forkCount"],
+            1
+        );
+        assert_eq!(
+            read_session(dir.path(), first_id).unwrap().messages,
+            file.messages[..3]
+        );
+        assert_eq!(fork(first_id).title, "分叉(1)(1)·original");
+        assert_eq!(fork(first_id).title, "分叉(1)(2)·original");
+        fs::remove_file(session_path(dir.path(), first_id)).unwrap();
+        assert_eq!(fork(id).title, "分叉(2)·original");
+        assert_eq!(
+            read_session(dir.path(), id).unwrap().messages,
+            file.messages
+        );
+        assert!(revise_history_file(
+            dir.path(),
+            id,
+            "local",
+            &metadata(dir.path(), id).unwrap().fingerprint,
+            HistoryAction::Fork {
+                turn_id: "later".into(),
+                label: "Fork".into()
+            },
+            file.updated_at
+        )
+        .is_err());
     }
 
     #[test]

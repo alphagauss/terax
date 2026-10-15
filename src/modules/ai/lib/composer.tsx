@@ -587,7 +587,11 @@ export function AiComposerProvider({
     void stopSession(sessionId);
   };
 
+  const editing = useChatStore(
+    (state) => state.editingMessage?.sessionId === sessionId,
+  );
   const canSend =
+    !editing &&
     (!isBusy || canSteer) &&
     !readOnly &&
     (value.trim().length > 0 || files.length > 0 || pickedSnippets.length > 0);

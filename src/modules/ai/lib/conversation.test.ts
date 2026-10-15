@@ -1120,3 +1120,95 @@ describe("AI session message conversion", () => {
     );
   });
 });
+
+/** 在 SDK 请求边界比较分叉及编辑前缀，覆盖签名和历史压缩检查点。 */
+it("历史截取后 SDK 请求保持原始协议前缀", async () => {
+  const records: SessionMessage[] = [
+    { role: "user", content: "question", message_id: "u1", timestamp },
+    {
+      role: "model",
+      turn_id: "t1",
+      turn_status: "completed",
+      timestamp,
+      content: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "reasoning",
+              text: "thought",
+              providerOptions: { test: { signature: "signed" } },
+            },
+            { type: "text", text: "answer" },
+          ],
+        },
+      ],
+    },
+    {
+      role: "event",
+      timestamp,
+      content: {
+        event: "compaction",
+        id: "c1",
+        throughUserMessageId: "u1",
+        summary: "summary",
+      },
+    },
+    { role: "user", content: "follow up", message_id: "u2", timestamp },
+    {
+      role: "model",
+      turn_id: "t2",
+      turn_status: "completed",
+      timestamp,
+      content: [
+        {
+          role: "assistant",
+          content: "second answer",
+          providerOptions: { test: { id: "provider-id" } },
+        },
+      ],
+    },
+  ];
+  const request = async (id: string, history: SessionMessage[]) => {
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [{ type: "text", text: "ok" }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        warnings: [],
+      }),
+    });
+    await generateText({
+      model,
+      messages: await convertToAgentModelMessages(
+        projectSessionMessages(id, jsonlRoundTrip(history)),
+      ),
+    });
+    return model.doGenerateCalls[0].prompt;
+  };
+  for (const end of [2, 5]) {
+    const prefix = records.slice(0, end);
+    const original = await request("original", prefix);
+    expect(await request("fork", prefix)).toEqual(original);
+    const edited = [
+      ...prefix,
+      {
+        role: "user" as const,
+        content: "edited",
+        message_id: "edited",
+        timestamp,
+      },
+    ];
+    const sent = await request("original", edited);
+    expect(sent.slice(0, -1)).toEqual(original);
+  }
+  const display = projectConversationDisplay(
+    projectSessionMessages("fork", records.slice(0, 5)),
+  );
+  expect(
+    display.filter((m) => messageMetadata(m).turnStatus === "completed"),
+  ).toHaveLength(2);
+});

@@ -17,6 +17,9 @@ import {
 } from "@/modules/ai/lib/conversation";
 import {
   loadChat,
+  editLastMessage,
+  forkSession,
+  canReviseHistory,
   sendChatMessage,
   startChatMessage,
   steerChatMessage,
@@ -30,6 +33,7 @@ import type { UIMessage } from "ai";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
+  revise: vi.fn(),
   acquire: vi.fn(),
   release: vi.fn(),
   list: vi.fn(),
@@ -53,6 +57,7 @@ vi.mock("@/lib/sharedStore", async (importOriginal) => ({
 
 vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/modules/ai/lib/sessions")>()),
+  reviseSessionHistory: io.revise,
   acquireSessionRun: io.acquire,
   releaseSessionRun: io.release,
   listSessions: io.list,
@@ -79,7 +84,7 @@ import { parseCommand } from "@/modules/ai/commands/registry";
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
 import { useCommandStore } from "@/modules/ai/commands/store";
 import { MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
-import type { SessionMeta } from "@/modules/ai/lib/sessions";
+import type { SessionFile, SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import {
   chats,
@@ -216,6 +221,7 @@ describe("chat store multi-process lifecycle", () => {
     io.workspaceDelete.mockResolvedValue(undefined);
     io.isPrimary = true;
     useChatStore.setState({
+      editingMessage: null,
       sessionsHydrated: false,
       draftSessionId: null,
       sessions: [],
@@ -237,6 +243,141 @@ describe("chat store multi-process lifecycle", () => {
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  it("编辑失败保留原历史和编辑内容，运行及保存期间拒绝历史操作", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      selectedModel: { providerId: "builtin:ollama", modelId: "test" },
+      editingMessage: { sessionId: first.id, messageId: "user" },
+    });
+    const chat = await loadChat(first.id);
+    const before = chat.messages;
+    const sending = vi.spyOn(chat, "sendMessage");
+    expect(await startChatMessage(first.id, { text: "competing send" })).toBe(
+      false,
+    );
+    io.revise.mockRejectedValue(new Error("disk failure"));
+    expect(canReviseHistory(first.id)).toBe(true);
+    await expect(editLastMessage(first.id, "user", "changed")).rejects.toThrow(
+      "disk failure",
+    );
+    expect(chat.messages).toBe(before);
+    expect(sending).not.toHaveBeenCalled();
+    expect(useChatStore.getState().editingMessage?.messageId).toBe("user");
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+    useChatStore.setState({ runLockSessionIds: { [first.id]: true } });
+    expect(canReviseHistory(first.id)).toBe(false);
+    expect(await editLastMessage(first.id, "user", "changed")).toBe(false);
+    await forkSession(first.id, "turn");
+    expect(io.revise).toHaveBeenCalledTimes(1);
+  });
+
+  it("编辑成功先安装已落盘历史和游标，再续发且不重复追加用户消息", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      selectedModel: { providerId: "builtin:ollama", modelId: "test" },
+    });
+    const chat = await loadChat(first.id);
+    useDeliveryHistory.setState({
+      sessions: { [first.id]: [{ id: "discarded" } as never] },
+    });
+    const saved: SessionFile = sessionFile(first);
+    saved.messages = [
+      {
+        role: "user",
+        message_id: "edited",
+        content: "changed",
+        timestamp: new Date().toISOString(),
+      },
+    ];
+    io.revise.mockResolvedValue({
+      meta: { ...first, fingerprint: "edited" },
+      session: saved,
+    });
+    const sending = vi
+      .spyOn(chat, "sendMessage")
+      .mockImplementation(async (message) => {
+        expect(message).toBeUndefined();
+        expect(
+          useDeliveryHistory.getState().sessions[first.id],
+        ).toBeUndefined();
+        expect(chat.messages[0].id).toBe("edited");
+        expect(persistedMessageCounts.get(first.id)).toBe(chat.messages.length);
+        expect(useChatStore.getState().sessions[0].fingerprint).toBe("edited");
+      });
+    expect(await editLastMessage(first.id, "edited", "changed")).toBe(true);
+    expect(sending).toHaveBeenCalledOnce();
+    useChatStore.setState({ runLockSessionIds: {} });
+    sending.mockRestore();
+  });
+
+  it("分叉直接使用已提交记录和参数，不重复读盘或调用模型", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    const source = await loadChat(first.id);
+    const sending = vi.spyOn(source, "sendMessage");
+    const selections = { "builtin:ollama/test": { temperature: "low" } };
+    useChatStore.setState({
+      parameterSelectionsBySession: { [first.id]: selections },
+    });
+    const saved: SessionFile = {
+      ...sessionFile(second),
+      messages: [
+        {
+          role: "user",
+          message_id: "original-user",
+          content: "original",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+    io.revise.mockResolvedValue({ meta: second, session: saved });
+    io.list.mockResolvedValue([first, second]);
+    io.read.mockClear();
+    await forkSession(first.id, "turn");
+    expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    expect(getSessionParameterSelections(second.id)).toEqual(selections);
+    expect(io.workspaceSet).toHaveBeenCalledWith(
+      `ai:parameters:${second.id}`,
+      selections,
+    );
+    const fork = await loadChat(second.id);
+    expect(fork.messages[0].id).toBe("original-user");
+    expect(io.read).not.toHaveBeenCalled();
+    expect(sending).not.toHaveBeenCalled();
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it("切换或刷新会话取消原位编辑，其他状态更新保留编辑", () => {
+    const editingMessage = { sessionId: first.id, messageId: "user" };
+    useChatStore.setState({
+      sessions: [first, second],
+      activeSessionId: first.id,
+      editingMessage,
+    });
+    useChatStore.getState().patchAgentMeta(first.id, { status: "idle" });
+    expect(useChatStore.getState().editingMessage).toBe(editingMessage);
+    useChatStore.setState({ activeSessionRevision: 1 });
+    expect(useChatStore.getState().editingMessage).toBeNull();
+    useChatStore.setState({ editingMessage });
+    useChatStore.getState().newSession();
+    expect(useChatStore.getState().editingMessage).toBeNull();
+  });
+
+  it("其他工作环境及 Channel 的历史操作保持只读", async () => {
+    for (const session of [
+      { ...first, environmentKey: "wsl:Ubuntu" },
+      { ...first, channelId: "channel" },
+    ]) {
+      useChatStore.setState({ sessions: [session], activeSessionId: first.id });
+      expect(canReviseHistory(first.id)).toBe(false);
+      expect(await editLastMessage(first.id, "user", "changed")).toBe(false);
+      await forkSession(first.id, "turn");
+    }
+    expect(io.acquire).not.toHaveBeenCalled();
+    expect(io.revise).not.toHaveBeenCalled();
   });
 
   it("keeps an editor selection path in the draft attachment", () => {

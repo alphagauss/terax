@@ -129,6 +129,14 @@
     "steer": "引导当前任务"
   },
   "chat": {
+    "edit": "编辑消息",
+    "fork": "分叉会话",
+    "forkTitle": "分叉",
+    "cancelEdit": "取消",
+    "resend": "重新发送",
+    "editNotice": "删除后续记录，不撤销操作",
+    "historyActionFailed": "无法更新会话",
+
     "metrics": {
       "output": "本轮输出",
       "tokens": "{{value}} token",

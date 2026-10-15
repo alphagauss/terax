@@ -216,3 +216,30 @@ function parseTimestamp(value: string): number {
   }
   return timestamp;
 }
+
+/** 在持有运行锁期间原子修改历史，原生层再次校验磁盘版本。 */
+export async function reviseSessionHistory(
+  id: string,
+  fingerprint: string,
+  action:
+    | { kind: "edit"; message_id: string; text: string; turn_id: string }
+    | { kind: "fork"; turn_id: string; label: string },
+): Promise<{ meta: SessionMeta; session: SessionFile }> {
+  const result = await invoke<{
+    meta: IpcSessionMeta;
+    session: IpcSessionFile;
+  }>("ai_session_revise_history", {
+    id,
+    fingerprint,
+    action,
+    now: new Date().toISOString(),
+  });
+  return {
+    meta: fromIpcMeta(result.meta),
+    session: {
+      ...result.session,
+      createdAt: parseTimestamp(result.session.createdAt),
+      updatedAt: parseTimestamp(result.session.updatedAt),
+    },
+  };
+}

@@ -299,6 +299,7 @@ type ConversationMetadata = {
   attachments?: MessageAttachment[];
   commandId?: string;
   turnId?: string;
+  turnStatus?: string;
   fileEdits?: TurnFileEdits;
   fileEditsSummary?: boolean;
   createdAt?: number;
@@ -969,6 +970,14 @@ export function projectSessionMessages(
   });
 
   flushAssistant();
+  const statuses = new Map<string, string | undefined>();
+  for (const record of records) {
+    if (
+      record.turn_id &&
+      (record.role === "model" || record.role === "assistant")
+    )
+      statuses.set(record.turn_id, record.turn_status);
+  }
   const finalByTurn = new Map<string, UIMessage>();
   for (const message of messages) {
     const turnId = messageMetadata(message).turnId;
@@ -978,6 +987,7 @@ export function projectSessionMessages(
     const metadata = messageMetadata(message);
     if (metadata.turnId && finalByTurn.get(metadata.turnId) !== message)
       delete metadata.turnId;
+    if (metadata.turnId) metadata.turnStatus = statuses.get(metadata.turnId);
   }
 
   return messages;
@@ -1513,11 +1523,12 @@ function attachSubagentDisplays(
 export function materializeTurnMetadata(
   messages: UIMessage[],
   turnId: string,
+  turnStatus?: string,
 ): UIMessage[] {
   const last = messages[messages.length - 1];
   if (last?.role !== "assistant") return messages;
   return [
     ...messages.slice(0, -1),
-    { ...last, metadata: { ...messageMetadata(last), turnId } },
+    { ...last, metadata: { ...messageMetadata(last), turnId, turnStatus } },
   ];
 }

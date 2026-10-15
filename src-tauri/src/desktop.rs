@@ -329,6 +329,7 @@ pub fn run() {
             commands::sessions::ai_session_read,
             commands::sessions::ai_sessions_search,
             commands::sessions::ai_session_commit,
+            commands::sessions::ai_session_revise_history,
             commands::sessions::ai_session_delete,
             commands::sessions::ai_agent_delete,
             commands::sessions::ai_session_run_acquire,

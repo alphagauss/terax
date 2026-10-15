@@ -12,6 +12,14 @@ import {
   describeToolCall,
   formatToolSummary,
 } from "@/modules/ai/lib/toolSummary";
+import { Button } from "@/components/controls/button";
+import { Textarea } from "@/components/controls/textarea";
+import { reportError } from "@/lib/errors";
+import {
+  canReviseHistory,
+  editLastMessage,
+  forkSession,
+} from "@/modules/ai/store/chatRuntime";
 import { writeClipboardText } from "@/lib/clipboard";
 import { DeliveryCard } from "@/modules/channels/components/DeliveryCard";
 import {
@@ -82,6 +90,8 @@ import {
   ArrowRight01Icon,
   CodeIcon,
   Copy01Icon,
+  PencilEdit02Icon,
+  GitBranchIcon,
   File01Icon,
   HashtagIcon,
   TerminalIcon,
@@ -426,10 +436,9 @@ export function AiChatView({
       const message = messages[index];
       if (
         message.role === "user" &&
-        !messageMetadata(message).commandId &&
         !messageMetadata(message).compaction
       ) {
-        return message.id;
+        return messageMetadata(message).commandId ? undefined : message.id;
       }
     }
     return undefined;
@@ -475,6 +484,11 @@ export function AiChatView({
     (state) =>
       state.sessions.find((session) => session.id === sessionId)?.cwd ?? null,
   );
+  const locked = useChatDisplayStore(useChatStore, (state) =>
+    Boolean(state.runLockSessionIds[sessionId]),
+  );
+  const editing = useChatStore((state) => state.editingMessage);
+  const historyAvailable = !isBusy && !locked && canReviseHistory(sessionId);
   const { hitStepCap, compacting } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
@@ -543,6 +557,20 @@ export function AiChatView({
                   <RenderedMessage
                     sessionId={sessionId}
                     message={m}
+                    editable={
+                      historyAvailable &&
+                      !editing &&
+                      m.id === latestUserMessageId
+                    }
+                    forkable={
+                      historyAvailable &&
+                      !editing &&
+                      messageMetadata(m).turnStatus === "completed" &&
+                      Boolean(messageMetadata(m).turnId) &&
+                      m.parts.some(
+                        (part) => part.type === "text" && part.text.trim(),
+                      )
+                    }
                     streaming={m.id === streamingMessageId && !compacting}
                     appearing={m.id === appearingUserMessageId}
                   />
@@ -675,11 +703,15 @@ const RenderedMessage = memo(function RenderedMessage({
   message,
   streaming,
   appearing,
+  editable,
+  forkable,
 }: {
   sessionId: string;
   message: UIMessage;
   streaming: boolean;
   appearing: boolean;
+  editable: boolean;
+  forkable: boolean;
 }) {
   const { t } = useTranslation("ai");
   // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
@@ -691,6 +723,11 @@ const RenderedMessage = memo(function RenderedMessage({
         ? []
         : buildMessageGroups(message.parts as AnyPart[]),
     [message.parts, message.role],
+  );
+  const editing = useChatStore(
+    (state) =>
+      state.editingMessage?.sessionId === sessionId &&
+      state.editingMessage.messageId === message.id,
   );
   const timestamp = useMessageTimestamp(message);
   const copyText = useMemo(() => messageTextForCopy(message), [message]);
@@ -737,7 +774,8 @@ const RenderedMessage = memo(function RenderedMessage({
         )}
       >
         <MessageAttachments message={message} />
-        {context.text ||
+        {editing ||
+        context.text ||
         context.chips.length ||
         messageMetadata(message).guided ? (
           <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
@@ -749,14 +787,31 @@ const RenderedMessage = memo(function RenderedMessage({
             {context.chips.length > 0 ? (
               <ContextChips chips={context.chips} />
             ) : null}
-            {context.text ? (
+            {editing ? (
+              <MessageEditor sessionId={sessionId} message={message} />
+            ) : context.text ? (
               <p className="whitespace-pre-wrap wrap-break-word">
                 {context.text}
               </p>
             ) : null}
           </MessageContent>
         ) : null}
-        <MessageMeta timestamp={timestamp} copyText={copyText} />
+        <MessageMeta timestamp={timestamp} copyText={copyText}>
+          {editable && (
+            <MessageAction
+              tooltip={t("chat.edit")}
+              label={t("chat.edit")}
+              onClick={() =>
+                useChatStore.setState({
+                  editingMessage: { sessionId, messageId: message.id },
+                })
+              }
+              className="size-5"
+            >
+              <HugeiconsIcon icon={PencilEdit02Icon} size={12} />
+            </MessageAction>
+          )}
+        </MessageMeta>
       </Message>
     );
   }
@@ -821,12 +876,99 @@ const RenderedMessage = memo(function RenderedMessage({
             copyText={copyText}
             sessionId={sessionId}
             turnId={messageMetadata(message).turnId}
-          />
+          >
+            {forkable && (
+              <MessageAction
+                tooltip={t("chat.fork")}
+                label={t("chat.fork")}
+                onClick={() =>
+                  void forkSession(
+                    sessionId,
+                    messageMetadata(message).turnId,
+                  ).catch((error) =>
+                    reportError(t("chat.historyActionFailed"), { error }),
+                  )
+                }
+                className="size-5"
+              >
+                <HugeiconsIcon icon={GitBranchIcon} size={12} />
+              </MessageAction>
+            )}
+          </MessageMeta>
         ) : null}
       </Message>
     </FileEditContext.Provider>
   );
 });
+
+/** 原位只修改正文，附件和底部草稿保持原样，成功提交后才结束编辑。 */
+function MessageEditor({
+  sessionId,
+  message,
+}: {
+  sessionId: string;
+  message: UIMessage;
+}) {
+  const { t } = useTranslation("ai");
+  const [text, setText] = useState(() => messageRawText(message));
+  const [saving, setSaving] = useState(false);
+  const focusEditor = useCallback((element: HTMLTextAreaElement | null) => {
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, []);
+  const hasAttachments =
+    Boolean(messageMetadata(message).attachments?.length) ||
+    message.parts.some((part) => part.type === "file");
+  const submit = async () => {
+    setSaving(true);
+    try {
+      if (!(await editLastMessage(sessionId, message.id, text)))
+        reportError(t("chat.historyActionFailed"));
+    } catch (error) {
+      reportError(t("chat.historyActionFailed"), { error });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="flex min-w-64 flex-col gap-2">
+      <Textarea
+        ref={focusEditor}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        disabled={saving}
+        aria-label={t("chat.edit")}
+        className="min-h-[22px] rounded-none border-0 bg-transparent p-0 text-[14px] leading-[22px] text-inherit md:text-[14px]"
+      />
+      <div className="flex items-center gap-2">
+        <p
+          className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+          title={t("chat.editNotice")}
+        >
+          {t("chat.editNotice")}
+        </p>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="shrink-0"
+          disabled={saving}
+          onClick={() => useChatStore.setState({ editingMessage: null })}
+        >
+          {t("chat.cancelEdit")}
+        </Button>
+        <Button
+          size="xs"
+          className="shrink-0"
+          disabled={saving || (!text.trim() && !hasAttachments)}
+          onClick={() => void submit()}
+        >
+          {t("chat.resend")}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 const RenderedLeafGroup = memo(function RenderedLeafGroup({
   group,
@@ -919,11 +1061,13 @@ const MessageMeta = memo(function MessageMeta({
   copyText,
   sessionId,
   turnId,
+  children,
 }: {
   timestamp: number;
   copyText: string;
   sessionId?: string;
   turnId?: string;
+  children?: React.ReactNode;
 }) {
   const { t, i18n } = useTranslation("ai");
   const [copied, setCopied] = useState(false);
@@ -978,6 +1122,7 @@ const MessageMeta = memo(function MessageMeta({
           strokeWidth={1.75}
         />
       </MessageAction>
+      {children}
       {sessionId && turnId && (
         <TurnMetrics sessionId={sessionId} turnId={turnId} />
       )}

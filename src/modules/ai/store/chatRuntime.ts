@@ -41,11 +41,18 @@ import { readAgentConfiguration } from "@/modules/ai/lib/agentConfiguration";
 import { availableAgentTools } from "@/modules/ai/lib/agentTools";
 import { parseSessionAgent } from "@/modules/ai/lib/agents";
 import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
-import { resolveSessionCwd } from "@/modules/ai/lib/sessions";
+import {
+  resolveSessionCwd,
+  reviseSessionHistory,
+  releaseSessionRun,
+} from "@/modules/ai/lib/sessions";
+import { setWorkspaceValue } from "@/modules/workspace-process";
 import { createSessionTransport } from "@/modules/ai/lib/transport";
 import type { ToolContext } from "@/modules/ai/tools/tools";
 import {
   chats,
+  restoreSession,
+  pendingTurns,
   stopSession,
   pendingTurn,
   getAgentMetaForSession,
@@ -289,7 +296,11 @@ export async function sendChatMessage(
   message: Omit<UIMessage, "id" | "role"> & { id?: string; role: "user" },
   hasAttachments = false,
 ): Promise<boolean> {
-  if (!isSessionWritable(sessionId)) return false;
+  if (
+    !isSessionWritable(sessionId) ||
+    useChatStore.getState().editingMessage?.sessionId === sessionId
+  )
+    return false;
   await loadChat(sessionId);
   const state = useChatStore.getState();
   const external =
@@ -410,8 +421,13 @@ export async function startChatMessage(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
   channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
   compaction?: string,
+  edit?: { messageId: string; text: string; fingerprint: string },
 ): Promise<boolean> {
-  if (startingSessionIds.has(sessionId)) return false;
+  if (
+    startingSessionIds.has(sessionId) ||
+    (!edit && useChatStore.getState().editingMessage?.sessionId === sessionId)
+  )
+    return false;
   startingSessionIds.add(sessionId);
   const submissionState = useChatStore.getState();
   const prefs = usePreferencesStore.getState();
@@ -465,6 +481,33 @@ export async function startChatMessage(
     if (chat.status === "submitted" || chat.status === "streaming")
       return false;
     if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
+    if (edit) {
+      try {
+        const turnId = pendingTurn(sessionId).id;
+        const { meta, session: saved } = await reviseSessionHistory(
+          sessionId,
+          edit.fingerprint,
+          {
+            kind: "edit",
+            message_id: edit.messageId,
+            text: edit.text,
+            turn_id: turnId,
+          },
+        );
+        chat.messages = restoreSession(saved);
+        state.resetAgentMeta(sessionId);
+        useChatStore.setState((current) => ({
+          sessions: current.sessions.map((item) =>
+            item.id === sessionId ? meta : item,
+          ),
+          editingMessage: null,
+        }));
+      } catch (error) {
+        pendingTurns.delete(sessionId);
+        await unlockHistory(sessionId);
+        throw error;
+      }
+    }
     state.patchAgentMeta(sessionId, {
       cancelled: false,
       activityTiming: undefined,
@@ -556,4 +599,86 @@ export async function startChatCompaction(
     if (signal?.aborted) stop();
     check();
   });
+}
+
+/** 历史操作与运行共用独占锁；不触发终态提交或重新执行旧工具。 */
+async function unlockHistory(sessionId: string) {
+  await releaseSessionRun(sessionId);
+  useChatStore.setState((state) => {
+    const locks = { ...state.runLockSessionIds };
+    delete locks[sessionId];
+    return { runLockSessionIds: locks };
+  });
+}
+
+/** 历史操作只对已保存且没有运行或提交任务的内置桌面会话开放。 */
+export function canReviseHistory(sessionId: string): boolean {
+  const state = useChatStore.getState();
+  return (
+    Boolean(state.sessions.find((s) => s.id === sessionId)?.fingerprint) &&
+    isSessionWritable(sessionId) &&
+    !state.runLockSessionIds[sessionId] &&
+    !startingSessionIds.has(sessionId) &&
+    !parseExternalAgentBinding(sessionMetadata.get(sessionId)) &&
+    !getAgentMetaForSession(state, sessionId).commitError
+  );
+}
+
+/** 原子保存修改后的最后一条用户消息，再沿用正常发送入口继续模型调用。 */
+export async function editLastMessage(
+  sessionId: string,
+  messageId: string,
+  text: string,
+) {
+  if (!canReviseHistory(sessionId)) return false;
+  const fingerprint = useChatStore
+    .getState()
+    .sessions.find((s) => s.id === sessionId)?.fingerprint;
+  if (!fingerprint) return false;
+  return startChatMessage(sessionId, undefined, undefined, undefined, {
+    messageId,
+    text,
+    fingerprint,
+  });
+}
+
+/** 从完整终态复制原始记录；标题与分叉路径始终只属于本地 metadata。 */
+export async function forkSession(
+  sessionId: string,
+  turnId: string | undefined,
+) {
+  if (!turnId || !canReviseHistory(sessionId)) return;
+  const state = useChatStore.getState();
+  const fingerprint = state.sessions.find(
+    (s) => s.id === sessionId,
+  )?.fingerprint;
+  if (!fingerprint) return;
+  if (!(await state.beginSessionRun(sessionId))) return;
+  try {
+    const { meta, session } = await reviseSessionHistory(
+      sessionId,
+      fingerprint,
+      {
+        kind: "fork",
+        turn_id: turnId,
+        label: i18n.t("ai:chat.forkTitle"),
+      },
+    );
+    const selections = structuredClone(
+      getSessionParameterSelections(sessionId),
+    );
+    await setWorkspaceValue(`ai:parameters:${meta.id}`, selections);
+    useChatStore.setState((current) => ({
+      sessions: [...current.sessions, meta],
+      parameterSelectionsBySession: {
+        ...current.parameterSelectionsBySession,
+        [meta.id]: selections,
+      },
+    }));
+    seedMessages.set(meta.id, restoreSession(session));
+    state.switchSession(meta.id);
+  } finally {
+    await unlockHistory(sessionId);
+    await useChatStore.getState().refreshSessions();
+  }
 }
