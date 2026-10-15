@@ -569,7 +569,7 @@ function NavigationItems({
                   </>
                 ) : null}
                 {iconOnly ? (
-                  <span className="absolute -top-0.5 -right-0.5">
+                  <span className="absolute -top-0.5 right-0.5">
                     <Badge value={badges?.[container.id]} />
                   </span>
                 ) : null}
