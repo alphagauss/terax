@@ -4,18 +4,40 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+const remote = vi.hoisted(() => ({
+  enabled: false,
+  phase: "disconnected",
+  epoch: 1,
+}));
+
 vi.mock("@/lib/fonts", () => ({ ensureMonoFontsLoaded: vi.fn() }));
 vi.mock("@/modules/workspace", () => ({
-  currentWorkspaceEnv: () => ({ kind: "local" }),
+  currentWorkspaceEnv: () =>
+    remote.enabled ? { kind: "ssh", profileId: "test" } : { kind: "local" },
 }));
 vi.mock("@/modules/remote", () => ({
-  useRemoteRuntimeStore: Object.assign(() => "local", {
-    getState: () => ({ snapshot: { phase: "idle" } }),
-  }),
+  useRemoteRuntimeStore: Object.assign(
+    () =>
+      remote.enabled
+        ? remote.phase === "connected"
+          ? remote.epoch
+          : remote.phase
+        : "local",
+    {
+      getState: () => ({
+        snapshot: {
+          phase: remote.phase,
+          epoch: remote.epoch,
+          profileId: "test",
+        },
+      }),
+    },
+  ),
 }));
 vi.mock("@/modules/settings/preferences", () => ({
-  usePreferencesStore: () => undefined,
+  usePreferencesStore: Object.assign(() => undefined, { getState: () => ({}) }),
 }));
+vi.mock("./pty-bridge", () => ({ openPty: vi.fn() }));
 vi.mock("./agentActivity", () => ({
   ensureAgentActivityListener: vi.fn(),
   isAgentActivePty: () => false,
@@ -23,6 +45,8 @@ vi.mock("./agentActivity", () => ({
 vi.mock("./rendererPool");
 
 import { buildTerminalTools } from "@/modules/ai/tools/terminal";
+import i18n from "@/i18n";
+import { openPty } from "./pty-bridge";
 import {
   configureRendererPool,
   getLiveSlotForTerminal,
@@ -36,6 +60,63 @@ beforeAll(() => {
     configurable: true,
     value: { ready: Promise.resolve() },
   });
+});
+
+it("SSH 结果提示附带本机时间，重连过程不加时间且不重复刷屏", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 9, 16, 4, 5, 6));
+  remote.enabled = true;
+  remote.phase = "disconnected";
+  const output: string[] = [];
+  vi.mocked(getLiveSlotForTerminal).mockReturnValue({
+    term: {
+      buffer: { active: { type: "normal" } },
+      options: {},
+      write: (bytes: string | Uint8Array) =>
+        output.push(
+          typeof bytes === "string" ? bytes : new TextDecoder().decode(bytes),
+        ),
+    },
+  } as unknown as Slot);
+  vi.mocked(openPty).mockResolvedValue({ close: vi.fn() } as never);
+  function Harness() {
+    useTerminalSession({
+      terminalId: 2,
+      container: { current: null },
+      visible: false,
+    });
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(<Harness />));
+    expect(output.join("")).toContain(
+      `${i18n.t("common:remoteWorkspace.connectionClosed")} 04:05:06`,
+    );
+    remote.phase = "reconnecting";
+    await act(async () => root.render(<Harness />));
+    expect(output[output.length - 1]).toBe(
+      `\x1b[2m${i18n.t("common:remoteWorkspace.reconnecting")}\x1b[0m\r\n`,
+    );
+    const count = output.length;
+    await act(async () => root.render(<Harness />));
+    expect(output).toHaveLength(count);
+    vi.setSystemTime(new Date(2026, 9, 16, 4, 5, 9));
+    remote.phase = "connected";
+    await act(async () => root.render(<Harness />));
+    expect(output[output.length - 1]).toContain(
+      `${i18n.t("common:remoteWorkspace.connected")} 04:05:09`,
+    );
+    const connectedCount = output.length;
+    await act(async () => root.render(<Harness />));
+    expect(output).toHaveLength(connectedCount);
+  } finally {
+    await act(async () => root.unmount());
+    disposeSession(2);
+    remote.enabled = false;
+    vi.mocked(getLiveSlotForTerminal).mockReset();
+    vi.useRealTimers();
+  }
 });
 
 describe("终端输出分页", () => {

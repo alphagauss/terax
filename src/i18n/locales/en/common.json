@@ -41,6 +41,7 @@
     "startingWsl": "Starting WSL…",
     "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready.",
     "connectionClosed": "SSH connection closed",
+    "connected": "SSH connected",
     "reconnecting": "Reconnecting automatically…",
     "manualReconnect": "You can reconnect manually.",
     "reconnectAction": "Reconnect current SSH",

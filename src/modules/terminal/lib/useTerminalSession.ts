@@ -679,6 +679,13 @@ function surfaceSpawnFailure(terminalId: number, s: Session, e: unknown): void {
   );
 }
 
+function remoteNoticeTime(): string {
+  const now = new Date();
+  return [now.getHours(), now.getMinutes(), now.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+}
+
 /** 在终端中追加 SSH Runtime 状态，重复状态不反复刷屏。 */
 function showRemoteNotice(
   terminalId: number,
@@ -708,7 +715,7 @@ function showRemoteNotice(
           notice === "connecting"
             ? "common:remoteWorkspace.connecting"
             : "common:remoteWorkspace.connectionClosed",
-        )}\x1b[0m`
+        )}${notice === "connecting" ? "" : ` ${remoteNoticeTime()}`}\x1b[0m`
       : "";
   const detail =
     notice === "closed" || notice === "connecting"
@@ -1038,6 +1045,16 @@ export async function respawnSession(
     } else {
       discardRetainedSlot(terminalId);
     }
+  }
+
+  // Runtime 已确认连接成功，提示先于新 Shell 输出，避免插入命令提示符。
+  if (preserveHistory && s.remoteEpoch !== null) {
+    deliverPtyBytes(
+      terminalId,
+      new TextEncoder().encode(
+        `\r\n\x1b[32m[terax] ${i18n.t("common:remoteWorkspace.connected")} ${remoteNoticeTime()}\x1b[0m\r\n`,
+      ),
+    );
   }
 
   s.ptyOpening = true;

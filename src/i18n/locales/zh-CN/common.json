@@ -41,6 +41,7 @@
     "startingWsl": "正在启动 WSL…",
     "restoreAfterConnection": "连接就绪后将恢复已保存的文件和终端。",
     "connectionClosed": "SSH 连接已断开",
+    "connected": "SSH 已连接",
     "reconnecting": "正在自动重新连接…",
     "manualReconnect": "可手动重新连接。",
     "reconnectAction": "重新连接当前 SSH",
