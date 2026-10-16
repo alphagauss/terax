@@ -2,6 +2,7 @@
 //!
 //! 每个命令都进入同一个有界生命周期模型。Local 与 WSL 使用受管子进程，SSH
 //! 使用长生命周期 exec channel；三者共享 stdin、输出 offset、超时和终止语义。
+//! 普通 Shell 正常退出后释放 POSIX 后代；显式后台化并重定向标准流的服务由用户管理。
 //! SSH Profile 目录只决定默认位置，不限制用户明确选择的 Agent 工作目录。
 
 use std::collections::HashMap;
@@ -477,8 +478,9 @@ impl AgentProcess {
         let shells = agent_shells(&workspace)?;
         let selected = select_shell(&shells, shell)?;
         let marker = format!("__TERAX_AGENT_CWD_{id}__");
-        let (mut native, wsl_termination) =
-            build_local_command(&id, &workspace, &command, &cwd, selected, login, &marker)?;
+        let (mut native, wsl_termination) = build_local_command(
+            &id, &workspace, &command, &cwd, selected, login, &marker, purpose,
+        )?;
         native
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -549,10 +551,19 @@ impl AgentProcess {
         let waited_control = control;
         thread::spawn(move || {
             let code = waited_child.wait().ok().and_then(|status| status.code());
-            stop_descendants_after_exit(&waited_control);
+            let release_posix_children = purpose == ProcessPurpose::Shell && code.is_some();
+            stop_descendants_after_exit(&waited_control, release_posix_children);
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
             if let Some(waiter) = waiter.upgrade() {
+                // 必须在输出收口后加锁，否则继承管道的后代会阻塞取消。
+                // 与显式终止串行，避免正常收尾抢先删除清理失败后仍需重试的进程组登记。
+                let _guard = waiter.termination_lock.blocking_lock();
+                if release_posix_children && waiter.shared.is_running() {
+                    if let Some(wsl) = &waited_control.wsl_termination {
+                        let _ = terminate_wsl_group(wsl, true);
+                    }
+                }
                 waiter.capture_cwd();
                 waiter.shared.finish(ProcessStatus::Exited, code);
                 // terminate/drop 可能先锁定终态；reader 收口后再压缩一次才是最终上限。
@@ -585,7 +596,7 @@ impl AgentProcess {
         let shells = super::shell_environment(Some(workspace_env.clone())).await?;
         let selected = select_shell(&shells, shell)?;
         let remote_command =
-            build_remote_command(&command, &cwd, selected, login, &marker, &pid_file)?;
+            build_remote_command(&command, &cwd, selected, login, &marker, &pid_file, purpose)?;
         let channel = workspace.open_exec_channel().await?;
         channel
             .exec(true, remote_command.into_bytes())
@@ -662,7 +673,7 @@ impl AgentProcess {
                             let _ = reply.send(result);
                         }
                         Some(RemoteAction::Terminate(status, reply)) => {
-                            let kill = remote_group_kill(&workspace, &pid_file).await;
+                            let kill = remote_group_kill(&workspace, &pid_file, false).await;
                             if kill.is_ok() { cleanup_pending.store(false, Ordering::Release); }
                             let _ = write.signal(Sig::TERM).await;
                             let _ = write.signal(Sig::KILL).await;
@@ -683,7 +694,11 @@ impl AgentProcess {
                     }
                 }
             }
-            if remote_group_kill(&workspace, &pid_file).await.is_ok() {
+            // 连接丢失不等于命令正常完成；只有收到退出状态才允许释放后台后代。
+            if remote_group_kill(&workspace, &pid_file, exit_code.is_some())
+                .await
+                .is_ok()
+            {
                 cleanup_pending.store(false, Ordering::Release);
             }
             if let Some(worker) = worker.upgrade() {
@@ -763,6 +778,7 @@ impl AgentProcess {
         // 并发停止必须等待同一次进程树清理结束，不能仅凭提前写入的终态返回。
         let _guard = self.termination_lock.lock().await;
         if !self.shared.is_running() {
+            let release_exited = self.shared.state.lock().unwrap().status == ProcessStatus::Exited;
             match &self.control {
                 ProcessControl::Local(control) => {
                     if let Some(wsl) = control
@@ -770,15 +786,18 @@ impl AgentProcess {
                         .clone()
                         .filter(|wsl| wsl.cleanup_pending.load(Ordering::Acquire))
                     {
-                        tokio::task::spawn_blocking(move || terminate_wsl_group(&wsl))
-                            .await
-                            .map_err(|error| error.to_string())??;
+                        tokio::task::spawn_blocking(move || {
+                            terminate_wsl_group(&wsl, release_exited)
+                        })
+                        .await
+                        .map_err(|error| error.to_string())??;
                     }
                 }
                 #[cfg(feature = "desktop")]
                 ProcessControl::Remote(control) => {
                     if control.cleanup_pending.load(Ordering::Acquire) {
-                        remote_group_kill(&control.workspace, &control.pid_file).await?;
+                        remote_group_kill(&control.workspace, &control.pid_file, release_exited)
+                            .await?;
                         control.cleanup_pending.store(false, Ordering::Release);
                     }
                 }
@@ -811,7 +830,7 @@ impl AgentProcess {
                     }
                 }
                 // Channel 关闭后仍可能有远端子孙，保留连接与 pid 文件以便重试。
-                remote_group_kill(&control.workspace, &control.pid_file).await?;
+                remote_group_kill(&control.workspace, &control.pid_file, false).await?;
                 control.cleanup_pending.store(false, Ordering::Release);
                 self.shared.finish_stream(OutputStream::Stdout);
                 self.shared.finish_stream(OutputStream::Stderr);
@@ -1025,7 +1044,7 @@ fn terminate_local(control: &LocalControl) -> Result<(), String> {
     let cleanup = control
         .wsl_termination
         .as_ref()
-        .map(terminate_wsl_group)
+        .map(|wsl| terminate_wsl_group(wsl, false))
         .transpose();
     #[cfg(unix)]
     unsafe {
@@ -1052,7 +1071,7 @@ fn stop_local_now(control: &LocalControl) {
     control.stdin.lock().unwrap().take();
     if let Some(wsl) = &control.wsl_termination {
         let wsl = wsl.clone();
-        thread::spawn(move || terminate_wsl_group(&wsl));
+        thread::spawn(move || terminate_wsl_group(&wsl, false));
     }
     #[cfg(unix)]
     unsafe {
@@ -1065,14 +1084,18 @@ fn stop_local_now(control: &LocalControl) {
     let _ = control.child.kill();
 }
 
-fn stop_descendants_after_exit(control: &LocalControl) {
+fn stop_descendants_after_exit(control: &LocalControl, release_posix_children: bool) {
     control.stdin.lock().unwrap().take();
-    if let Some(wsl) = &control.wsl_termination {
-        let _ = terminate_wsl_group(wsl);
+    if !release_posix_children {
+        if let Some(wsl) = &control.wsl_termination {
+            let _ = terminate_wsl_group(wsl, false);
+        }
     }
     #[cfg(unix)]
-    unsafe {
-        libc::kill(-(control.child.id() as libc::pid_t), libc::SIGKILL);
+    if !release_posix_children {
+        unsafe {
+            libc::kill(-(control.child.id() as libc::pid_t), libc::SIGKILL);
+        }
     }
     #[cfg(windows)]
     {
@@ -1080,8 +1103,8 @@ fn stop_descendants_after_exit(control: &LocalControl) {
     }
 }
 
-fn terminate_wsl_group(termination: &WslTermination) -> Result<(), String> {
-    let command = posix_group_kill_command(&termination.pid_file);
+fn terminate_wsl_group(termination: &WslTermination, release_exited: bool) -> Result<(), String> {
+    let command = posix_group_kill_command(&termination.pid_file, release_exited);
     let mut process = Command::new("wsl.exe");
     process
         .args([
@@ -1110,10 +1133,11 @@ fn terminate_wsl_group(termination: &WslTermination) -> Result<(), String> {
 async fn remote_group_kill(
     workspace: &Arc<remote::session::RemoteWorkspace>,
     pid_file: &str,
+    release_exited: bool,
 ) -> Result<(), String> {
     let output = workspace
         .exec(
-            &posix_group_kill_command(pid_file),
+            &posix_group_kill_command(pid_file, release_exited),
             None,
             Duration::from_secs(5),
         )
@@ -1125,16 +1149,23 @@ async fn remote_group_kill(
     }
 }
 
-fn posix_group_kill_command(pid_file: &str) -> String {
+fn posix_group_kill_command(pid_file: &str, release_exited: bool) -> String {
     let file = crate::modules::shell::quote::shell_quote(pid_file);
+    // 只有正常收完输出时释放后代；管道仍被后代持有时，显式取消仍必须终止进程组。
+    let release = if release_exited {
+        format!("if [ \"$state\" = exited ]; then rm -f -- {file}; exit 0; fi")
+    } else {
+        String::new()
+    };
     // 只将明确的 ESRCH 当作幂等成功；其他失败保留 pid 文件供后续重试。
     format!(
         r#"i=0; while [ ! -s {file} ] && [ $i -lt 20 ]; do sleep 0.05; i=$((i+1)); done
 [ -e {file} ] || exit 0
-read -r pid < {file} || exit 1
+{{ read -r pid || exit 1; read -r state || state=; }} < {file} || exit 1
+{release}
 case "$pid" in ''|0|*[!0-9]*) printf '%s\n' 'invalid Agent process group id' >&2; exit 1;; esac
 for signal in TERM KILL; do
-    if error=$(LC_ALL=C kill -"$signal" -- -"$pid" 2>&1); then
+    if error=$(LC_ALL=C kill -"$signal" -"$pid" 2>&1); then
         [ "$signal" = KILL ] || sleep 1
     else
         case "$error" in
@@ -1148,6 +1179,7 @@ rm -f -- {file}"#
 }
 
 /// 构造本地或 WSL 命令，进程身份仅用于 WSL 进程组控制文件。
+#[allow(clippy::too_many_arguments)]
 fn build_local_command(
     _id: &str,
     workspace: &WorkspaceEnv,
@@ -1156,6 +1188,7 @@ fn build_local_command(
     identity: &ShellIdentity,
     login: bool,
     marker: &str,
+    _purpose: ProcessPurpose,
 ) -> Result<(Command, Option<WslTermination>), String> {
     #[cfg(windows)]
     if let WorkspaceEnv::Wsl { distro } = workspace {
@@ -1164,7 +1197,7 @@ fn build_local_command(
         let shell_program = identity.executable.as_str();
         let payload = posix_payload(command, marker);
         let pid_file = format!("/tmp/terax-agent-{_id}.pid");
-        let wrapper = posix_group_wrapper(&payload, &pid_file, shell_program, login);
+        let wrapper = posix_group_wrapper(&payload, &pid_file, shell_program, login, _purpose);
         let mut native = Command::new("wsl.exe");
         native.args(["-d", distro]);
         if !cwd.trim().is_empty() {
@@ -1251,6 +1284,7 @@ fn build_remote_command(
     login: bool,
     marker: &str,
     pid_file: &str,
+    purpose: ProcessPurpose,
 ) -> Result<String, String> {
     posix_shell(identity.kind)?;
     let shell_program = identity.executable.as_str();
@@ -1259,9 +1293,9 @@ fn build_remote_command(
         "cd -- {} && {payload}",
         crate::modules::shell::quote::shell_quote(cwd),
     );
-    let wrapper = posix_group_wrapper(&command, pid_file, shell_program, login);
+    let wrapper = posix_group_wrapper(&command, pid_file, shell_program, login, purpose);
     let trap = format!(
-        "if read -r pid < {}; then kill -TERM -- -\"$pid\" 2>/dev/null || true; fi",
+        "if read -r pid < {}; then kill -TERM -\"$pid\" 2>/dev/null || true; fi",
         crate::modules::shell::quote::shell_quote(pid_file)
     );
     Ok(format!(
@@ -1272,11 +1306,25 @@ fn build_remote_command(
 }
 
 #[cfg(any(feature = "desktop", windows, test))]
-fn posix_group_wrapper(payload: &str, pid_file: &str, shell: &str, login: bool) -> String {
+fn posix_group_wrapper(
+    payload: &str,
+    pid_file: &str,
+    shell: &str,
+    login: bool,
+    purpose: ProcessPurpose,
+) -> String {
     let login_flag = if login { " -l" } else { "" };
     let pid_file = crate::modules::shell::quote::shell_quote(pid_file);
+    // 追加完成标记而不覆盖 PID，避免并发取消读到截断的登记。
+    // 收完输出后只删除登记，显式取消仍可读取原进程组。
+    // 取消或断线触发的信号会终止包装器，不会写入该标记。
+    let release = if purpose == ProcessPurpose::Shell {
+        format!("printf 'exited\\n' >> {pid_file}; ")
+    } else {
+        String::new()
+    };
     format!(
-        "printf '%s\\n' \"$$\" > {pid_file}; trap 'trap - TERM INT HUP; kill -TERM -- -$$ 2>/dev/null || true' TERM INT HUP; {shell}{login_flag} -c {}; exit $?",
+        "printf '%s\\n' \"$$\" > {pid_file}; trap 'trap - TERM INT HUP; kill -TERM -$$ 2>/dev/null || true' TERM INT HUP; {shell}{login_flag} -c {}; rc=$?; {release}exit $rc",
         crate::modules::shell::quote::shell_quote(payload)
     )
 }
@@ -1403,7 +1451,7 @@ mod tests {
         } else {
             pid_file.to_string_lossy().into_owned()
         };
-        let script = posix_group_kill_command(&script_path);
+        let script = posix_group_kill_command(&script_path, false);
         for (kill, success) in [
             ("", true),
             ("kill() { printf '%s\n' 'kill: Operation not permitted' >&2; return 1; };", false),
@@ -1459,6 +1507,7 @@ mod tests {
             false,
             "marker",
             "/tmp/pid",
+            ProcessPurpose::Shell,
         )
         .unwrap();
         assert!(command.contains("setsid"));
@@ -1479,6 +1528,7 @@ mod tests {
             false,
             "marker",
             "/tmp/pid",
+            ProcessPurpose::Shell,
         );
         assert!(result.is_err());
     }
@@ -1596,6 +1646,7 @@ mod tests {
                 identity,
                 false,
                 "__CWD__",
+                ProcessPurpose::Shell,
             )
             .unwrap();
             assert_eq!(
@@ -1624,6 +1675,7 @@ mod tests {
                 identity,
                 false,
                 "__CWD__",
+                ProcessPurpose::Shell,
             )
         });
         if let Some(first) = shells.first() {
@@ -1744,6 +1796,7 @@ mod tests {
                 select_shell(&shells, shell).unwrap(),
                 false,
                 "__CWD__",
+                ProcessPurpose::Shell,
             )
             .unwrap();
             assert_eq!(
@@ -1781,6 +1834,7 @@ mod tests {
                 identity,
                 false,
                 "__CWD__",
+                ProcessPurpose::Shell,
             )
             .unwrap();
             assert_eq!(
@@ -1939,6 +1993,7 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
                     identity,
                     false,
                     marker,
+                    ProcessPurpose::Shell,
                 )
                 .unwrap();
                 native
@@ -2042,6 +2097,7 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
             },
             false,
             "marker",
+            ProcessPurpose::Shell,
         )
         .unwrap();
         let args: Vec<_> = command
@@ -2124,6 +2180,39 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
     }
 
     #[tokio::test]
+    async fn normal_exit_cannot_publish_completion_during_termination() {
+        let directory = tempfile::tempdir().unwrap();
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            WorkspaceEnv::Local,
+            interactive_command().into(),
+            directory.path().to_string_lossy().into_owned(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::Shell,
+        )
+        .unwrap();
+        // 模拟终止正在等待原生清理；命令先行退出不能抢占取消的终态。
+        let guard = process.termination_lock.lock().await;
+        process.write("finish\n".into()).await.unwrap();
+        let child = match &process.control {
+            ProcessControl::Local(control) => control.child.clone(),
+            #[cfg(feature = "desktop")]
+            ProcessControl::Remote(_) => unreachable!(),
+        };
+        tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(process.response(0, 8192).status, ProcessStatus::Running);
+        process.shared.finish(ProcessStatus::Terminated, None);
+        drop(guard);
+        assert_eq!(process.response(0, 8192).status, ProcessStatus::Terminated);
+    }
+
+    #[tokio::test]
     async fn terminal_elapsed_time_stops_advancing() {
         let directory = tempfile::tempdir().unwrap();
         #[cfg(windows)]
@@ -2196,7 +2285,7 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
     }
 
     #[tokio::test]
-    async fn normal_root_exit_also_reaps_descendants() {
+    async fn external_agent_root_exit_reaps_descendants() {
         let directory = tempfile::tempdir().unwrap();
         let marker = directory.path().join("normal-exit-descendant.txt");
         #[cfg(windows)]
@@ -2234,7 +2323,7 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
             directory.path().to_string_lossy().into_owned(),
             shell,
             false,
-            ProcessPurpose::Shell,
+            ProcessPurpose::ExternalAgent,
         )
         .unwrap();
 
@@ -2245,5 +2334,197 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
             !marker.exists(),
             "descendant survived after the root shell exited"
         );
+    }
+
+    fn posix_test_workspace(directory: &std::path::Path) -> (WorkspaceEnv, String) {
+        #[cfg(windows)]
+        {
+            let distro = std::env::var("TERAX_TEST_WSL_DISTRO").unwrap();
+            let output = Command::new("wsl.exe")
+                .args(["-d", &distro, "--exec", "wslpath", "-u"])
+                .arg(directory)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            (
+                WorkspaceEnv::Wsl { distro },
+                String::from_utf8(output.stdout).unwrap().trim().into(),
+            )
+        }
+        #[cfg(unix)]
+        {
+            (
+                WorkspaceEnv::Local,
+                directory.to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    #[test]
+    #[cfg_attr(windows, ignore = "requires TERAX_TEST_WSL_DISTRO")]
+    fn posix_nohup_survives_launcher_exit_and_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let (workspace, cwd) = posix_test_workspace(directory.path());
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            workspace,
+            "nohup sh -c 'touch ready; i=0; while [ ! -e release ] && [ $i -lt 500 ]; do sleep 0.02; i=$((i+1)); done; [ ! -e release ] || echo survived > survived' </dev/null >service.log 2>&1 &".into(),
+            cwd,
+            ShellKind::Sh,
+            false,
+            ProcessPurpose::Shell,
+        )
+        .unwrap();
+        let response = process.wait_snapshot(0, Duration::from_secs(10), None, 8192);
+        assert_eq!(
+            response.status,
+            ProcessStatus::Exited,
+            "{}",
+            response.stderr
+        );
+        assert_eq!(response.exit_code, Some(0));
+        assert!(
+            !process.holds_resources(),
+            "launcher retained cleanup ownership"
+        );
+        drop(process);
+        std::fs::write(directory.path().join("release"), "continue").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !directory.path().join("survived").exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(directory.path().join("survived").exists());
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore = "requires TERAX_TEST_WSL_DISTRO")]
+    async fn posix_cancel_still_terminates_nohup_children_of_active_launcher() {
+        // 既覆盖启动 Shell 仍在等待，也覆盖 Shell 已退出但后代仍持有输出管道的情况。
+        for tail in ["</dev/null >service.log 2>&1 & wait", "</dev/null &"] {
+            let directory = tempfile::tempdir().unwrap();
+            let (workspace, cwd) = posix_test_workspace(directory.path());
+            let process = AgentProcess::spawn_local(
+                uuid::Uuid::new_v4().to_string(),
+                uuid::Uuid::new_v4().to_string(),
+                workspace,
+                format!("nohup sh -c 'touch ready; i=0; while [ ! -e release ] && [ $i -lt 500 ]; do sleep 0.02; i=$((i+1)); done; [ ! -e release ] || echo survived > survived' {tail}"),
+                cwd,
+                ShellKind::Sh,
+                false,
+                ProcessPurpose::Shell,
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !directory.path().join("ready").exists() && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert!(directory.path().join("ready").exists());
+            assert!(process.is_running());
+            let stopped = process.terminate_as(ProcessStatus::Terminated).await;
+            std::fs::write(directory.path().join("release"), "continue").unwrap();
+            stopped.unwrap();
+            assert!(!process.holds_resources());
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            assert!(!directory.path().join("survived").exists());
+        }
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg_attr(windows, ignore = "requires TERAX_TEST_WSL_DISTRO")]
+    fn remote_wrapper_releases_normal_launch_but_cleans_interrupted_launch() {
+        let directory = tempfile::Builder::new()
+            .prefix("terax ' service ")
+            .tempdir()
+            .unwrap();
+        let (workspace, cwd) = posix_test_workspace(directory.path());
+        let execute = |script: &str| {
+            #[cfg(windows)]
+            let mut command = {
+                let WorkspaceEnv::Wsl { distro } = &workspace else {
+                    unreachable!()
+                };
+                let mut command = Command::new("wsl.exe");
+                command.args(["-d", distro, "--exec", "/bin/sh"]);
+                command
+            };
+            #[cfg(unix)]
+            let mut command = {
+                let _ = &workspace;
+                Command::new("/bin/sh")
+            };
+            command.args(["-c", script]);
+            command
+        };
+        for (interrupted, release_exited) in [(false, true), (false, false), (true, false)] {
+            let suffix = if interrupted {
+                "cancel"
+            } else if release_exited {
+                "normal"
+            } else {
+                "unconfirmed"
+            };
+            let pid_file = format!("/tmp/terax-agent-test-{}.pid", uuid::Uuid::new_v4());
+            let payload = format!(
+                "nohup sh -c 'touch ready-{suffix}; i=0; while [ ! -e release-{suffix} ] && [ $i -lt 500 ]; do sleep 0.02; i=$((i+1)); done; [ ! -e release-{suffix} ] || echo survived > survived-{suffix}' </dev/null >service-{suffix}.log 2>&1 & {}",
+                if interrupted { "wait" } else { "" },
+            );
+            let script = build_remote_command(
+                &payload,
+                &cwd,
+                &ShellIdentity {
+                    kind: ShellKind::Bash,
+                    executable: "/bin/bash".into(),
+                    version: None,
+                },
+                false,
+                "marker",
+                &pid_file,
+                ProcessPurpose::Shell,
+            )
+            .unwrap();
+            let mut launcher = execute(&script)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !directory.path().join(format!("ready-{suffix}")).exists()
+                && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert!(directory.path().join(format!("ready-{suffix}")).exists());
+            if !interrupted {
+                assert!(launcher.wait().unwrap().success());
+            }
+            let cleanup = execute(&posix_group_kill_command(&pid_file, release_exited))
+                .output()
+                .unwrap();
+            std::fs::write(
+                directory.path().join(format!("release-{suffix}")),
+                "continue",
+            )
+            .unwrap();
+            assert!(
+                cleanup.status.success(),
+                "{}",
+                String::from_utf8_lossy(&cleanup.stderr)
+            );
+            assert_eq!(launcher.wait().unwrap().success(), !interrupted);
+            if !release_exited {
+                thread::sleep(Duration::from_millis(500));
+                assert!(!directory.path().join(format!("survived-{suffix}")).exists());
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !directory.path().join(format!("survived-{suffix}")).exists()
+                    && Instant::now() < deadline
+                {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                assert!(directory.path().join(format!("survived-{suffix}")).exists());
+            }
+        }
     }
 }

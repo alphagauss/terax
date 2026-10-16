@@ -135,10 +135,15 @@ function options(): RunAgentOptions {
     keys: EMPTY_PROVIDER_KEYS,
     model: modelRefForProvider("lmstudio", "model"),
     systemPrompt: "stable system",
-    allowedTools: ["get_terminal_output"],
+    allowedTools: ["get_terminal_output", "shell_exec"],
     maxConcurrentSubagents: 1,
     turnCoordinator: new AgentTurnCoordinator(),
     toolContext: {
+      environment: {
+        backend: "local",
+        platform: "Linux",
+        shells: [{ kind: "bash", executable: "/bin/bash", version: "5.2" }],
+      },
       getSessionId: () => sessionId,
       getCwd: () => "/workspace",
       getTerminalContext: () => "new terminal output",
@@ -275,6 +280,10 @@ describe("Agent compaction", () => {
     expect(activeModel.doStreamCalls).toHaveLength(0);
     const prefix = await convertToAgentModelMessages(opts.uiMessages);
     const request = activeModel.doGenerateCalls[0];
+    expect(JSON.stringify(request.tools)).toContain("local Linux");
+    expect(JSON.stringify(request.tools)).not.toMatch(
+      /Windows|macOS|WSL|SSH|WMI/,
+    );
     expect(request.prompt.slice(1, -1)).toEqual(prefix);
     expect(JSON.stringify(request.prompt)).toContain("old terminal output");
     expect(JSON.stringify(request.prompt)).toContain("/workspace/old.txt");
@@ -295,6 +304,7 @@ describe("Agent compaction", () => {
       vi.mocked(opts.onCheckpoint).mock.calls.map((call) => call[1].event),
     ).toEqual(["compaction", "user_steering"]);
     const next = JSON.stringify(activeModel.doStreamCalls[0].prompt);
+    expect(activeModel.doStreamCalls[0].tools).toEqual(request.tools);
     expect(next).toContain("handoff");
     expect(next).toContain("old final answer");
     expect(next).not.toContain("old terminal output");

@@ -10,6 +10,7 @@ pub mod quote;
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -94,6 +95,7 @@ pub async fn shell_run_command(
 
 /// 当前应用进程内的 Agent 进程注册表与聊天 cwd。
 pub struct ShellState {
+    shutting_down: AtomicBool,
     processes: RwLock<HashMap<String, Arc<AgentProcess>>>,
     owner_cwds: RwLock<HashMap<String, String>>,
     owner_exec_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -129,6 +131,9 @@ pub fn shell_open_execution(
         return Err("invalid Agent task id".into());
     }
     let mut scopes = state.executions.lock().unwrap();
+    if state.shutting_down.load(Ordering::Acquire) {
+        return Err("Agent process manager is shutting down".into());
+    }
     let key = (owner_session_id, execution_id);
     if scopes.contains_key(&key) {
         return Err("Agent execution already exists".into());
@@ -282,6 +287,7 @@ async fn stop_scoped_processes(
 impl Default for ShellState {
     fn default() -> Self {
         Self {
+            shutting_down: AtomicBool::new(false),
             processes: RwLock::new(HashMap::new()),
             owner_cwds: RwLock::new(HashMap::new()),
             owner_exec_locks: Mutex::new(HashMap::new()),
@@ -374,6 +380,9 @@ pub async fn shell_exec(
     // 容量检查与登记必须覆盖同一个 spawn 临界区，否则并发调用可以穿透进程上限。
     // 锁在登记后立即释放，不占用后续首次等待时间。
     let spawn_guard = state.spawn_lock.lock().await;
+    if state.shutting_down.load(Ordering::Acquire) {
+        return Err("Agent process manager is shutting down".into());
+    }
     let task_id = if let Some(execution_id) = execution_id.as_ref() {
         let scopes = state.executions.lock().unwrap();
         let scope = scopes
@@ -620,6 +629,34 @@ pub async fn shell_clear_owner(state: &ShellState, owner_session_id: String) -> 
 }
 
 impl ShellState {
+    /// 退出时先撤销准入，再等待在途启动并清理本应用的受管进程；独立服务已不属于登记资源。
+    pub async fn shutdown(&self) -> Result<(), String> {
+        self.shutting_down.store(true, Ordering::Release);
+        self.executions.lock().unwrap().clear();
+        // 在途远端启动可能迟迟不返回，已有进程必须同时开始清理。
+        let drain = async {
+            let guard = self.spawn_lock.lock().await;
+            drop(guard);
+            self.terminate_registered().await
+        };
+        let (active, late) = tokio::join!(self.terminate_registered(), drain);
+        active.and(late)
+    }
+
+    async fn terminate_registered(&self) -> Result<(), String> {
+        let processes: Vec<_> = self.processes.read().unwrap().values().cloned().collect();
+        let results = futures_util::future::join_all(
+            processes
+                .iter()
+                .map(|process| process.terminate_as(ProcessStatus::Terminated)),
+        )
+        .await;
+        for result in results {
+            result?;
+        }
+        Ok(())
+    }
+
     /// 在当前 Workspace 中启动由封闭适配器构造的 External Agent 命令。
     #[cfg(feature = "desktop")]
     pub(crate) async fn spawn_external_agent(
@@ -642,6 +679,9 @@ impl ShellState {
         };
 
         let spawn_guard = self.spawn_lock.lock().await;
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err("Agent process manager is shutting down".into());
+        }
         self.cleanup();
         self.enforce_limits(&owner_session_id)?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -1560,6 +1600,66 @@ mod tests {
             .is_empty());
         assert!(state.processes.read().unwrap()[&sibling_process.process_id].is_running());
         shell_clear_owner(&state, other).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_closes_admission_and_only_stops_this_host() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().to_string_lossy().into_owned();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let state = ShellState::default();
+        let other = ShellState::default();
+        let owner = uuid::Uuid::new_v4().to_string();
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 30";
+        #[cfg(unix)]
+        let command = "sleep 30";
+        let run = |state| {
+            shell_exec(
+                state,
+                &registry,
+                owner.clone(),
+                None,
+                command.into(),
+                cwd.clone(),
+                Some(cwd.clone()),
+                AgentPermissionMode::FullAccess,
+                0,
+                0,
+                8192,
+                ShellKind::Default,
+                false,
+                Some(WorkspaceEnv::Local),
+            )
+        };
+        let first = run(&state).await.unwrap();
+        let sibling = run(&other).await.unwrap();
+        let guard = state.spawn_lock.lock().await;
+        let (stopped, late) = tokio::join!(state.shutdown(), async {
+            // 即使有启动卡在临界区，退出也必须先终止已登记的命令。
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while state.processes.read().unwrap()[&first.process_id].is_running() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            drop(guard);
+            run(&state).await
+        });
+        stopped.unwrap();
+        assert!(late.err().unwrap().contains("shutting down"));
+        assert!(shell_open_execution(
+            &state,
+            owner.clone(),
+            uuid::Uuid::new_v4().to_string(),
+            None
+        )
+        .is_err());
+        assert!(!state.processes.read().unwrap()[&first.process_id].is_running());
+        assert!(other.processes.read().unwrap()[&sibling.process_id].is_running());
+        other.shutdown().await.unwrap();
     }
 
     use super::*;

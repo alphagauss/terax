@@ -418,9 +418,18 @@ pub fn run() {
                     }
                 }
             }
-            // Servers exit on stdin EOF, but destructors are not guaranteed
-            // on process exit; kill explicitly.
+            // 进程退出不保证析构，先有界等待受管命令清理，尤其是 WSL 与 SSH 的异步终止。
             if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<shell::ShellState>() {
+                    match tauri::async_runtime::block_on(async {
+                        tokio::time::timeout(std::time::Duration::from_secs(5), state.shutdown())
+                            .await
+                    }) {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => log::warn!("cannot clean up Agent processes: {error}"),
+                        Err(_) => log::warn!("Agent process cleanup timed out during exit"),
+                    }
+                }
                 if let Some(state) = app.try_state::<workspace_process::WorkspaceProcessState>() {
                     if let Err(error) = workspace_runtime::unregister_window(&state) {
                         log::warn!("cannot unregister Workspace runtime window: {error}");

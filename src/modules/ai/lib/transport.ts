@@ -104,7 +104,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
   let runtimeTask: Promise<{
     systemPrompt: string;
     agent: AgentConfiguration;
-    shells: AgentExecutionEnvironment["shells"];
+    environment: AgentExecutionEnvironment;
   }> | null = null;
 
   let runtimeTurnId: string | null = null;
@@ -114,7 +114,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
         customInstructions: string;
         systemPrompt: string;
         agent: AgentConfiguration;
-        shells: AgentExecutionEnvironment["shells"];
+        environment: AgentExecutionEnvironment;
       }
     | undefined;
 
@@ -141,7 +141,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       prepared = {
         customInstructions,
         agent,
-        shells: environment.shells,
+        environment,
         systemPrompt: buildAgentSystemPrompt({
           cwd,
           environment,
@@ -193,7 +193,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       });
     }
     const frozenModel = modelSnapshot;
-    const { systemPrompt, agent, shells } = await getRuntime();
+    const { systemPrompt, agent, environment } = await getRuntime();
     const result = await runAgentStream({
       openSubagentSessions: () =>
         openSubagentSessions(deps.toolContext.getSessionId(), turnId),
@@ -218,7 +218,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,
       allowedTools: agent.tools,
-      toolContext: { ...deps.toolContext, shells },
+      toolContext: { ...deps.toolContext, environment },
       turnId,
       getCompactionConfiguration: deps.getCompactionConfiguration,
       onCompacting: deps.onCompacting,

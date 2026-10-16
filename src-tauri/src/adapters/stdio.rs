@@ -360,6 +360,11 @@ pub async fn run(cwd: String) -> Result<(), String> {
     host.http.cancel_owner(OWNER);
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
+    match tokio::time::timeout(std::time::Duration::from_secs(5), host.shell.shutdown()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => log::warn!("cannot clean up Agent processes: {error}"),
+        Err(_) => log::warn!("Agent process cleanup timed out during exit"),
+    }
     drop(host);
     Ok(())
 }

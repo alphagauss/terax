@@ -21,23 +21,46 @@ const history: ModelMessage[] = [
 
 describe("agent system prompt", () => {
   it.each([
-    [{ kind: "local" } as const, "windows" as const, "Windows"],
-    [{ kind: "local" } as const, "macos" as const, "macOS"],
-    [{ kind: "local" } as const, "linux" as const, "Linux"],
-    [{ kind: "wsl", distro: "Ubuntu" } as const, "windows" as const, "Linux"],
+    [{ kind: "local" } as const, "windows" as const, "Windows", "Windows"],
+    [{ kind: "local" } as const, "macos" as const, "macOS", "macOS"],
+    [{ kind: "local" } as const, "linux" as const, "Linux", "Linux"],
+    [
+      { kind: "wsl", distro: "Ubuntu" } as const,
+      "windows" as const,
+      "Linux",
+      "WSL",
+    ],
     [
       { kind: "ssh", profileId: "server" } as const,
       "windows" as const,
       "Linux",
+      "Linux SSH",
     ],
   ])(
     "maps %j on %s to its execution environment",
-    (workspace, host, platform) => {
+    (workspace, host, platform, executionEnvironment) => {
       const shells = [
         { kind: "bash" as const, executable: "/bin/bash", version: null },
       ];
-      expect(resolveAgentExecutionEnvironment(workspace, host, shells)).toEqual(
-        { platform, shells },
+      const environment = resolveAgentExecutionEnvironment(
+        workspace,
+        host,
+        shells,
+      );
+      expect(environment).toEqual({
+        backend: workspace.kind,
+        platform,
+        shells,
+      });
+      const prompt = buildAgentSystemPrompt({
+        cwd: "/workspace",
+        environment,
+        agent: { name: "Builder", instructions: "" },
+        customInstructions: "",
+        projectInstructions: [],
+      });
+      expect(prompt).toContain(
+        `Execution environment: ${executionEnvironment}\nOperating system: ${platform}`,
       );
     },
   );
@@ -104,6 +127,7 @@ describe("agent system prompt", () => {
       const prompt = buildAgentSystemPrompt({
         cwd: "/workspace",
         environment: {
+          backend: "local",
           platform,
           shells: [
             { kind: "sh", executable: "/bin/sh", version: null },
@@ -144,9 +168,11 @@ describe("agent system prompt", () => {
       expect(prompt).toContain('Shell tool default: "zsh"');
       expect(prompt).toContain('"executable":"/bin/zsh","version":"5.9"');
       expect(prompt).toContain("Operating system: Linux");
-      expect(prompt).not.toMatch(
-        /Local|WSL|SSH|remote|Windows|PowerShell|macOS/,
+      expect(prompt).toContain(
+        `Execution environment: ${workspace === "WSL" ? "WSL" : "Linux SSH"}`,
       );
+      expect(prompt).not.toMatch(/Local|remote|Windows|PowerShell|macOS/);
+      expect(prompt).not.toContain(workspace === "WSL" ? "SSH" : "WSL");
       expect(prompt).not.toContain("/bin/bash");
     },
   );
@@ -175,6 +201,7 @@ describe("agent system prompt", () => {
     const options = {
       cwd: "D:/workspace/project",
       environment: {
+        backend: "local",
         platform: "Windows",
         shells: [
           {

@@ -22,6 +22,7 @@ export type PromptSectionKind = (typeof PROMPT_SECTION_ORDER)[number];
 export type PromptSection = { kind: PromptSectionKind; content: string };
 
 export type AgentExecutionEnvironment = {
+  backend: WorkspaceEnv["kind"];
   platform: "Windows" | "macOS" | "Linux" | "Unknown";
   shells: readonly ShellIdentity[];
 };
@@ -49,7 +50,7 @@ export function resolveAgentExecutionEnvironment(
   shells: readonly ShellIdentity[],
 ): AgentExecutionEnvironment {
   if (workspace.kind !== "local") {
-    return { platform: "Linux", shells };
+    return { backend: workspace.kind, platform: "Linux", shells };
   }
   const platform =
     hostPlatform === "windows"
@@ -59,7 +60,7 @@ export function resolveAgentExecutionEnvironment(
         : hostPlatform === "linux"
           ? "Linux"
           : "Unknown";
-  return { platform, shells };
+  return { backend: workspace.kind, platform, shells };
 }
 
 /**
@@ -75,7 +76,14 @@ export function buildAgentPromptSections({
 }: BuildAgentSystemPromptOptions): PromptSection[] {
   const defaultShell = environment.shells[0]?.kind ?? null;
   const hasSh = environment.shells.some(({ kind }) => kind === "sh");
+  const executionEnvironment =
+    environment.backend === "wsl"
+      ? "WSL"
+      : environment.backend === "ssh"
+        ? "Linux SSH"
+        : environment.platform;
   const environmentBlock = `## SESSION ENVIRONMENT
+Execution environment: ${executionEnvironment}
 Operating system: ${environment.platform}
 Shell tool default: ${JSON.stringify(defaultShell)}
 Shell choices (selector, executable, version): ${JSON.stringify(

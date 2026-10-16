@@ -6,8 +6,8 @@
 export type ToolContext = {
   /** 当前执行拥有的 Shell 资源，取消时关闭启动准入并终止进程树。 */
   shellExecution?: import("@/modules/ai/lib/shellExecution").ShellExecution;
-  /** 与本轮系统提示共用的解释器快照，Subagent 原样继承。 */
-  shells?: readonly import("@/modules/ai/lib/native").ShellIdentity[];
+  /** 与本轮系统提示共用的执行环境快照，Subagent 原样继承。 */
+  environment?: import("@/modules/ai/lib/prompt").AgentExecutionEnvironment;
   /** 只由 Channel 主运行提供，不向 Subagent 传播发送能力。 */
   getMessageSender?: () =>
     | import("@/modules/channels/types").ChannelMessageSender

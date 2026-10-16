@@ -5,6 +5,7 @@
 
 import { asSchema, type FlexibleSchema } from "ai";
 import { describe, expect, it } from "vitest";
+import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
 import { buildTools } from "./tools";
@@ -32,6 +33,59 @@ function hasDeclaredJsonType(schema: unknown): boolean {
 }
 
 describe("AI tool provider schemas", () => {
+  it.each([
+    [
+      "Windows",
+      { kind: "local" } as const,
+      "windows" as const,
+      /Win32_Process\.Create/,
+      /Linux|macOS|WSL|SSH|nohup/,
+    ],
+    [
+      "Linux",
+      { kind: "local" } as const,
+      "linux" as const,
+      /local Linux/,
+      /Windows|macOS|WSL|SSH|WMI|Start-Process/,
+    ],
+    [
+      "macOS",
+      { kind: "local" } as const,
+      "macos" as const,
+      /local macOS/,
+      /Windows|Linux|WSL|SSH|WMI|Start-Process/,
+    ],
+    [
+      "WSL",
+      { kind: "wsl", distro: "Ubuntu" } as const,
+      "windows" as const,
+      /WSL distribution/,
+      /Windows|macOS|SSH|WMI|Start-Process/,
+    ],
+    [
+      "Linux SSH",
+      { kind: "ssh", profileId: "server" } as const,
+      "windows" as const,
+      /SSH connection loss/,
+      /Windows|macOS|WSL|WMI|Start-Process/,
+    ],
+  ])(
+    "only describes the actual %s execution environment",
+    (_name, workspace, host, expected, unrelated) => {
+      const environment = resolveAgentExecutionEnvironment(workspace, host, []);
+      const description =
+        buildShellTools({ ...context, environment }).shell_exec.description ??
+        "";
+      expect(description).toMatch(expected);
+      expect(description).not.toMatch(unrelated);
+      if (environment.platform !== "Windows") {
+        expect(description).toContain(
+          "nohup ./server </dev/null >server.log 2>&1 & echo $!",
+        );
+      }
+    },
+  );
+
   const tools = buildTools({
     ...context,
     getMessageSender: () => async () => ({ status: "accepted", parts: [] }),
@@ -100,7 +154,14 @@ describe("AI tool provider schemas", () => {
   ])(
     "exposes only detected shell selectors for %j",
     async (shell, selectors, powerShell) => {
-      const tools = buildShellTools({ ...context, shells: [shell] });
+      const tools = buildShellTools({
+        ...context,
+        environment: resolveAgentExecutionEnvironment(
+          { kind: "local" },
+          shell.kind === "bash" ? "linux" : "windows",
+          [shell],
+        ),
+      });
       const schema = await asSchema(
         tools.shell_exec.inputSchema as FlexibleSchema<unknown>,
       ).jsonSchema;

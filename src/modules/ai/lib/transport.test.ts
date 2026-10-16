@@ -33,6 +33,7 @@ import type { ParameterAssignment } from "./modelParameters";
 import { createSessionTransport } from "./transport";
 
 const environment = {
+  backend: "local",
   platform: "Windows",
   shells: [{ kind: "pwsh", executable: "C:/pwsh.exe", version: "7.1" }],
 } as const;
@@ -209,9 +210,9 @@ describe("session transport", () => {
     const secondPrompt = mocks.runAgentStream.mock.calls[1][0].systemPrompt;
     expect(secondPrompt).toBe(firstPrompt);
     expect(firstPrompt).toContain(JSON.stringify(environment.shells));
-    expect(firstRun.toolContext.shells).toEqual(environment.shells);
-    expect(mocks.runAgentStream.mock.calls[1][0].toolContext.shells).toBe(
-      firstRun.toolContext.shells,
+    expect(firstRun.toolContext.environment).toEqual(environment);
+    expect(mocks.runAgentStream.mock.calls[1][0].toolContext.environment).toBe(
+      firstRun.toolContext.environment,
     );
     expect(mocks.runAgentStream.mock.calls[0][0].modelParameters[0].value).toBe(
       "low",

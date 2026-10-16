@@ -139,3 +139,67 @@ fn pipe_eof_terminates_the_owned_shell() {
         }
     }
 }
+
+#[test]
+fn detached_service_is_not_listed_and_survives_host_exit() {
+    let root = tempfile::tempdir().unwrap();
+    let ready = root.path().join("ready");
+    let release = root.path().join("release");
+    let finished = root.path().join("finished");
+    #[cfg(unix)]
+    let (command, shell) = (
+        "nohup sh -c 'touch ready; i=0; while [ ! -e release ] && [ $i -lt 500 ]; do sleep 0.02; i=$((i+1)); done; [ ! -e release ] || echo done > finished' </dev/null >service.log 2>&1 &".to_string(),
+        "sh",
+    );
+    #[cfg(windows)]
+    let (command, shell) = {
+        let script = root.path().join("service.ps1");
+        std::fs::write(&script, format!(
+            "Set-Content -LiteralPath '{}' ready\n$deadline = [DateTime]::UtcNow.AddSeconds(15)\nwhile (!(Test-Path -LiteralPath '{}') -and [DateTime]::UtcNow -lt $deadline) {{ Start-Sleep -Milliseconds 20 }}\nif (Test-Path -LiteralPath '{}') {{ Set-Content -LiteralPath '{}' done }}",
+            ready.display(), release.display(), release.display(), finished.display(),
+        )).unwrap();
+        // WMI 由系统服务创建进程，不继承受管启动 Shell 的 Job Object。
+        (
+            format!(
+                "$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ ShowWindow = [uint16]0 }}; $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = 'cmd.exe /d /c powershell.exe -NoProfile -NonInteractive -File \"{}\" <NUL >\"{}\" 2>&1'; CurrentDirectory = '{}'; ProcessStartupInformation = $startup }}; if ($result.ReturnValue -ne 0) {{ throw \"Create failed: $($result.ReturnValue)\" }}; $result.ProcessId",
+                script.display(), root.path().join("service.log").display(), root.path().display(),
+            ),
+            "powershell",
+        )
+    };
+    let mut host = HostProcess::new(root.path());
+    let owner = "6b9145ce-933e-4c54-8a4b-90831a2e4d84";
+    let result = host.call("shell_exec", json!({
+        "ownerSessionId": owner, "command": command, "initialCwd": root.path(), "cwd": root.path(),
+        "permissionMode": "full-access", "timeoutSecs": 30, "yieldTimeMs": 10000, "maxOutputBytes": 4096, "shell": shell, "login": false
+    }));
+    assert_eq!(result["result"]["status"], "exited", "{result}");
+    assert_eq!(result["result"]["exit_code"], 0, "{result}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(ready.exists(), "service did not start: {result}");
+    assert_eq!(
+        host.call(
+            "shell_list",
+            json!({"ownerSessionId": owner, "includeExited": false})
+        )["result"],
+        json!([])
+    );
+    assert!(host
+        .call("shell_clear_owner", json!({"ownerSessionId": owner}))
+        .get("error")
+        .is_none());
+    host.disconnect();
+    // 宿主实际退出以后才让服务写入结果，避免仅验证启动命令已经返回。
+    std::fs::write(release, "continue").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !finished.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        finished.exists(),
+        "detached service did not survive host exit"
+    );
+}

@@ -18,6 +18,20 @@ const DEFAULT_TIMEOUT_SECS = 300;
 const DEFAULT_YIELD_MS = 10_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 
+const POSIX_INDEPENDENT_SERVICE =
+  "For an independent noninteractive service that must outlive Terax, use nohup with all three standard streams redirected, e.g. nohup ./server </dev/null >server.log 2>&1 & echo $!.";
+
+/** 仅选择实际执行环境的说明，避免把宿主平台或其他连接方式写入模型工具定义。 */
+const SHELL_ENVIRONMENT_DESCRIPTIONS = {
+  Windows:
+    "This tool runs on local Windows. Start-Process and Start-Job inside this tool do not escape its Job Object. For independent launch, use the system WMI/CIM Win32_Process.Create method with absolute executable paths, set CurrentDirectory and Win32_ProcessStartup.ShowWindow=0, redirect stdin and both outputs in the launched command, and check ReturnValue and ProcessId. The independent process does not inherit this tool's environment variables.",
+  Linux: `This tool runs on local Linux. ${POSIX_INDEPENDENT_SERVICE}`,
+  macOS: `This tool runs on local macOS. ${POSIX_INDEPENDENT_SERVICE}`,
+  wsl: `This tool runs inside the current WSL distribution. Service commands, paths, and logs belong to that distribution. ${POSIX_INDEPENDENT_SERVICE}`,
+  ssh: `This tool runs on the current Linux SSH host. Commands, paths, and logs are remote. SSH connection loss can interrupt managed processes; neither survival nor successful remote cleanup is guaranteed after a disconnect. ${POSIX_INDEPENDENT_SERVICE}`,
+  Unknown: "",
+};
+
 const outputOptions = {
   since_offset: z
     .number()
@@ -135,14 +149,24 @@ const processInputSchema = z
 
 /** 创建统一 Shell 工具，并在每次有副作用的调用前读取最新权限模式。 */
 export function buildShellTools(ctx: ToolContext) {
-  const shells = ctx.shells ?? [];
+  const environment = ctx.environment;
+  const shells = environment?.shells ?? [];
+  const environmentDescription = environment
+    ? SHELL_ENVIRONMENT_DESCRIPTIONS[
+        environment.backend === "local"
+          ? environment.platform
+          : environment.backend
+      ]
+    : "";
   const hasPowerShell = shells.some(
     ({ kind }) => kind === "pwsh" || kind === "powershell",
   );
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. A running response confirms launch, not success. If the task depends on the result, poll until exit and check the exit status before claiming completion. Normal agent or subagent completion does not stop background processes. Before finishing, terminate temporary processes you no longer need; report the process IDs, purpose, observed status, access details, and how to stop any intentionally retained services. Subagents must include this handoff in their result. Only stop processes you started or were explicitly asked to manage. Never start full-screen TTY programs such as vim, less, or top.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. A running response confirms launch, not success. If the task depends on the result, poll until exit and check the exit status before claiming completion. Normal agent or subagent completion does not stop managed background processes, but cancellation of their execution, explicit termination, timeout, chat deletion, and application exit can stop them. " +
+        environmentDescription +
+        " Wait for the launcher to exit and separately verify the service PID and readiness; launcher success is not service success. Independently launched services are not registered in shell_list, cannot be controlled by shell_process, and are not covered by this tool's timeout or cleanup after the launcher exits; inspect their log files and stop them explicitly by their verified OS identity. Before finishing, terminate temporary processes you no longer need; report the managed process_id or independent OS PID, purpose, observed status, access details, log locations, and how to stop any intentionally retained services. Subagents must include this handoff in their result. Only stop processes you started or were explicitly asked to manage. Never start full-screen TTY programs such as vim, less, or top.",
       inputSchema: z.object({
         command: z
           .string()

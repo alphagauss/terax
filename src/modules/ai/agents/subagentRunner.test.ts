@@ -136,8 +136,13 @@ it.each(["lmstudio", "anthropic"] as const)(
     });
     const options = {
       model: modelRefForProvider(provider, "model"),
-      allowedTools: ["get_terminal_output"] as const,
+      allowedTools: ["get_terminal_output", "shell_exec"] as const,
       toolContext: {
+        environment: {
+          backend: "ssh",
+          platform: "Linux",
+          shells: [{ kind: "bash", executable: "/bin/bash", version: "5.2" }],
+        },
         getCwd: () => "/workspace",
         supportsApprovals: false,
         getSessionId: () => "child-test",
@@ -146,7 +151,7 @@ it.each(["lmstudio", "anthropic"] as const)(
         isActiveTerminalPrivate: () => false,
       } as RunAgentOptions["toolContext"],
     };
-    await runner(store, undefined, options)(input("first"));
+    await runner(store, undefined, options, "full-access")(input("first"));
     const firstRun = required(store.tasks.get("child")).runId;
     const restored = new SubagentSessions();
     for (const [id, task] of restoreSubagentSessions(journal))
@@ -155,8 +160,14 @@ it.each(["lmstudio", "anthropic"] as const)(
       required(restored.tasks.get("child")),
     );
     expect(JSON.stringify(before)).not.toContain("cacheControl");
-    await runner(restored, undefined, options)(input("second"));
+    await runner(restored, undefined, options, "full-access")(input("second"));
     const requests = model.doStreamCalls;
+    expect(JSON.stringify(requests[0].tools)).toContain(
+      "current Linux SSH host",
+    );
+    expect(JSON.stringify(requests[0].tools)).not.toMatch(
+      /Windows|macOS|WSL|WMI/,
+    );
     for (let index = 0; index < requests.length; index++) {
       const request = requests[index];
       expect(request.tools).toEqual(requests[0].tools);
