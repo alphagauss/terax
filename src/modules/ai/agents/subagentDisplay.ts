@@ -22,6 +22,9 @@ export type SubagentDisplayStep = {
 
 /** 当前进程中的完整展示状态，结果只用于实时 UI，不重复持久化。 */
 export type SubagentDisplayState = {
+  runId?: string;
+  parentTurnId?: string;
+  instructions?: string[];
   taskId: string;
   toolCallId: string;
   label: string;
@@ -41,7 +44,7 @@ type SubagentDisplaySnapshotStep = Omit<SubagentDisplayStep, "status"> & {
 /** 从子会话事实派生、只服务历史展示的终态快照。 */
 export type SubagentDisplaySnapshot = Pick<
   SubagentDisplayState,
-  "taskId" | "toolCallId" | "label"
+  "taskId" | "toolCallId" | "label" | "runId" | "parentTurnId" | "instructions"
 > & {
   result?: string;
   error?: string;
@@ -52,6 +55,9 @@ export type SubagentDisplaySnapshot = Pick<
 };
 
 const SNAPSHOT_KEYS = new Set([
+  "runId",
+  "parentTurnId",
+  "instructions",
   "result",
   "error",
   "version",
@@ -84,6 +90,9 @@ export function toSubagentDisplaySnapshot(
       ? interruptedStatus
       : state.status;
   return {
+    ...(state.runId ? { runId: state.runId } : {}),
+    ...(state.parentTurnId ? { parentTurnId: state.parentTurnId } : {}),
+    ...(state.instructions ? { instructions: state.instructions } : {}),
     ...(state.result === undefined ? {} : { result: state.result }),
     ...(state.error === undefined ? {} : { error: state.error }),
     version: 2,
@@ -115,6 +124,11 @@ export function isSubagentDisplaySnapshot(
   if (
     Object.keys(snapshot).some((key) => !SNAPSHOT_KEYS.has(key)) ||
     snapshot.version !== 2 ||
+    (snapshot.runId !== undefined && !isBoundedText(snapshot.runId, 128)) ||
+    (snapshot.parentTurnId !== undefined && !isBoundedText(snapshot.parentTurnId, 128)) ||
+    (snapshot.instructions !== undefined &&
+      (!Array.isArray(snapshot.instructions) ||
+        !snapshot.instructions.every((item) => typeof item === "string"))) ||
     (snapshot.result !== undefined && typeof snapshot.result !== "string") ||
     (snapshot.error !== undefined && typeof snapshot.error !== "string") ||
     !isBoundedText(snapshot.taskId, 128) ||

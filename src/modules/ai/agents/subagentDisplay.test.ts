@@ -74,6 +74,24 @@ describe("Subagent display data", () => {
     ).toBe(false);
   });
 
+  it("keeps repeated tool IDs isolated by parent turn during restore and later commits", () => {
+    const messages: UIMessage[] = ["old", "new"].map((turnId) => ({
+      id: turnId, role: "assistant", metadata: { turnId },
+      parts: [{ type: "dynamic-tool", toolName: "run_subagent", toolCallId: "same",
+        state: "output-available", input: { task: turnId }, output: {} }],
+    }));
+    const snapshots = ["old", "new"].map((parentTurnId) => toSubagentDisplaySnapshot({
+      ...runningDisplay, toolCallId: "same", parentTurnId, runId: parentTurnId,
+      result: parentTurnId, status: "completed",
+    }, "cancelled"));
+    const restored = materializeSubagentDisplayParts(messages, snapshots);
+    const results = (items: UIMessage[]) => items.map((message) =>
+      (message.parts.find((part) => part.type === "data-subagent-display") as unknown as { data: { snapshot: { result: string } } }).data.snapshot.result);
+    expect(results(restored)).toEqual(["old", "new"]);
+    const withoutTurnMetadata = restored.map((message) => ({ ...message, metadata: {} }));
+    expect(results(materializeSubagentDisplayParts(withoutTurnMetadata, [snapshots[1]]))).toEqual(["old", "new"]);
+  });
+
   it("materializes a snapshot only beside its matching tool call", () => {
     const messages: UIMessage[] = [
       {

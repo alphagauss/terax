@@ -43,6 +43,8 @@ export type SubagentTaskRunner = (options: {
 }) => Promise<Omit<SubagentTaskResult, "taskId" | "label" | "durationMs">>;
 
 type SubagentProgressEvent =
+  | { type: "execution"; runId: string; parentTurnId: string; task: string }
+  | { type: "instructions"; messages: string[] }
   | { type: "thinking" }
   | {
       type: "tool-start";
@@ -453,6 +455,12 @@ function reduceDisplayProgress(
   state: SubagentDisplayState,
   event: SubagentProgressEvent,
 ): SubagentDisplayState {
+  if (event.type === "execution") {
+    return { ...state, runId: event.runId, parentTurnId: event.parentTurnId, instructions: [event.task] };
+  }
+  if (event.type === "instructions") {
+    return { ...state, instructions: [...(state.instructions ?? []), ...event.messages] };
+  }
   if (event.type === "thinking") {
     return { ...state, phase: "thinking" };
   }

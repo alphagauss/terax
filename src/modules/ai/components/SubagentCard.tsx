@@ -3,6 +3,8 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import type { SubagentExecution } from "@/modules/ai/components/SubagentCards";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/controls/select";
 import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
@@ -11,7 +13,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
-import { FileEditStats } from "@/modules/ai/components/FileEditStats";
+import { FileEditContext, FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
 import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import {
@@ -26,7 +28,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   SubagentDisplaySnapshot,
@@ -49,6 +51,7 @@ type Props = {
   part: AnyToolPart;
   display?: Display;
   backgroundResult?: SubagentResultView;
+  executions?: SubagentExecution[];
 };
 
 type RunningAction =
@@ -74,18 +77,30 @@ const TOOL_HEADLINE_MIN_MS = 1000;
  */
 export function SubagentCard({
   sessionId = "",
-  part,
-  display,
+  part: originalPart,
+  display: originalDisplay,
   backgroundResult,
+  executions,
 }: Props) {
   const { t } = useTranslation("ai");
+  const fileEdits = useContext(FileEditContext);
+  const [selectedId, setSelectedId] = useState<string>();
+  const latest = executions?.[executions.length - 1];
+  const selected = executions?.find((item) => (item.display.runId ?? item.part.toolCallId) === selectedId) ?? latest;
+  const part = selected?.part ?? originalPart;
+  const display = selected?.display ?? originalDisplay;
+  const latestDisplay = latest?.display ?? originalDisplay;
+  const selectedFileEdits = useMemo(() => selected
+    ? { sessionId, calls: selected.fileEditCalls }
+    : fileEdits, [sessionId, selected, fileEdits]);
+  const latestStatus = resolveStatus(latest?.part ?? originalPart, latestDisplay, backgroundResult);
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
   const task = stringValue(input?.task) ?? stringValue(input?.message) ?? "";
   const status = resolveStatus(part, display, backgroundResult);
   const actualHeadline = useMemo(
-    () => resolveHeadline(status, display),
-    [display, status],
+    () => resolveHeadline(latestStatus, latestDisplay),
+    [latestDisplay, latestStatus],
   );
   const headline = useStableHeadline(actualHeadline);
   const shownStatus =
@@ -94,37 +109,41 @@ export function SubagentCard({
   const result =
     liveResult(display) ??
     resultFromObject(output) ??
-    backgroundResult ??
+    (selected ? undefined : backgroundResult) ??
     resultFromToolError(part);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"process" | "result" | "usage">(() =>
-    status === "running" ? "process" : "result",
-  );
+  const [chosenTab, setTab] = useState<"process" | "result" | "usage">();
+  const tab = chosenTab ?? (status === "running" || status === "stopping" ? "process" : "result");
   const [taskOpen, setTaskOpen] = useState(false);
-  const label = display?.label ?? stringValue(input?.label) ?? t("chat.subagent.title");
-
-  useEffect(() => {
-    if (status !== "running" && status !== "stopping") setTab("result");
-  }, [status]);
+  const label = latestDisplay?.label ?? stringValue(input?.label) ?? t("chat.subagent.title");
+  const taskId = latestDisplay?.taskId ?? stringValue(output?.taskId);
+  const color = `var(--chart-${1 + [...(taskId ?? "")].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 5})`;
+  const statusLabel = (value: SubagentDisplayStatus) => t(`chat.subagent.${value === "incomplete" ? "stepLimit" : value}`);
 
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="group/subagent overflow-hidden rounded-md border border-primary/20 bg-primary/5"
+      className="group/subagent overflow-hidden rounded-md border border-border/60 border-l-2 bg-muted/20"
+      style={{ borderLeftColor: color }}
     >
       <CollapsibleTrigger className="flex w-full min-w-0 items-start gap-2 px-2 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <HugeiconsIcon
           icon={RobotIcon}
           size={13}
           strokeWidth={1.75}
-          className="mt-0.5 shrink-0 text-primary"
+          className="mt-0.5 shrink-0"
+          style={{ color }}
         />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[12px] font-medium text-foreground">
               {label}
             </span>
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{taskId}</span>
+            {latest && <span className="shrink-0 text-[10px] text-muted-foreground">
+              {t("chat.subagent.execution", { number: latest.number })}
+            </span>}
             {!open &&
               headline.kind === "running" &&
               headline.action.kind === "tool" && (
@@ -144,7 +163,7 @@ export function SubagentCard({
                 {runningActionLabel(headline.action, t)}
               </Shimmer>
             ) : (
-              terminalSummary(headline.status, steps.length, display, t)
+              terminalSummary(headline.status, latestDisplay?.steps.length ?? 0, latestDisplay, t)
             )}
           </span>
         </span>
@@ -161,6 +180,33 @@ export function SubagentCard({
 
       <CollapsibleContent className="terax-collapsible-content border-t border-border/30">
         <div className="space-y-2.5 px-2.5 py-2">
+          {executions && selected && <>
+            <div className="text-[10px] text-muted-foreground">
+              {t("chat.subagent.turnExecutions", { count: executions.filter((item) => item.current).length })}
+            </div>
+            <Select value={selected.display.runId ?? selected.part.toolCallId} onValueChange={(id) => { setSelectedId(id === (latest?.display.runId ?? latest?.part.toolCallId) ? undefined : id); setTab(undefined); setTaskOpen(true); }}>
+              <SelectTrigger size="sm" aria-label={t("chat.subagent.executions")} data-chat-scroll-preserve>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[true, false].map((current) => {
+                  const items = executions.filter((item) => item.current === current);
+                  return items.length > 0 && <SelectGroup key={String(current)}>
+                    <SelectLabel>{t(current ? "chat.subagent.currentExecutions" : "chat.subagent.historyExecutions")}</SelectLabel>
+                    {items.map((item) => <SelectItem key={item.display.runId ?? item.part.toolCallId} value={item.display.runId ?? item.part.toolCallId}>
+                      {t("chat.subagent.execution", { number: item.number })} · {statusLabel(item.display.status)} · {(item.display.instructions?.[0] ?? "").replace(/\s+/g, " ").slice(0, 60)}
+                    </SelectItem>)}
+                  </SelectGroup>;
+                })}
+              </SelectContent>
+            </Select>
+            {selected !== latest && <button type="button" data-chat-scroll-preserve
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={() => { setSelectedId(undefined); setTab(undefined); }}>
+              {t("chat.subagent.latestExecution", { number: latest?.number })} · {statusLabel(latestStatus)}
+            </button>}
+          </>}
+
           <Collapsible open={taskOpen} onOpenChange={setTaskOpen}>
             <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">
               <HugeiconsIcon icon={ArrowRight01Icon} size={10} className={cn(taskOpen && "rotate-90")} />
@@ -168,7 +214,16 @@ export function SubagentCard({
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="mt-1 whitespace-pre-wrap wrap-break-word text-[11.5px] leading-relaxed text-foreground">
-                {task || t("chat.subagent.emptyTask")}
+                {display?.instructions?.[0] || task || t("chat.subagent.emptyTask")}
+                {display?.instructions?.slice(1).map((instruction, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 补充要求在一次执行内只追加，正文与序号共同区分重复消息。
+                  <div key={`${index}-${instruction}`} className="mt-2 border-t border-border/30 pt-2">
+                    <span className="block text-[10px] text-muted-foreground">
+                      {t("chat.subagent.additionalInstruction", { number: index + 1 })}
+                    </span>
+                    {instruction}
+                  </div>
+                ))}
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -191,6 +246,7 @@ export function SubagentCard({
             </TabButton>
           </div>
 
+          <FileEditContext.Provider value={selectedFileEdits}>
           {tab === "process" ? (
             <ProcessList
               steps={steps}
@@ -200,11 +256,13 @@ export function SubagentCard({
           ) : tab === "usage" ? (
             <TaskUsageDetails
               sessionId={sessionId}
+              runId={display?.runId}
               taskId={display?.taskId ?? stringValue(output?.taskId)}
             />
           ) : (
             <ResultPanel status={status} result={result} />
           )}
+          </FileEditContext.Provider>
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -64,12 +64,15 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
           : undefined,
       });
       if (input.action === "list")
-        return { tasks: [...store.tasks.values()].map(describe) };
+        return {
+          tasks: [...store.tasks.values()].map(describe),
+          concurrency: { limit: opts.maxConcurrentSubagents, running: coordinator.runningCount },
+        };
       const task = store.tasks.get(input.taskId ?? "");
       if (!task)
         return {
           status: "rejected",
-          error: "Task does not belong to this chat.",
+          error: "Task not found in this chat.",
         };
       if (input.action === "wait") {
         // 在首次等待前捕获历史结果，避免并行续跑改变本次等待的执行归属。
@@ -128,7 +131,7 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
         await coordinator.stop(task.taskId, () =>
           native.shellStopTask(opts.toolContext.getSessionId(), task.taskId),
         );
-        return describe(task);
+        return { ...describe(task), cleanup: "completed" };
       }
       if (task.status === "context_exhausted")
         return {

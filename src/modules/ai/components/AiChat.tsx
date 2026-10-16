@@ -67,10 +67,10 @@ import {
 import { ChatCollapsibleScrollGuard } from "@/modules/ai/components/ChatCollapsibleScrollGuard";
 import { ChatReasoningPart } from "@/modules/ai/components/ChatReasoningPart";
 import { ChatStatusDots } from "@/modules/ai/components/ChatStatusDots";
-import {
-  SubagentCard,
-  type SubagentResultView,
+import type {
+  SubagentResultView,
 } from "@/modules/ai/components/SubagentCard";
+import { GroupedSubagentCard, SubagentCardsProvider } from "@/modules/ai/components/SubagentCards";
 import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
 import {
   activityDurationFromPart,
@@ -540,6 +540,7 @@ export function AiChatView({
         className="gap-4 px-3 pt-3 pb-[10cqh]"
         scrollClassName="app-scrollbar [container-type:size] [scrollbar-gutter:stable]"
       >
+        <SubagentCardsProvider sessionId={sessionId} messages={messages}>
         <ChatFileReferenceBaseProvider baseDirectory={sessionCwd}>
           <div ref={setToolDetailsWheelScope} className="contents">
             {activities
@@ -583,6 +584,7 @@ export function AiChatView({
             ))}
           </div>
         </ChatFileReferenceBaseProvider>
+        </SubagentCardsProvider>
         {compacting && (
           <div role="status" className="text-xs text-muted-foreground">
             <Shimmer>{t("chat.compacting")}</Shimmer>
@@ -1670,7 +1672,7 @@ const RenderedPart = memo(function RenderedPart({
     const toolPart = part as unknown as AnyToolPart;
     if (isSubagentToolPart(part, hasSubagentDisplay)) {
       return (
-        <LiveSubagentCard
+        <GroupedSubagentCard
           sessionId={sessionId}
           part={toolPart}
           persistedDisplay={persistedSubagent}
@@ -1682,31 +1684,6 @@ const RenderedPart = memo(function RenderedPart({
   }
 
   return null;
-});
-
-const LiveSubagentCard = memo(function LiveSubagentCard({
-  sessionId,
-  part,
-  persistedDisplay,
-  backgroundResult,
-}: {
-  sessionId: string;
-  part: AnyToolPart;
-  persistedDisplay?: SubagentDisplaySnapshot;
-  backgroundResult?: SubagentResultView;
-}) {
-  const liveDisplay = useChatDisplayStore(
-    useChatStore,
-    (state) => state.subagentDisplaysBySession[sessionId]?.[part.toolCallId],
-  );
-  return (
-    <SubagentCard
-      sessionId={sessionId}
-      part={part}
-      display={liveDisplay ?? persistedDisplay}
-      backgroundResult={backgroundResult}
-    />
-  );
 });
 
 /** 投影工具的结构化业务错误，并保留用户拒绝的独立状态。 */

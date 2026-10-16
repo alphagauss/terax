@@ -976,22 +976,20 @@ export function projectSessionMessages(
     )
       statuses.set(record.turn_id, record.turn_status);
   }
+  const materialized = materializeSubagentDisplayParts(messages, projectSubagentDisplays(records));
   const finalByTurn = new Map<string, UIMessage>();
-  for (const message of messages) {
+  for (const message of materialized) {
     const turnId = messageMetadata(message).turnId;
     if (turnId) finalByTurn.set(turnId, message);
   }
-  for (const message of messages) {
+  for (const message of materialized) {
     const metadata = messageMetadata(message);
     if (metadata.turnId && finalByTurn.get(metadata.turnId) !== message)
       delete metadata.turnId;
     if (metadata.turnId) metadata.turnStatus = statuses.get(metadata.turnId);
   }
 
-  return materializeSubagentDisplayParts(
-    messages,
-    projectSubagentDisplays(records),
-  );
+  return materialized;
 }
 
 /** 将一组新增 UIMessage 转换为可追加的会话记录。 */
@@ -1466,11 +1464,12 @@ export function materializeSubagentDisplayParts(
   snapshots: readonly SubagentDisplaySnapshot[],
 ): UIMessage[] {
   if (snapshots.length === 0) return [...messages];
-  const byToolCallId = new Map(
-    snapshots.map((snapshot) => [snapshot.toolCallId, snapshot]),
-  );
   return messages.map((message) => {
     if (message.role !== "assistant") return message;
+    const turnId = messageMetadata(message).turnId ?? message.parts.find(isSubagentDisplayDataPart)?.data.snapshot.parentTurnId;
+    const byToolCallId = new Map(snapshots
+      .filter((snapshot) => !turnId || !snapshot.parentTurnId || snapshot.parentTurnId === turnId)
+      .map((snapshot) => [snapshot.toolCallId, snapshot]));
     const parts = attachSubagentDisplays(message.parts, byToolCallId);
     return parts === message.parts ? message : { ...message, parts };
   });

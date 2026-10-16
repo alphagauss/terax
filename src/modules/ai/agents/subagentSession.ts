@@ -244,6 +244,12 @@ export function projectSubagentDisplays(
         startedAt: Date.parse(record.timestamp),
         snapshot: {
           version: 2,
+          runId: entry.runId,
+          parentTurnId: record.turn_id,
+          instructions: (entry.records ?? [])
+            .filter((item) => item.role === "user")
+            .slice(-1)
+            .map((item) => String(item.content)),
           taskId: entry.taskId,
           toolCallId: entry.toolCallId,
           label: entry.label,
@@ -255,6 +261,10 @@ export function projectSubagentDisplays(
     const run = runs.get(entry.runId);
     if (!run) continue;
     const snapshot = run.snapshot;
+    if (entry.consumed && entry.records) {
+      snapshot.instructions = [...(snapshot.instructions ?? []),
+        ...entry.records.filter((item) => item.role === "user").map((item) => String(item.content))];
+    }
     const result = subagentResultText(entry.records ?? []);
     if (
       entry.records?.some(

@@ -267,6 +267,23 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
   expect(
     (await invoke("subagent_task", { action: "list" })).tasks,
   ).toHaveLength(1);
+  expect(await invoke("subagent_task", { action: "list" })).toMatchObject({
+    concurrency: { limit: 1, running: 0 },
+  });
+  expect(await invoke("subagent_task", { action: "get", taskId: "missing" })).toMatchObject({
+    status: "rejected", error: "Task not found in this chat.",
+  });
+  const cleanup = vi.spyOn(native, "shellStopTask").mockResolvedValue();
+  try {
+    expect(await invoke("subagent_task", { action: "stop", taskId: started.taskId })).toMatchObject({
+      status: "completed", cleanup: "completed",
+    });
+    expect(cleanup).toHaveBeenCalledWith("child-test", started.taskId);
+    cleanup.mockRejectedValueOnce(new Error("cleanup failed"));
+    await expect(invoke("subagent_task", { action: "stop", taskId: started.taskId })).rejects.toThrow("cleanup failed");
+  } finally {
+    cleanup.mockRestore();
+  }
   required(store.tasks.get(started.taskId)).status = "context_exhausted";
   expect(
     (

@@ -173,8 +173,10 @@ export function LatestRequestCacheDetails({
 /** 主回答与子任务共用的输出及工具计数，缺失旧记录不伪装成零。 */
 export function OutputToolDetails({
   records,
+  outputLabel,
 }: {
   records: readonly UsageRecord[];
+  outputLabel?: string;
 }) {
   const { t } = useTranslation("ai");
   const summary = summarizeOutput(records);
@@ -182,7 +184,7 @@ export function OutputToolDetails({
   return (
     <div className="space-y-1 text-[11px]">
       <div className="flex justify-between gap-3">
-        <span>{t("chat.metrics.output")}</span>
+        <span>{outputLabel ?? t("chat.metrics.output")}</span>
         <span className="font-mono">
           {summary.outputTokens == null
             ? unknown
@@ -201,17 +203,20 @@ export function OutputToolDetails({
 export function TaskUsageDetails({
   sessionId,
   taskId,
+  runId,
 }: {
   sessionId: string;
   taskId?: string;
+  runId?: string;
 }) {
+  const { t } = useTranslation("ai");
   const records = useUsageRecords(sessionId).filter(
-    (record) => taskId != null && record.taskId === taskId,
+    (record) => taskId != null && record.taskId === taskId && runId != null && record.runId === runId,
   );
   return (
     <div className="space-y-1 text-[11px]">
       <UsageDetails records={records} />
-      <OutputToolDetails records={records} />
+      <OutputToolDetails records={records} outputLabel={t("chat.subagent.executionOutput")} />
     </div>
   );
 }

@@ -102,6 +102,7 @@ export function buildSubagentTaskRunner({
         ? (session.executions ?? [])
         : [];
     session.runId = crypto.randomUUID();
+    onProgress({ type: "execution", runId: session.runId, parentTurnId: opts.turnId, task });
     session.executions = [];
     store.tasks.set(taskId, session);
     accepting.add(taskId);
@@ -290,6 +291,7 @@ export function buildSubagentTaskRunner({
             consumed: pending.map((item) => item.id),
             records: pending.map((item) => userRecord(item.message)),
           });
+          onProgress({ type: "instructions", messages: pending.map((item) => item.message) });
           lastChildMessages.push(
             ...pending.map((item) => ({
               role: "user" as const,

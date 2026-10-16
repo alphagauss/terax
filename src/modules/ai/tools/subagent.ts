@@ -37,7 +37,7 @@ export function buildSubagentTools(
   return {
     subagent_task: tool({
       description:
-        "Manage subagents belonging to this chat. list returns task IDs and states; get returns a paginated history of inputs, outputs and tool calls (each entry is limited to 8000 characters; use wait for the full latest final result); wait blocks for the current execution result (default 30 seconds, timeout leaves the task running); stop cancels the task, terminates its managed process trees and waits for cleanup, discarding unconsumed queued instructions; send queues instructions for the next safe boundary of a running task (queued is not yet consumed), or resumes an ended task with a fresh step budget. A finishing task may reject send; retry after completion. stop does not undo completed actions. Use the short taskId returned by this chat. Context-exhausted tasks require a new run_subagent task.",
+        "Manage subagents belonging to this chat. list returns task IDs, latest execution states and concurrency limit/running counts; get returns a paginated history of inputs, outputs and tool calls (each entry is limited to 8000 characters; use wait for the full latest final result); wait blocks for the current execution result (default 30 seconds, timeout leaves the task running); stop cancels the task, terminates its managed process trees and waits for cleanup, discarding unconsumed queued instructions; send queues instructions for the next safe boundary of a running task (queued is not yet consumed), or resumes an ended task with a fresh step budget. A finishing task may reject send; retry after completion. stop also cleans up managed processes from ended tasks and prior executions; cleanup=completed confirms cleanup succeeded independently of the latest execution status. stop does not undo completed actions. Use the short taskId returned by this chat. Context-exhausted tasks require a new run_subagent task.",
       inputSchema: z
         .object({
           action: z.enum(["list", "get", "stop", "send", "wait"]),
@@ -142,7 +142,7 @@ export function buildSubagentTools(
         "next model step. With wait=false, the tool returns immediately and " +
         "the result is appended later in the same turn unless retrieved by subagent_task wait. Use the returned taskId to inspect, stop, wait for, or continue this task. At most the configured " +
         "number of subagents may run concurrently in this chat. Subagents " +
-        "cannot create other subagents.",
+        "cannot create other subagents. Managed background processes may keep running after a subagent completes; use subagent_task stop to clean them up.",
       inputSchema: z.object({
         task: z
           .string()

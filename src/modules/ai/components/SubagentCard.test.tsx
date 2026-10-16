@@ -94,6 +94,7 @@ describe("SubagentCard", () => {
         content: {
           turnId: "turn",
           taskId: "task-1",
+          runId: "run-1",
           model: { providerId: "test", modelId: "test" },
           contextWindow: 10000,
           values: { inputTokens: 1200, cacheReadTokens: 960, outputTokens: 45 },
@@ -102,13 +103,21 @@ describe("SubagentCard", () => {
           timing: { responseTimeMs: 1500, timeToFirstOutputMs: 500 },
         },
       },
+      {
+        role: "usage", call_id: "later-call", timestamp: "later",
+        content: {
+          turnId: "turn", taskId: "task-1", runId: "run-2",
+          model: { providerId: "test", modelId: "test" }, contextWindow: 10000,
+          values: { inputTokens: 5000, cacheReadTokens: 4000, outputTokens: 900 }, estimated: [], toolCalls: 8,
+        },
+      },
     ]);
     await act(async () =>
       root.render(
         <SubagentCard
           sessionId="subagent-usage-tab"
           part={part as never}
-          display={display({ status: "completed", result: "Final result" })}
+          display={display({ runId: "run-1", status: "completed", result: "Final result" })}
         />,
       ),
     );
@@ -123,10 +132,41 @@ describe("SubagentCard", () => {
     await act(async () => tab?.click());
     expect(container.textContent).toContain("Context input");
     expect(container.textContent).toContain("960 / 80%");
-    expect(container.textContent).toContain("Turn output45 token");
+    expect(container.textContent).toContain("Execution output45 token");
     expect(container.textContent).toContain("Tool calls2");
     expect(container.textContent).not.toContain("First token latency");
     expect(container.textContent).not.toContain("Generation speed");
+  });
+
+  it("keeps the chosen tab when an execution completes", async () => {
+    await act(async () => root.render(<SubagentCard part={part as never} display={display()} />));
+    await act(async () => container.querySelector<HTMLButtonElement>("button[data-state]")?.click());
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Process 0")?.click());
+    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "completed", result: "Do not switch to me" })} />));
+    expect(container.textContent).not.toContain("Do not switch to me");
+    expect(container.textContent).toContain("No tool calls.");
+  });
+
+  it("selects execution details without following a later resume while reading history", async () => {
+    const execution = (number: number) => ({
+      part: { ...part, toolCallId: `call-${number}` } as never,
+      number, current: number > 1,
+      display: display({ toolCallId: `call-${number}`, runId: `run-${number}`, status: "completed", result: `Result ${number}`, instructions: [`Instruction ${number}`] }),
+    });
+    const executions = [execution(1), execution(2)];
+    await act(async () => root.render(<SubagentCard part={part as never} executions={executions} />));
+    await act(async () => container.querySelector<HTMLButtonElement>("button[data-state]")?.click());
+    expect(container.textContent).toContain("Result 2");
+    await act(async () => container.querySelector('[role="combobox"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes("Execution 1"));
+    expect(option).toBeDefined();
+    await act(async () => option?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(container.textContent).toContain("Result 1");
+    await act(async () => root.render(<SubagentCard part={part as never} executions={[...executions, execution(3)]} />));
+    expect(container.textContent).toContain("Result 1");
+    expect(container.textContent).toContain("View latest execution 3");
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("View latest execution"))?.click());
+    expect(container.textContent).toContain("Result 3");
   });
 
   it("holds the visible tool action for one second without queuing stale actions", async () => {
