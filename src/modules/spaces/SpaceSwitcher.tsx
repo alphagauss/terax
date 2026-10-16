@@ -532,7 +532,7 @@ function SpaceRow({
           moveTarget
             ? "bg-primary/10 ring-1 ring-inset ring-primary/40"
             : isActive
-              ? "bg-interactive-active"
+              ? "bg-primary/15 hover:bg-primary/20 active:bg-primary/25"
               : "hover:bg-interactive-hover",
         )}
       >
@@ -566,7 +566,14 @@ function SpaceRow({
             className="ml-0.5"
           />
         ) : (
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-xs font-medium",
+              isActive
+                ? "text-[color:color-mix(in_oklab,var(--primary)_60%,var(--foreground))]"
+                : "text-foreground",
+            )}
+          >
             {space.id === DEFAULT_SPACE_ID ? t("defaultSpace") : space.name}
           </span>
         )}
