@@ -1078,7 +1078,7 @@ export const FileExplorer = memo(
                   </button>
                 </Hint>
 
-                <div className="ml-0.5 flex shrink-0 items-center gap-0">
+                <div className="ml-0.5 flex shrink-0 items-center gap-0 [&>button]:w-5">
                   {onOpenFolder ? (
                     <Hint content={openFolderLabel ?? t("openFolder")}>
                       <Button
@@ -1089,7 +1089,7 @@ export const FileExplorer = memo(
                       >
                         <HugeiconsIcon
                           icon={FolderOpenIcon}
-                          size={13}
+                          className="size-3.75"
                           strokeWidth={2}
                         />
                       </Button>
@@ -1105,7 +1105,7 @@ export const FileExplorer = memo(
                     >
                       <HugeiconsIcon
                         icon={Search01Icon}
-                        size={13}
+                        className="size-3.75"
                         strokeWidth={2}
                       />
                     </Button>
@@ -1122,7 +1122,7 @@ export const FileExplorer = memo(
                     >
                       <HugeiconsIcon
                         icon={FileAddIcon}
-                        size={13}
+                        className="size-3.75"
                         strokeWidth={2}
                       />
                     </Button>
@@ -1138,7 +1138,7 @@ export const FileExplorer = memo(
                     >
                       <HugeiconsIcon
                         icon={FolderAddIcon}
-                        size={13}
+                        className="size-3.75"
                         strokeWidth={2}
                       />
                     </Button>
@@ -1152,7 +1152,7 @@ export const FileExplorer = memo(
                     >
                       <HugeiconsIcon
                         icon={Refresh01Icon}
-                        size={12}
+                        className="size-3.75"
                         strokeWidth={2}
                       />
                     </Button>
@@ -1166,7 +1166,7 @@ export const FileExplorer = memo(
                     >
                       <HugeiconsIcon
                         icon={ListChevronsDownUpIcon}
-                        size={13}
+                        className="size-3.75"
                         strokeWidth={2}
                       />
                     </Button>
