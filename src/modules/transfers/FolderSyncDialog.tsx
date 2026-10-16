@@ -202,7 +202,7 @@ export function FolderSyncDialog({
         }
       }}
     >
-      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
+      <DialogContent className="h-[85vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <div className="flex items-center gap-1">
             <DialogTitle>{t("sync.title")}</DialogTitle>
@@ -212,7 +212,7 @@ export function FolderSyncDialog({
             {t("sync.description")}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="no-scrollbar min-h-0 space-y-3 overflow-y-auto">
           <div className="space-y-1">
             <div>{t("sync.remote")}</div>
             <div className="break-all text-muted-foreground">{remotePath}</div>
@@ -445,7 +445,7 @@ export function FolderSyncDialog({
               </fieldset>
               <div
                 key={previewGroup}
-                className="max-h-48 overflow-auto overscroll-y-contain"
+                className="app-scrollbar h-48 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]"
               >
                 {visibleItems?.length ? (
                   <ul className="divide-y divide-border">
