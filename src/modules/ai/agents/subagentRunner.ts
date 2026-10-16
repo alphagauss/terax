@@ -101,7 +101,7 @@ export function buildSubagentTaskRunner({
       session.status === "failed"
         ? (session.executions ?? [])
         : [];
-    session.runId = crypto.randomUUID();
+    session.runId = shellExecution.id;
     onProgress({ type: "execution", runId: session.runId, parentTurnId: opts.turnId, task });
     session.executions = [];
     store.tasks.set(taskId, session);

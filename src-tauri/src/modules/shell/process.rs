@@ -446,6 +446,8 @@ pub struct ProcessResponse {
 
 #[derive(Serialize)]
 pub struct ProcessInfo {
+    pub execution_id: Option<String>,
+    pub task_id: Option<String>,
     pub process_id: String,
     pub command: String,
     pub cwd: String,
@@ -889,6 +891,8 @@ impl AgentProcess {
         let state = self.shared.state.lock().unwrap();
         let last_access = *self.last_access.lock().unwrap();
         ProcessInfo {
+            execution_id: None,
+            task_id: None,
             process_id: self.id.clone(),
             command: self.command.clone(),
             cwd: self.cwd.clone(),

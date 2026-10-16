@@ -314,6 +314,7 @@ pub fn run() {
             commands::shell::shell_close_execution,
             commands::shell::shell_stop_execution,
             commands::shell::shell_stop_task,
+            commands::shell::shell_stop_active,
             external_agent::external_agent_list,
             external_agent::external_agent_run,
             external_agent::external_agent_cancel,

@@ -214,7 +214,7 @@ describe("AI tool approval mode", () => {
       stdout: "",
       stderr: "",
     });
-    nativeMock.shellList.mockResolvedValue([]);
+    nativeMock.shellList.mockResolvedValue([{ process_id: processId, task_id: "abcd", execution_id: "private-run", command: "server" }]);
     const tools = buildShellTools(context);
     if (!tools.shell_process.execute || !tools.shell_list.execute) {
       throw new Error("Shell process tools must be executable");
@@ -224,7 +224,9 @@ describe("AI tool approval mode", () => {
       { process_id: processId, action: "poll" },
       toolOptions,
     );
-    await tools.shell_list.execute({}, toolOptions);
+    const listed = await tools.shell_list.execute({}, toolOptions);
+    expect(listed).toMatchObject({ processes: [{ task_id: "abcd" }] });
+    expect(JSON.stringify(listed)).not.toContain("private-run");
 
     expect(nativeMock.shellProcess).toHaveBeenCalledWith(
       expect.objectContaining({ ownerSessionId: context.getSessionId() }),

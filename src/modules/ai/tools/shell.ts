@@ -142,7 +142,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. Never start full-screen TTY programs such as vim, less, or top.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. A running response confirms launch, not success. If the task depends on the result, poll until exit and check the exit status before claiming completion. Normal agent or subagent completion does not stop background processes. Before finishing, terminate temporary processes you no longer need; report the process IDs, purpose, observed status, access details, and how to stop any intentionally retained services. Subagents must include this handoff in their result. Only stop processes you started or were explicitly asked to manage. Never start full-screen TTY programs such as vim, less, or top.",
       inputSchema: z.object({
         command: z
           .string()
@@ -308,9 +308,10 @@ function redactProcessResponse(
   };
 }
 
-function redactProcessInfo(process: ShellProcessInfo): ShellProcessInfo {
+function redactProcessInfo(process: ShellProcessInfo): Omit<ShellProcessInfo, "execution_id"> {
+  const { execution_id: _executionId, ...publicProcess } = process;
   return {
-    ...process,
+    ...publicProcess,
     command: redactSensitive(process.command),
   };
 }

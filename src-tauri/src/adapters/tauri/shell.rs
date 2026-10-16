@@ -158,3 +158,12 @@ pub async fn shell_stop_task(
 ) -> Result<(), String> {
     service::shell_stop_task(state.inner(), owner_session_id, task_id).await
 }
+
+/// 停止当前执行，保留已经完成执行的后台服务。
+#[tauri::command]
+pub async fn shell_stop_active(
+    state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+) -> Result<(), String> {
+    service::shell_stop_active(state.inner(), owner_session_id).await
+}

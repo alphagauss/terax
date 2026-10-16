@@ -206,6 +206,9 @@ impl Host {
                 shell::shell_stop_task(&self.shell, arg(a, "ownerSessionId")?, arg(a, "taskId")?)
                     .await,
             ),
+            "shell_stop_active" => {
+                value(shell::shell_stop_active(&self.shell, arg(a, "ownerSessionId")?).await)
+            }
             "shell_clear_owner" => {
                 value(shell::shell_clear_owner(&self.shell, arg(a, "ownerSessionId")?).await)
             }

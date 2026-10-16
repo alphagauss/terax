@@ -108,7 +108,7 @@
     "closeAiPanel": "Close AI panel",
     "miniWindowOpen": "Mini-window open",
     "openConversation": "Open conversation",
-    "stop": "Stop",
+    "stop": "Stop current execution",
     "send": "Send (Enter)",
     "searchPlaceholder": "Search models and providers…",
     "tabAll": "All",
@@ -241,6 +241,17 @@
     "continue": "Continue",
     "copy": "Copy message",
     "copied": "Copied",
+    "processes": {
+      "running_one": "{{count}} background process running",
+      "running_other": "{{count}} background processes running",
+      "main": "Main agent",
+      "task": "Task {{taskId}}",
+      "clearAll": "Stop all processes in this chat",
+      "cleaning": "Stopping processes…",
+      "cleanupFailed": "Could not stop all chat processes",
+      "unavailable": "Process status unavailable; retrying.",
+      "stopFirst": "Stop the current execution before clearing all chat processes."
+    },
     "subagent": {
       "running": "Running",
       "executionOutput": "Execution output",

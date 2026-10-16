@@ -51,7 +51,7 @@ it("运行中提交引导后在输入框上方显示待接入状态", async () =
     render();
     act(() =>
       container
-        .querySelector<HTMLButtonElement>('button[aria-label="Stop"]')
+        .querySelector<HTMLButtonElement>('button[aria-label="Stop current execution"]')
         ?.click(),
     );
     expect(composer.stop).toHaveBeenCalledTimes(1);
@@ -61,13 +61,13 @@ it("运行中提交引导后在输入框上方显示待接入状态", async () =
       'button[aria-label="Guide the current task"]',
     );
     expect(guide).not.toBeNull();
-    expect(container.querySelector('button[aria-label="Stop"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Stop current execution"]')).not.toBeNull();
     act(() => guide?.click());
     expect(composer.submit).toHaveBeenCalledTimes(1);
     composer.canSend = false;
     composer.pendingSteering = 1;
     render();
-    expect(container.querySelector('button[aria-label="Stop"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Stop current execution"]')).not.toBeNull();
     const status = container.querySelector<HTMLElement>('[role="status"]');
     const input = container.querySelector<HTMLElement>(
       '[data-testid="composer-input"]',

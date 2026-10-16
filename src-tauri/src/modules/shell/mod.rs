@@ -152,11 +152,33 @@ pub async fn shell_close_execution(
     validate_owner(&owner_session_id)?;
     validate_process_id(&execution_id)?;
     let _guard = state.spawn_lock.lock().await;
-    state
+    let key = (owner_session_id, execution_id);
+    let cancelled = state
         .executions
         .lock()
         .unwrap()
-        .remove(&(owner_session_id, execution_id));
+        .get(&key)
+        .is_some_and(|scope| scope.cancelled);
+    if cancelled {
+        let ids: Vec<_> = state
+            .process_executions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, scope)| scope.owner == key.0 && scope.execution == key.1)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let processes = state.processes.read().unwrap();
+        // 清理失败时保留关闭的准入记录，使后续停止能够重试这些资源。
+        if ids.iter().any(|id| {
+            processes
+                .get(id)
+                .is_some_and(|process| process.holds_resources())
+        }) {
+            return Ok(());
+        }
+    }
+    state.executions.lock().unwrap().remove(&key);
     Ok(())
 }
 
@@ -177,6 +199,33 @@ pub async fn shell_stop_execution(
         scope.cancelled = true;
     }
     stop_scoped_processes(state, &owner_session_id, Some(&execution_id), None).await
+}
+
+/// 仅取消当前仍开放的执行，保留正常结束执行留下的后台进程。
+pub async fn shell_stop_active(state: &ShellState, owner_session_id: String) -> Result<(), String> {
+    validate_owner(&owner_session_id)?;
+    let ids: Vec<_> = {
+        let mut executions = state.executions.lock().unwrap();
+        executions
+            .iter_mut()
+            .filter_map(|((owner, id), scope)| {
+                if owner != &owner_session_id {
+                    return None;
+                }
+                scope.cancelled = true;
+                Some(id.clone())
+            })
+            .collect()
+    };
+    let mut failure = None;
+    for id in ids {
+        if let Err(error) = stop_scoped_processes(state, &owner_session_id, Some(&id), None).await {
+            failure = Some(error);
+        } else {
+            shell_close_execution(state, owner_session_id.clone(), id).await?;
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 /// 终止任务历次执行的进程，并关闭仍在执行的任务准入。
@@ -515,6 +564,13 @@ pub fn shell_list(
         .filter(|process| include_exited || process.is_running())
         .map(|process| process.info())
         .collect();
+    let executions = state.process_executions.lock().unwrap();
+    for process in &mut processes {
+        if let Some(scope) = executions.get(&process.process_id) {
+            process.execution_id = Some(scope.execution.clone());
+            process.task_id = scope.task.clone();
+        }
+    }
     processes.sort_by_key(|process| process.started_at_ms);
     Ok(processes)
 }
@@ -1417,6 +1473,93 @@ mod tests {
         assert!(state.executions.lock().unwrap().is_empty());
         assert!(state.processes.read().unwrap().is_empty());
         assert!(state.process_executions.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn active_stop_preserves_finished_execution_services_and_other_chats() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().to_string_lossy().into_owned();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let state = ShellState::default();
+        let owner = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
+        let old = uuid::Uuid::new_v4().to_string();
+        let current = uuid::Uuid::new_v4().to_string();
+        let sibling = uuid::Uuid::new_v4().to_string();
+        for (chat, execution) in [(&owner, &old), (&owner, &current), (&other, &sibling)] {
+            shell_open_execution(&state, chat.clone(), execution.clone(), Some("task".into()))
+                .unwrap();
+        }
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 30";
+        #[cfg(unix)]
+        let command = "sleep 30";
+        let run = |chat: String, execution: String| {
+            shell_exec(
+                &state,
+                &registry,
+                chat,
+                Some(execution),
+                command.into(),
+                cwd.clone(),
+                Some(cwd.clone()),
+                AgentPermissionMode::FullAccess,
+                0,
+                0,
+                8192,
+                ShellKind::Default,
+                false,
+                Some(WorkspaceEnv::Local),
+            )
+        };
+        let old_process = run(owner.clone(), old.clone()).await.unwrap();
+        shell_close_execution(&state, owner.clone(), old.clone())
+            .await
+            .unwrap();
+        let current_process = run(owner.clone(), current.clone()).await.unwrap();
+        let sibling_process = run(other.clone(), sibling.clone()).await.unwrap();
+        let listed = shell_list(&state, owner.clone(), false, Some(WorkspaceEnv::Local)).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(
+            listed
+                .iter()
+                .any(|p| p.execution_id.as_ref() == Some(&old)
+                    && p.task_id.as_deref() == Some("task"))
+        );
+        // 模拟停止失败后仍持有资源，关闭执行不能抹去后续重试的归属。
+        state
+            .executions
+            .lock()
+            .unwrap()
+            .get_mut(&(owner.clone(), current.clone()))
+            .unwrap()
+            .cancelled = true;
+        shell_close_execution(&state, owner.clone(), current.clone())
+            .await
+            .unwrap();
+        assert!(state
+            .executions
+            .lock()
+            .unwrap()
+            .contains_key(&(owner.clone(), current.clone())));
+        let spawn_guard = state.spawn_lock.lock().await;
+        let (stopped, late) = tokio::join!(shell_stop_active(&state, owner.clone()), async {
+            tokio::task::yield_now().await;
+            drop(spawn_guard);
+            run(owner.clone(), current.clone()).await
+        });
+        stopped.unwrap();
+        assert!(late.err().unwrap().contains("cancelled"));
+        assert!(!state.processes.read().unwrap()[&current_process.process_id].is_running());
+        assert!(state.processes.read().unwrap()[&old_process.process_id].is_running());
+        assert!(state.processes.read().unwrap()[&sibling_process.process_id].is_running());
+        shell_clear_owner(&state, owner.clone()).await.unwrap();
+        assert!(shell_list(&state, owner, false, Some(WorkspaceEnv::Local))
+            .unwrap()
+            .is_empty());
+        assert!(state.processes.read().unwrap()[&sibling_process.process_id].is_running());
+        shell_clear_owner(&state, other).await.unwrap();
     }
 
     use super::*;

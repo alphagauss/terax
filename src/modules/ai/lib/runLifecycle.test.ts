@@ -61,7 +61,7 @@ function setup(chunks: UIMessageChunk[], failCommit = false) {
 }
 
 describe("Agent run lifecycle without UI", () => {
-  it("starts owner process cleanup before waiting for child tools to finish", async () => {
+  it("starts active execution cleanup before waiting for child tools without clearing old services", async () => {
     const run = setup([]);
     const coordinator = getAgentTurnCoordinator("session");
     let release!: () => void;
@@ -86,6 +86,7 @@ describe("Agent run lifecycle without UI", () => {
     });
     await cancelAgentRun(run.chat, "session");
     expect(coordinator.runningCount).toBe(0);
+    expect(cleanup).toHaveBeenLastCalledWith("session", expect.any(Promise), "active");
     run.lifecycle.dispose();
   });
   it("cancels a pending approval without resuming the model or unlocking before cleanup", async () => {

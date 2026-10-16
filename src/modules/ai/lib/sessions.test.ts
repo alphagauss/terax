@@ -43,6 +43,16 @@ it("等待工具收尾后释放文件状态，即使进程终止失败也不提�
   ipc.mockReset();
 });
 
+it("普通停止使用活跃执行范围，显式清理使用完整聊天范围", async () => {
+  ipc.mockReset();
+  await clearSessionProcesses("session", Promise.resolve(), "active");
+  expect(ipc).toHaveBeenCalledWith("shell_stop_active", { ownerSessionId: "session" });
+  expect(ipc).not.toHaveBeenCalledWith("shell_clear_owner", expect.anything());
+  ipc.mockClear();
+  await clearSessionProcesses("session");
+  expect(ipc).toHaveBeenCalledWith("shell_clear_owner", { ownerSessionId: "session" });
+});
+
 it("从真实用户正文生成标题，不读取结构化片段", () => {
   expect(
     deriveTitle([

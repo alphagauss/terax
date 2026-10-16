@@ -3,6 +3,7 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import { ExecutionProcesses } from "@/modules/ai/components/SessionProcesses";
 import type { SubagentExecution } from "@/modules/ai/components/SubagentCards";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/controls/select";
 import { Shimmer } from "@/components/controls/shimmer";
@@ -166,6 +167,7 @@ export function SubagentCard({
               terminalSummary(headline.status, latestDisplay?.steps.length ?? 0, latestDisplay, t)
             )}
           </span>
+          <span className="block"><ExecutionProcesses runId={latestDisplay?.runId} /></span>
         </span>
         <HugeiconsIcon
           icon={ArrowRight01Icon}
@@ -207,6 +209,7 @@ export function SubagentCard({
             </button>}
           </>}
 
+          <ExecutionProcesses runId={display?.runId} />
           <Collapsible open={taskOpen} onOpenChange={setTaskOpen}>
             <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">
               <HugeiconsIcon icon={ArrowRight01Icon} size={10} className={cn(taskOpen && "rotate-90")} />

@@ -24,7 +24,7 @@ import {
   startChatMessage,
   steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
-import { appendSessionDisplay } from "@/modules/ai/store/chatStore";
+import { appendSessionDisplay, clearIdleSessionProcesses } from "@/modules/ai/store/chatStore";
 import {
   projectDeliveries,
   useDeliveryHistory,
@@ -243,6 +243,22 @@ describe("chat store multi-process lifecycle", () => {
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  it("holds the session lock throughout explicit process cleanup and releases it on failure", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    let finish!: () => void;
+    io.clearProcesses.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const cleanup = clearIdleSessionProcesses(first.id);
+    await vi.waitFor(() => expect(io.clearProcesses).toHaveBeenCalledWith(first.id));
+    expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
+    finish();
+    await cleanup;
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+    io.clearProcesses.mockRejectedValueOnce(new Error("cleanup failed"));
+    await expect(clearIdleSessionProcesses(first.id)).rejects.toThrow("cleanup failed");
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+    expect(io.release).toHaveBeenCalledTimes(2);
   });
 
   it("编辑失败保留原历史和编辑内容，运行及保存期间拒绝历史操作", async () => {

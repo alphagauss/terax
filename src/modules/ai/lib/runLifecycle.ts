@@ -13,7 +13,7 @@ import { clearSessionProcesses } from "@/modules/ai/lib/sessions";
 const stoppingRuns = new WeakMap<Chat<UIMessage>, Promise<void>>();
 
 /**
- * 中止模型并立即终止所属进程，等待子任务与 SDK 收敛后清理审批状态。
+ * 中止模型并立即终止活跃执行的进程，保留已结束执行的后台服务，等待子任务与 SDK 收敛后清理审批状态。
  * 停止期间禁止终态提交，避免会话解锁早于原生资源清理。
  */
 export function cancelAgentRun(
@@ -38,7 +38,7 @@ export function cancelAgentRun(
       });
       await chat.stop();
       const childrenStopped = clearAgentTurnCoordinator(sessionId);
-      await clearSessionProcesses(sessionId, childrenStopped);
+      await clearSessionProcesses(sessionId, childrenStopped, "active");
       await idle;
     })
     .then(

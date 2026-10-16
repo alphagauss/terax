@@ -64,6 +64,8 @@ export type ShellProcessResponse = {
 };
 
 export type ShellProcessInfo = {
+  execution_id?: string | null;
+  task_id?: string | null;
   process_id: string;
   command: string;
   cwd: string;

@@ -71,6 +71,7 @@ import type {
   SubagentResultView,
 } from "@/modules/ai/components/SubagentCard";
 import { GroupedSubagentCard, SubagentCardsProvider } from "@/modules/ai/components/SubagentCards";
+import { SessionProcessesProvider } from "@/modules/ai/components/SessionProcesses";
 import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
 import {
   activityDurationFromPart,
@@ -540,6 +541,7 @@ export function AiChatView({
         className="gap-4 px-3 pt-3 pb-[10cqh]"
         scrollClassName="app-scrollbar [container-type:size] [scrollbar-gutter:stable]"
       >
+        <SessionProcessesProvider sessionId={sessionId}>
         <SubagentCardsProvider sessionId={sessionId} messages={messages}>
         <ChatFileReferenceBaseProvider baseDirectory={sessionCwd}>
           <div ref={setToolDetailsWheelScope} className="contents">
@@ -585,6 +587,7 @@ export function AiChatView({
           </div>
         </ChatFileReferenceBaseProvider>
         </SubagentCardsProvider>
+        </SessionProcessesProvider>
         {compacting && (
           <div role="status" className="text-xs text-muted-foreground">
             <Shimmer>{t("chat.compacting")}</Shimmer>
