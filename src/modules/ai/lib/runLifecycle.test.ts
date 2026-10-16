@@ -11,8 +11,13 @@ import {
 } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cancelAgentRun, observeAgentRun } from "@/modules/ai/lib/runLifecycle";
+import { getAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 
-const cleanup = vi.hoisted(() => vi.fn(async () => {}));
+const cleanup = vi.hoisted(() =>
+  vi.fn(async (_id: string, toolsSettled?: Promise<void>) => {
+    await toolsSettled;
+  }),
+);
 vi.mock("@/modules/ai/lib/sessions", () => ({
   clearSessionProcesses: cleanup,
 }));
@@ -56,6 +61,33 @@ function setup(chunks: UIMessageChunk[], failCommit = false) {
 }
 
 describe("Agent run lifecycle without UI", () => {
+  it("starts owner process cleanup before waiting for child tools to finish", async () => {
+    const run = setup([]);
+    const coordinator = getAgentTurnCoordinator("session");
+    let release!: () => void;
+    const nativeCommand = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await coordinator.start({
+      taskId: "k7m3",
+      task: "long command",
+      toolCallId: "spawn",
+      wait: false,
+      limit: 1,
+      run: async ({ abortSignal }) => {
+        await nativeCommand;
+        expect(abortSignal.aborted).toBe(true);
+        return { status: "cancelled" };
+      },
+    });
+    cleanup.mockImplementationOnce(async (_id, toolsSettled) => {
+      release();
+      await toolsSettled;
+    });
+    await cancelAgentRun(run.chat, "session");
+    expect(coordinator.runningCount).toBe(0);
+    run.lifecycle.dispose();
+  });
   it("cancels a pending approval without resuming the model or unlocking before cleanup", async () => {
     vi.useFakeTimers();
     const run = setup([

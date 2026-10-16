@@ -396,6 +396,7 @@ export const native = {
 
   shellExec: (params: {
     ownerSessionId: string;
+    executionId?: string;
     command: string;
     initialCwd: string;
     cwd?: string | null;
@@ -410,6 +411,22 @@ export const native = {
       ...params,
       cwd: params.cwd ?? null,
     }),
+  shellOpenExecution: (
+    ownerSessionId: string,
+    executionId: string,
+    taskId?: string,
+  ) =>
+    invoke<void>("shell_open_execution", {
+      ownerSessionId,
+      executionId,
+      taskId,
+    }),
+  shellStopExecution: (ownerSessionId: string, executionId: string) =>
+    invoke<void>("shell_stop_execution", { ownerSessionId, executionId }),
+  shellCloseExecution: (ownerSessionId: string, executionId: string) =>
+    invoke<void>("shell_close_execution", { ownerSessionId, executionId }),
+  shellStopTask: (ownerSessionId: string, taskId: string) =>
+    invoke<void>("shell_stop_task", { ownerSessionId, taskId }),
   shellProcess: (params: {
     ownerSessionId: string;
     processId: string;

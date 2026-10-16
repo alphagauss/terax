@@ -23,6 +23,7 @@ import { serializeSessionMessages } from "@/modules/ai/lib/conversation";
 import { reportInvalidToolInput } from "@/modules/ai/lib/errors";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import { buildParameterOptions } from "@/modules/ai/lib/modelParameters";
+import { ShellExecution } from "@/modules/ai/lib/shellExecution";
 import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
 import {
   buildConfiguredLanguageModel,
@@ -77,6 +78,11 @@ export function buildSubagentTaskRunner({
     abortSignal,
     onProgress,
   }) => {
+    const shellExecution = new ShellExecution(
+      opts.toolContext.getSessionId(),
+      abortSignal,
+      taskId,
+    );
     const session: SubagentSession = store.tasks.get(taskId) ?? {
       taskId,
       runId: "",
@@ -110,6 +116,25 @@ export function buildSubagentTaskRunner({
       turn_id: session.runId,
       timestamp: new Date().toISOString(),
     });
+    const cleanup = async () => {
+      try {
+        await shellExecution.close();
+      } catch (error) {
+        await store.append(session, { status: "failed", error: String(error) });
+        throw error;
+      } finally {
+        await settleTools();
+        peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(
+          taskId,
+        );
+        accepting.delete(taskId);
+        const pending = session.pending.splice(0);
+        if (pending.length)
+          await store.append(session, {
+            consumed: pending.map((item) => item.id),
+          });
+      }
+    };
     try {
       // 通过并发检查后的每次任务启动读取一次；首次 await 前冻结，后续步骤保持不变。
       const config: SubagentModelConfiguration = structuredClone(
@@ -173,6 +198,7 @@ export function buildSubagentTaskRunner({
       const tools: ToolSet = buildTools(
         {
           ...toolContext,
+          shellExecution,
           fileEditTaskId: taskId,
           onFileEditInput: (id, toolName, input) => {
             onProgress({
@@ -255,9 +281,11 @@ export function buildSubagentTaskRunner({
       });
       let steps = 0;
       while (true) {
+        abortSignal.throwIfAborted();
         const pending = session.pending.splice(0);
         if (pending.length) {
           await Promise.all(pending.map((item) => item.ready));
+          abortSignal.throwIfAborted();
           await store.append(session, {
             consumed: pending.map((item) => item.id),
             records: pending.map((item) => userRecord(item.message)),
@@ -442,31 +470,34 @@ export function buildSubagentTaskRunner({
         }
       }
     } catch (error) {
+      let failure = error;
+      try {
+        await shellExecution.stop();
+      } catch (cleanupError) {
+        failure = cleanupError;
+      }
       await settleTools();
+      const cancelled = abortSignal.aborted && failure === error;
       const exhausted =
         /context_length_exceeded|exceeds? (?:the )?(?:maximum )?context|maximum context length|prompt is too long/i.test(
-          String(error),
+          String(failure),
         );
       await store.append(session, {
-        status: abortSignal.aborted
+        status: cancelled
           ? "cancelled"
           : exhausted
             ? "context_exhausted"
             : "failed",
-        error: exhausted
-          ? "Context exhausted. Create a new subagent task."
-          : String(error),
+        error: cancelled
+          ? undefined
+          : exhausted
+            ? "Context exhausted. Create a new subagent task."
+            : String(failure),
       });
-      throw error;
+      if (cancelled) return { status: "cancelled" };
+      throw failure;
     } finally {
-      await settleTools();
-      peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(taskId);
-      accepting.delete(taskId);
-      const pending = session.pending.splice(0);
-      if (pending.length)
-        await store.append(session, {
-          consumed: pending.map((item) => item.id),
-        });
+      await cleanup();
     }
   };
 }

@@ -133,11 +133,18 @@ export function deleteSessionFile(id: string): Promise<void> {
 }
 
 /** 清理指定聊天拥有的 Agent Shell 进程和文件工具运行时状态。 */
-export async function clearSessionProcesses(id: string): Promise<void> {
-  await Promise.all([
+export async function clearSessionProcesses(
+  id: string,
+  toolsSettled?: Promise<void>,
+): Promise<void> {
+  const cleanup = await Promise.allSettled([
     invoke("shell_clear_owner", { ownerSessionId: id }),
-    invoke("agent_file_clear_owner", { ownerSessionId: id }),
+    toolsSettled,
   ]);
+  // 进程先终止以唤醒工具；文件运行时必须等工具收尾后再释放。
+  await invoke("agent_file_clear_owner", { ownerSessionId: id });
+  const failed = cleanup.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
 }
 
 /** 尝试取得跨进程会话运行锁。 */

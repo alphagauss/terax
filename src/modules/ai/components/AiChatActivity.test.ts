@@ -55,7 +55,9 @@ describe("activity headline summaries", () => {
       kind: "tool",
       text: "find_files",
     });
-    expect(headline("find_files", {}, "input-available")?.text).toBe("List directory · .");
+    expect(headline("find_files", {}, "input-available")?.text).toBe(
+      "List directory · .",
+    );
   });
 
   it("uses search conditions and process actions instead of opaque IDs", () => {
@@ -199,6 +201,61 @@ describe("AI chat activity grouping", () => {
       kind: "single",
       part: { type: "text" },
     });
+  });
+
+  it("keeps actual resumed tasks outside activity blocks and management calls inside", () => {
+    const tool = (id: string, action: string, status: string) => ({
+      type: "tool-subagent_task",
+      toolCallId: id,
+      state: "output-available",
+      input: { action, taskId: "task" },
+      output: { taskId: "task", status },
+    });
+    const groups = buildMessageGroups([
+      tool("queued", "send", "queued"),
+      tool("get", "get", "completed"),
+      tool("resume", "send", "completed"),
+      tool("stop", "stop", "cancelled"),
+      tool("rejected", "send", "rejected"),
+    ] as never);
+    expect(groups.map((group) => group.kind)).toEqual([
+      "activity",
+      "single",
+      "activity",
+    ]);
+    expect(groups[1]).toMatchObject({
+      kind: "single",
+      part: { toolCallId: "resume" },
+    });
+    expect(groups[0]).toMatchObject({
+      groups: [
+        { part: { toolCallId: "queued" } },
+        { part: { toolCallId: "get" } },
+      ],
+    });
+  });
+
+  it("uses execution display facts to separate a resumed task before its tool result arrives", () => {
+    const parts = [
+      {
+        type: "tool-subagent_task",
+        toolCallId: "queued",
+        state: "input-available",
+        input: { action: "send", taskId: "old" },
+      },
+      {
+        type: "tool-subagent_task",
+        toolCallId: "resumed",
+        state: "input-available",
+        input: { action: "send", taskId: "old" },
+      },
+    ];
+    expect(
+      buildMessageGroups(parts as never).map((group) => group.kind),
+    ).toEqual(["activity"]);
+    const groups = buildMessageGroups(parts as never, new Set(["resumed"]));
+    expect(groups.map((group) => group.kind)).toEqual(["activity", "single"]);
+    expect(groups[1]).toMatchObject({ part: { toolCallId: "resumed" } });
   });
 
   it("groups External Agent tools and stops each activity block before text", () => {

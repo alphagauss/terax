@@ -242,6 +242,8 @@
     "copy": "复制消息",
     "copied": "已复制",
     "subagent": {
+      "title": "子任务",
+      "stopping": "正在停止…",
       "task": "任务",
       "process": "过程 {{count}}",
       "result": "结果",
@@ -258,9 +260,7 @@
       "cancelledResult": "Subagent 已取消，没有返回结果。",
       "emptyResult": "Subagent 没有返回内容。",
       "emptyTask": "任务内容不可用。",
-      "noToolCalls": "没有工具调用。",
-      "expand": "展开",
-      "collapse": "收起"
+      "noToolCalls": "没有工具调用。"
     },
     "recentUserMessages": "最近的用户消息",
     "scrollNavigation": "会话导航",

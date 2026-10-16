@@ -33,6 +33,7 @@ pub async fn shell_exec(
     state: tauri::State<'_, ShellState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
     owner_session_id: String,
+    execution_id: Option<String>,
     command: String,
     initial_cwd: String,
     cwd: Option<String>,
@@ -48,6 +49,7 @@ pub async fn shell_exec(
         state.inner(),
         registry.inner(),
         owner_session_id,
+        execution_id,
         command,
         initial_cwd,
         cwd,
@@ -114,4 +116,45 @@ pub async fn shell_clear_owner(
     owner_session_id: String,
 ) -> Result<(), String> {
     service::shell_clear_owner(state.inner(), owner_session_id).await
+}
+
+/// 管理当前聊天的执行准入与进程树。
+#[tauri::command]
+pub async fn shell_open_execution(
+    state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    execution_id: String,
+    task_id: Option<String>,
+) -> Result<(), String> {
+    service::shell_open_execution(state.inner(), owner_session_id, execution_id, task_id)
+}
+
+/// 管理当前聊天的执行准入与进程树。
+#[tauri::command]
+pub async fn shell_close_execution(
+    state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    execution_id: String,
+) -> Result<(), String> {
+    service::shell_close_execution(state.inner(), owner_session_id, execution_id).await
+}
+
+/// 管理当前聊天的执行准入与进程树。
+#[tauri::command]
+pub async fn shell_stop_execution(
+    state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    execution_id: String,
+) -> Result<(), String> {
+    service::shell_stop_execution(state.inner(), owner_session_id, execution_id).await
+}
+
+/// 管理当前聊天的执行准入与进程树。
+#[tauri::command]
+pub async fn shell_stop_task(
+    state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    task_id: String,
+) -> Result<(), String> {
+    service::shell_stop_task(state.inner(), owner_session_id, task_id).await
 }

@@ -65,11 +65,12 @@ function runner(
   store: SubagentSessions,
   accepting = new Set<string>(),
   overrides: Partial<RunAgentOptions> = {},
+  permissionMode: "ask" | "full-access" = "ask",
 ) {
   return buildSubagentTaskRunner({
     store,
     accepting,
-    permissionMode: "ask",
+    permissionMode,
     opts: {
       turnId: "parent-turn",
       keys: EMPTY_PROVIDER_KEYS,
@@ -77,6 +78,7 @@ function runner(
       systemPrompt: "stable system",
       allowedTools: [],
       toolContext: {
+        getCwd: () => "/workspace",
         getSessionId: () => "child-test",
         getPermissionMode: () => "ask",
       },
@@ -500,5 +502,83 @@ it("does not finish cancellation until an in-flight native operation and its jou
   } finally {
     release();
     read.mockRestore();
+  }
+});
+
+it("terminates the child's native execution before cancellation completes and resumes with the same short ID", async () => {
+  const store = new SubagentSessions();
+  const coordinator = new AgentTurnCoordinator();
+  let finishCommand!: (value: never) => void;
+  const command = new Promise<never>((resolve) => {
+    finishCommand = resolve;
+  });
+  const open = vi.spyOn(native, "shellOpenExecution").mockResolvedValue();
+  const close = vi.spyOn(native, "shellCloseExecution").mockResolvedValue();
+  const execute = vi.spyOn(native, "shellExec").mockReturnValue(command);
+  const stop = vi
+    .spyOn(native, "shellStopExecution")
+    .mockImplementation(async () => {
+      finishCommand({ status: "terminated", stdout: "", stderr: "" } as never);
+    });
+  try {
+    model = new MockLanguageModelV4({
+      doStream: async () =>
+        stream("", "shell", "shell_exec", '{"command":"sleep 600"}'),
+    });
+    const run = runner(
+      store,
+      undefined,
+      { allowedTools: ["shell_exec"] },
+      "full-access",
+    );
+    const created = await coordinator.start({
+      task: "inspect",
+      toolCallId: "spawn",
+      wait: false,
+      limit: 1,
+      run,
+    });
+    if (!("taskId" in created)) throw new Error("Task rejected");
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await coordinator.stop(created.taskId);
+    expect(open).toHaveBeenCalledWith(
+      "child-test",
+      expect.any(String),
+      created.taskId,
+    );
+    expect(stop).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(store.tasks.get(created.taskId)).toMatchObject({
+      status: "cancelled",
+      error: undefined,
+    });
+    expect(await coordinator.wait(created.taskId, 1000)).toMatchObject({
+      status: "cancelled",
+    });
+    expect(
+      JSON.stringify(await coordinator.wait(created.taskId, 1000)),
+    ).not.toContain("AbortError");
+    model = new MockLanguageModelV4({
+      doStream: async () => stream("resumed"),
+    });
+    const resumed = await coordinator.start({
+      taskId: created.taskId,
+      task: "continue",
+      toolCallId: "resume",
+      wait: true,
+      limit: 1,
+      run,
+    });
+    expect(resumed).toMatchObject({
+      taskId: created.taskId,
+      status: "completed",
+      result: "resumed",
+    });
+  } finally {
+    finishCommand({ status: "terminated" } as never);
+    open.mockRestore();
+    close.mockRestore();
+    execute.mockRestore();
+    stop.mockRestore();
   }
 });

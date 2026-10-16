@@ -7,6 +7,7 @@ import {
   SubagentSessions,
 } from "@/modules/ai/agents/subagentSession";
 import type { RunAgentOptions } from "@/modules/ai/lib/agent";
+import { native } from "@/modules/ai/lib/native";
 import type { SubagentStarter } from "@/modules/ai/tools/subagent";
 import { buildTools } from "@/modules/ai/tools/tools";
 
@@ -27,6 +28,7 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
     return coordinator.start({
       ...input,
       taskId,
+      existingTaskIds: store.tasks.keys(),
       limit: opts.maxConcurrentSubagents,
       parentAbortSignal: input.abortSignal,
       onDisplay: opts.onSubagentDisplay,
@@ -123,7 +125,9 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
       }
       if (input.action === "stop") {
         accepting.delete(task.taskId);
-        await coordinator.stop(task.taskId);
+        await coordinator.stop(task.taskId, () =>
+          native.shellStopTask(opts.toolContext.getSessionId(), task.taskId),
+        );
         return describe(task);
       }
       if (task.status === "context_exhausted")

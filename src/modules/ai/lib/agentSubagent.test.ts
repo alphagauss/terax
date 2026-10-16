@@ -387,6 +387,8 @@ describe.sequential("Agent background subagents", () => {
   it.each([true, false])(
     "审批响应=%s 时先落实工具结果，再接入引导",
     async (approved) => {
+      vi.spyOn(native, "shellOpenExecution").mockResolvedValue();
+      vi.spyOn(native, "shellCloseExecution").mockResolvedValue();
       const execute = vi.spyOn(native, "shellExec").mockResolvedValue({
         process_id: "approval-process",
         status: "exited",

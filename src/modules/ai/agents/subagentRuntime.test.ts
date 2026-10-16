@@ -24,6 +24,78 @@ function deferredResult() {
 }
 
 describe("AgentTurnCoordinator", () => {
+  it("allocates four-character IDs without reusing restored or current tasks", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const random = vi.spyOn(crypto, "getRandomValues");
+    const values = [0, 1, 1, 2];
+    random.mockImplementation((buffer) => {
+      const value = values.shift();
+      if (value === undefined) throw new Error("Unexpected ID allocation");
+      (buffer as Uint8Array).fill(value);
+      return buffer;
+    });
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 2 }, (_, index) =>
+          coordinator.start({
+            task: "inspect",
+            toolCallId: `call-${index}`,
+            wait: true,
+            limit: 2,
+            existingTaskIds: ["2222"],
+            run: async () => ({ status: "completed", result: "done" }),
+          }),
+        ),
+      );
+      const ids = results.map((result) =>
+        "taskId" in result ? result.taskId : "",
+      );
+      expect(ids).toEqual(["3333", "4444"]);
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("keeps stopping visible until cleanup completes and surfaces cleanup failure", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const pending = deferredResult();
+    const displays: SubagentDisplayState[] = [];
+    await coordinator.start({
+      taskId: "k7m3",
+      task: "inspect",
+      toolCallId: "call",
+      wait: false,
+      limit: 1,
+      run: () => pending.promise,
+      onDisplay: (display) => displays.push(display),
+    });
+    let rejectCleanup!: (error: Error) => void;
+    const resources = new Promise<void>((_resolve, reject) => {
+      rejectCleanup = reject;
+    });
+    const cleanup = vi.fn(() => resources);
+    const stopping = coordinator.stop("k7m3", cleanup);
+    const repeated = coordinator.stop("k7m3", cleanup);
+    expect(displays[displays.length - 1]?.status).toBe("stopping");
+    expect(coordinator.isRunning("k7m3")).toBe(true);
+    pending.resolve({ status: "cancelled" });
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect(displays[displays.length - 1]?.status).toBe("stopping");
+    expect(
+      await coordinator.start({
+        taskId: "k7m3",
+        task: "resume",
+        toolCallId: "resume",
+        wait: false,
+        limit: 2,
+        run: async () => ({ status: "completed" }),
+      }),
+    ).toMatchObject({ status: "rejected" });
+    rejectCleanup(new Error("cleanup failed"));
+    await expect(stopping).rejects.toThrow("cleanup failed");
+    await expect(repeated).rejects.toThrow("cleanup failed");
+    expect(displays[displays.length - 1]?.status).toBe("failed");
+  });
   it("rejects malformed persisted result entries", () => {
     expect(
       isSubagentResultDataPart({

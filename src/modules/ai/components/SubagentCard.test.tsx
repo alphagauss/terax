@@ -82,7 +82,7 @@ describe("SubagentCard", () => {
     await act(async () => i18n.changeLanguage("zh-CN"));
     expect(container.textContent).toContain("递归删除 · build");
     expect(container.textContent).toContain("file_operation");
-    expect(container.textContent).toContain("run_subagent");
+    expect(container.textContent).toContain("Inspector");
   });
 
   it("shows only the four task statistics in a third tab", async () => {
@@ -134,7 +134,7 @@ describe("SubagentCard", () => {
       root.render(<SubagentCard part={part as never} display={display()} />);
     });
     expect(container.textContent).toContain("Thinking");
-    expect(container.textContent).toContain("run_subagent");
+    expect(container.textContent).toContain("Inspector");
     const shimmer = container.querySelector(".terax-shimmer");
 
     const toolDisplay = display({
@@ -218,6 +218,12 @@ describe("SubagentCard", () => {
     const trigger = container.querySelector("button");
     expect(trigger).not.toBeNull();
     await act(async () => trigger?.click());
+    expect(container.textContent).not.toContain("Inspect the persistence boundary");
+    expect(container.textContent).toContain("Final result");
+    const taskTrigger = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Task",
+    );
+    await act(async () => taskTrigger?.click());
     expect(container.textContent).toContain("Inspect the persistence boundary");
 
     const resultTab = [...container.querySelectorAll("button")].find(
@@ -249,4 +255,16 @@ describe("SubagentCard", () => {
       "The Subagent reached its step limit before completing the task.",
     );
   });
+  it("switches an open running task to its final result and hides cancellation internals", async () => {
+    await act(async () => root.render(<SubagentCard part={part as never} display={display()} />));
+    await act(async () => container.querySelector("button")?.click());
+    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "completed", result: "Finished work" })} />));
+    expect(container.textContent).toContain("Finished work");
+    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "stopping" })} />));
+    expect(container.textContent).toContain("Stopping…");
+    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "cancelled", error: "AbortError: signal is aborted without reason" })} />));
+    expect(container.textContent).not.toContain("AbortError");
+    expect(container.textContent).toContain("cancelled");
+  });
+
 });

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -380,9 +380,11 @@ struct LocalControl {
     wsl_termination: Option<WslTermination>,
 }
 
+#[derive(Clone)]
 struct WslTermination {
     distro: String,
     pid_file: String,
+    cleanup_pending: Arc<AtomicBool>,
 }
 
 #[cfg(feature = "desktop")]
@@ -395,6 +397,9 @@ enum RemoteAction {
 #[cfg(feature = "desktop")]
 struct RemoteControl {
     tx: mpsc::Sender<RemoteAction>,
+    workspace: Arc<remote::session::RemoteWorkspace>,
+    pid_file: String,
+    cleanup_pending: Arc<AtomicBool>,
 }
 
 enum ProcessControl {
@@ -419,6 +424,7 @@ pub struct AgentProcess {
     cwd_after: Mutex<Option<String>>,
     shared: Arc<ProcessShared>,
     control: ProcessControl,
+    termination_lock: tokio::sync::Mutex<()>,
 }
 
 #[derive(Serialize)]
@@ -531,6 +537,7 @@ impl AgentProcess {
             cwd_after: Mutex::new(None),
             shared: shared.clone(),
             control: ProcessControl::Local(control.clone()),
+            termination_lock: tokio::sync::Mutex::new(()),
         });
 
         let stdout_reader = spawn_reader(stdout, OutputStream::Stdout, shared.clone());
@@ -584,6 +591,7 @@ impl AgentProcess {
             .map_err(|error| format!("start remote Agent process: {error}"))?;
         let (mut read, write) = channel.split();
         let (tx, mut rx) = mpsc::channel(16);
+        let cleanup_pending = Arc::new(AtomicBool::new(true));
         let shared = Arc::new(ProcessShared::new());
         let process = Arc::new(Self {
             id,
@@ -600,7 +608,13 @@ impl AgentProcess {
             marker,
             cwd_after: Mutex::new(None),
             shared: shared.clone(),
-            control: ProcessControl::Remote(RemoteControl { tx }),
+            control: ProcessControl::Remote(RemoteControl {
+                tx,
+                workspace: workspace.clone(),
+                pid_file: pid_file.clone(),
+                cleanup_pending: cleanup_pending.clone(),
+            }),
+            termination_lock: tokio::sync::Mutex::new(()),
         });
 
         let worker = Arc::downgrade(&process);
@@ -647,6 +661,7 @@ impl AgentProcess {
                         }
                         Some(RemoteAction::Terminate(status, reply)) => {
                             let kill = remote_group_kill(&workspace, &pid_file).await;
+                            if kill.is_ok() { cleanup_pending.store(false, Ordering::Release); }
                             let _ = write.signal(Sig::TERM).await;
                             let _ = write.signal(Sig::KILL).await;
                             let _ = write.close().await;
@@ -666,7 +681,9 @@ impl AgentProcess {
                     }
                 }
             }
-            let _ = remote_group_kill(&workspace, &pid_file).await;
+            if remote_group_kill(&workspace, &pid_file).await.is_ok() {
+                cleanup_pending.store(false, Ordering::Release);
+            }
             if let Some(worker) = worker.upgrade() {
                 worker.shared.finish_stream(OutputStream::Stdout);
                 worker.shared.finish_stream(OutputStream::Stderr);
@@ -741,7 +758,29 @@ impl AgentProcess {
     /// 终止完整受管进程树，并锁定指定终态。
     pub async fn terminate_as(&self, status: ProcessStatus) -> Result<(), String> {
         self.touch();
+        // 并发停止必须等待同一次进程树清理结束，不能仅凭提前写入的终态返回。
+        let _guard = self.termination_lock.lock().await;
         if !self.shared.is_running() {
+            match &self.control {
+                ProcessControl::Local(control) => {
+                    if let Some(wsl) = control
+                        .wsl_termination
+                        .clone()
+                        .filter(|wsl| wsl.cleanup_pending.load(Ordering::Acquire))
+                    {
+                        tokio::task::spawn_blocking(move || terminate_wsl_group(&wsl))
+                            .await
+                            .map_err(|error| error.to_string())??;
+                    }
+                }
+                #[cfg(feature = "desktop")]
+                ProcessControl::Remote(control) => {
+                    if control.cleanup_pending.load(Ordering::Acquire) {
+                        remote_group_kill(&control.workspace, &control.pid_file).await?;
+                        control.cleanup_pending.store(false, Ordering::Release);
+                    }
+                }
+            }
             return Ok(());
         }
         match &self.control {
@@ -751,7 +790,7 @@ impl AgentProcess {
                 let control = control.clone();
                 tokio::task::spawn_blocking(move || terminate_local(&control))
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| error.to_string())??;
                 self.capture_cwd();
                 self.shared.compact_output();
                 Ok(())
@@ -759,14 +798,24 @@ impl AgentProcess {
             #[cfg(feature = "desktop")]
             ProcessControl::Remote(control) => {
                 let (reply, result) = oneshot::channel();
-                control
+                if control
                     .tx
                     .send(RemoteAction::Terminate(status, reply))
                     .await
-                    .map_err(|_| "remote Agent process is unavailable".to_string())?;
-                result
-                    .await
-                    .map_err(|_| "remote Agent process stopped before termination".to_string())?
+                    .is_ok()
+                {
+                    if let Ok(result) = result.await {
+                        return result;
+                    }
+                }
+                // Channel 关闭后仍可能有远端子孙，保留连接与 pid 文件以便重试。
+                remote_group_kill(&control.workspace, &control.pid_file).await?;
+                control.cleanup_pending.store(false, Ordering::Release);
+                self.shared.finish_stream(OutputStream::Stdout);
+                self.shared.finish_stream(OutputStream::Stderr);
+                self.capture_cwd();
+                self.shared.finish(status, None);
+                Ok(())
             }
         }
     }
@@ -857,6 +906,20 @@ impl AgentProcess {
 
     pub fn is_running(&self) -> bool {
         self.shared.is_running()
+    }
+
+    /// 清理失败的远端进程仍占资源额度，不能按普通已完成记录淘汰。
+    pub fn holds_resources(&self) -> bool {
+        self.is_running()
+            || self.termination_lock.try_lock().is_err()
+            || match &self.control {
+                ProcessControl::Local(control) => control
+                    .wsl_termination
+                    .as_ref()
+                    .is_some_and(|wsl| wsl.cleanup_pending.load(Ordering::Acquire)),
+                #[cfg(feature = "desktop")]
+                ProcessControl::Remote(control) => control.cleanup_pending.load(Ordering::Acquire),
+            }
     }
 
     pub fn finished_age(&self) -> Option<Duration> {
@@ -953,14 +1016,13 @@ fn spawn_reader<R: Read + Send + 'static>(
     })
 }
 
-fn terminate_local(control: &LocalControl) {
+fn terminate_local(control: &LocalControl) -> Result<(), String> {
     control.stdin.lock().unwrap().take();
-    if control.child.try_wait().ok().flatten().is_some() {
-        return;
-    }
-    if let Some(wsl) = &control.wsl_termination {
-        terminate_wsl_group(wsl);
-    }
+    let cleanup = control
+        .wsl_termination
+        .as_ref()
+        .map(terminate_wsl_group)
+        .transpose();
     #[cfg(unix)]
     unsafe {
         libc::kill(-(control.child.id() as libc::pid_t), libc::SIGTERM);
@@ -971,21 +1033,22 @@ fn terminate_local(control: &LocalControl) {
     }
     #[cfg(unix)]
     thread::sleep(TERMINATE_GRACE);
+    #[cfg(unix)]
+    unsafe {
+        // 主 Shell 可能先响应 TERM 退出，子孙仍须收到进程组 KILL。
+        libc::kill(-(control.child.id() as libc::pid_t), libc::SIGKILL);
+    }
     if control.child.try_wait().ok().flatten().is_none() {
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(-(control.child.id() as libc::pid_t), libc::SIGKILL);
-        }
         let _ = control.child.kill();
     }
+    cleanup.map(|_| ())
 }
 
 fn stop_local_now(control: &LocalControl) {
     control.stdin.lock().unwrap().take();
     if let Some(wsl) = &control.wsl_termination {
-        let distro = wsl.distro.clone();
-        let pid_file = wsl.pid_file.clone();
-        thread::spawn(move || terminate_wsl_group(&WslTermination { distro, pid_file }));
+        let wsl = wsl.clone();
+        thread::spawn(move || terminate_wsl_group(&wsl));
     }
     #[cfg(unix)]
     unsafe {
@@ -1001,7 +1064,7 @@ fn stop_local_now(control: &LocalControl) {
 fn stop_descendants_after_exit(control: &LocalControl) {
     control.stdin.lock().unwrap().take();
     if let Some(wsl) = &control.wsl_termination {
-        terminate_wsl_group(wsl);
+        let _ = terminate_wsl_group(wsl);
     }
     #[cfg(unix)]
     unsafe {
@@ -1013,7 +1076,7 @@ fn stop_descendants_after_exit(control: &LocalControl) {
     }
 }
 
-fn terminate_wsl_group(termination: &WslTermination) {
+fn terminate_wsl_group(termination: &WslTermination) -> Result<(), String> {
     let command = posix_group_kill_command(&termination.pid_file);
     let mut process = Command::new("wsl.exe");
     process
@@ -1029,7 +1092,14 @@ fn terminate_wsl_group(termination: &WslTermination) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     crate::modules::proc::hide_console(&mut process);
-    let _ = process.status();
+    let status = process
+        .status()
+        .map_err(|error| format!("terminate WSL Agent process group: {error}"))?;
+    if !status.success() {
+        return Err(format!("terminate WSL Agent process group: {status}"));
+    }
+    termination.cleanup_pending.store(false, Ordering::Release);
+    Ok(())
 }
 
 #[cfg(feature = "desktop")]
@@ -1053,8 +1123,23 @@ async fn remote_group_kill(
 
 fn posix_group_kill_command(pid_file: &str) -> String {
     let file = crate::modules::shell::quote::shell_quote(pid_file);
+    // 只将明确的 ESRCH 当作幂等成功；其他失败保留 pid 文件供后续重试。
     format!(
-        "i=0; while [ ! -s {file} ] && [ $i -lt 20 ]; do sleep 0.05; i=$((i+1)); done; if read -r pid < {file} && kill -TERM -- -\"$pid\" 2>/dev/null; then sleep 1; kill -KILL -- -\"$pid\" 2>/dev/null || true; fi; rm -f -- {file}"
+        r#"i=0; while [ ! -s {file} ] && [ $i -lt 20 ]; do sleep 0.05; i=$((i+1)); done
+[ -e {file} ] || exit 0
+read -r pid < {file} || exit 1
+case "$pid" in ''|0|*[!0-9]*) printf '%s\n' 'invalid Agent process group id' >&2; exit 1;; esac
+for signal in TERM KILL; do
+    if error=$(LC_ALL=C kill -"$signal" -- -"$pid" 2>&1); then
+        [ "$signal" = KILL ] || sleep 1
+    else
+        case "$error" in
+            *'No such process'*|*'no such process'*) break;;
+            *) printf '%s\n' "$error" >&2; exit 1;;
+        esac
+    fi
+done
+rm -f -- {file}"#
     )
 }
 
@@ -1087,6 +1172,7 @@ fn build_local_command(
             Some(WslTermination {
                 distro: distro.clone(),
                 pid_file,
+                cleanup_pending: Arc::new(AtomicBool::new(true)),
             }),
         ));
     }
@@ -1295,6 +1381,43 @@ fn elapsed_ms(started: Instant, finished_at: Option<Instant>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn posix_group_cleanup_reports_signal_failure_and_keeps_retry_file() {
+        // Windows 开发环境可选装 POSIX Shell；Unix 上必须能够执行真实脚本。
+        if let Err(error) = Command::new("sh").args(["-c", "exit 0"]).status() {
+            #[cfg(windows)]
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return;
+            }
+            panic!("POSIX Shell unavailable: {error}");
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("process.pid");
+        let script_path = if cfg!(windows) {
+            // Git Bash 接受 Windows 绝对路径中的正斜杠。
+            pid_file.to_string_lossy().replace('\\', "/")
+        } else {
+            pid_file.to_string_lossy().into_owned()
+        };
+        let script = posix_group_kill_command(&script_path);
+        for (kill, success) in [
+            ("", true),
+            ("kill() { printf '%s\n' 'kill: Operation not permitted' >&2; return 1; };", false),
+            ("kill() { [ \"$1\" = -TERM ] && return 0; printf '%s\n' 'kill: Operation not permitted' >&2; return 1; };", false),
+            ("kill() { [ \"$1\" = -TERM ] && return 0; printf '%s\n' 'kill: No such process' >&2; return 1; };", true),
+        ] {
+            std::fs::write(&pid_file, "2147483647\n").unwrap();
+            let output = Command::new("sh").arg("-c")
+                .arg(format!("sleep() {{ :; }}; {kill}\n{script}"))
+                .output().unwrap();
+            assert_eq!(output.status.success(), success, "{}", String::from_utf8_lossy(&output.stderr));
+            assert_eq!(pid_file.exists(), !success);
+            if !success {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("Operation not permitted"));
+            }
+        }
+    }
+
     use super::*;
 
     fn interactive_command() -> &'static str {

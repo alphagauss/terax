@@ -242,6 +242,8 @@
     "copy": "Copy message",
     "copied": "Copied",
     "subagent": {
+      "title": "Subagent",
+      "stopping": "Stopping…",
       "task": "Task",
       "process": "Process {{count}}",
       "result": "Result",
@@ -258,9 +260,7 @@
       "cancelledResult": "The Subagent was cancelled and returned no result.",
       "emptyResult": "The Subagent returned no content.",
       "emptyTask": "Task details are unavailable.",
-      "noToolCalls": "No tool calls.",
-      "expand": "Expand",
-      "collapse": "Collapse"
+      "noToolCalls": "No tool calls."
     },
     "recentUserMessages": "Recent user messages",
     "scrollNavigation": "Conversation navigation",

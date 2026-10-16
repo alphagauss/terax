@@ -4,6 +4,7 @@
  */
 
 import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
+import { ShellExecution } from "@/modules/ai/lib/shellExecution";
 import {
   type AgentTurnCoordinator,
   releaseAgentTurnCoordinator,
@@ -181,7 +182,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
 
   const coordinator = opts.turnCoordinator;
-  const rootTools = buildManagedSubagentTools(opts);
 
   return {
     toUIMessageStream({
@@ -195,6 +195,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
         originalMessages,
         onError,
         execute: async ({ writer }) => {
+          const shellExecution = new ShellExecution(
+            opts.toolContext.getSessionId(),
+            opts.abortSignal,
+          );
+          const rootTools = buildManagedSubagentTools({
+            ...opts,
+            toolContext: { ...opts.toolContext, shellExecution },
+          });
           const modelHistory: ModelMessage[] = [...prunedHistory];
           const last =
             opts.compactOnly === undefined
@@ -220,7 +228,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
           let finishReason: FinishReason = "stop";
           let approvalPending = false;
           let activityStartedAt: number | undefined;
-          const abort = () => void coordinator.cancelAll();
+          const abort = () => void coordinator.cancelAll().catch(() => {});
           opts.abortSignal?.addEventListener("abort", abort, { once: true });
 
           const finishActivity = (
@@ -548,7 +556,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
               ) {
                 writer.setOutcome(cycle.outcome);
                 finishActivity();
-                await coordinator.cancelAll();
+                await Promise.all([
+                  coordinator.cancelAll(),
+                  shellExecution.stop(),
+                ]);
+                await shellExecution.close();
                 releaseAgentTurnCoordinator(
                   opts.toolContext.getSessionId(),
                   coordinator,
@@ -637,6 +649,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
             if (!approvalPending) coordinator.inbox.close();
             finishActivity();
+            await shellExecution.close();
             writer.setOutcome({ status: "completed" });
             writer.write({
               type: "finish",
@@ -656,14 +669,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
           } catch (error) {
             contextUsage?.finish();
             finishActivity();
-            await coordinator.cancelAll();
+            const cleanup = await Promise.allSettled([
+              coordinator.cancelAll(),
+              shellExecution.stop(),
+            ]);
             releaseAgentTurnCoordinator(
               opts.toolContext.getSessionId(),
               coordinator,
             );
+            const failed = cleanup.find(
+              (result) => result.status === "rejected",
+            );
+            if (failed?.status === "rejected") throw failed.reason;
             throw error;
           } finally {
             opts.abortSignal?.removeEventListener("abort", abort);
+            await shellExecution.close();
           }
         },
       });

@@ -98,6 +98,136 @@ pub struct ShellState {
     owner_cwds: RwLock<HashMap<String, String>>,
     owner_exec_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     spawn_lock: tokio::sync::Mutex<()>,
+    executions: Mutex<HashMap<(String, String), ExecutionScope>>,
+    process_executions: Mutex<HashMap<String, ProcessExecution>>,
+}
+
+struct ExecutionScope {
+    task_id: Option<String>,
+    cancelled: bool,
+}
+
+struct ProcessExecution {
+    owner: String,
+    execution: String,
+    task: Option<String>,
+}
+
+/// 工具开始前建立执行准入，全部工具收口后关闭。
+pub fn shell_open_execution(
+    state: &ShellState,
+    owner_session_id: String,
+    execution_id: String,
+    task_id: Option<String>,
+) -> Result<(), String> {
+    validate_owner(&owner_session_id)?;
+    validate_process_id(&execution_id)?;
+    if task_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > 256)
+    {
+        return Err("invalid Agent task id".into());
+    }
+    let mut scopes = state.executions.lock().unwrap();
+    let key = (owner_session_id, execution_id);
+    if scopes.contains_key(&key) {
+        return Err("Agent execution already exists".into());
+    }
+    scopes.insert(
+        key,
+        ExecutionScope {
+            task_id,
+            cancelled: false,
+        },
+    );
+    Ok(())
+}
+
+/// 全部工具结束后释放准入，后台进程仍保留任务归属。
+pub async fn shell_close_execution(
+    state: &ShellState,
+    owner_session_id: String,
+    execution_id: String,
+) -> Result<(), String> {
+    validate_owner(&owner_session_id)?;
+    validate_process_id(&execution_id)?;
+    let _guard = state.spawn_lock.lock().await;
+    state
+        .executions
+        .lock()
+        .unwrap()
+        .remove(&(owner_session_id, execution_id));
+    Ok(())
+}
+
+/// 先关闭准入，再等待在途启动登记并终止该次执行的进程树。
+pub async fn shell_stop_execution(
+    state: &ShellState,
+    owner_session_id: String,
+    execution_id: String,
+) -> Result<(), String> {
+    validate_owner(&owner_session_id)?;
+    validate_process_id(&execution_id)?;
+    if let Some(scope) = state
+        .executions
+        .lock()
+        .unwrap()
+        .get_mut(&(owner_session_id.clone(), execution_id.clone()))
+    {
+        scope.cancelled = true;
+    }
+    stop_scoped_processes(state, &owner_session_id, Some(&execution_id), None).await
+}
+
+/// 终止任务历次执行的进程，并关闭仍在执行的任务准入。
+pub async fn shell_stop_task(
+    state: &ShellState,
+    owner_session_id: String,
+    task_id: String,
+) -> Result<(), String> {
+    validate_owner(&owner_session_id)?;
+    for ((owner, _), scope) in state.executions.lock().unwrap().iter_mut() {
+        if owner == &owner_session_id && scope.task_id.as_deref() == Some(&task_id) {
+            scope.cancelled = true;
+        }
+    }
+    stop_scoped_processes(state, &owner_session_id, None, Some(&task_id)).await
+}
+
+async fn stop_scoped_processes(
+    state: &ShellState,
+    owner: &str,
+    execution: Option<&str>,
+    task: Option<&str>,
+) -> Result<(), String> {
+    let _guard = state.spawn_lock.lock().await;
+    let ids: Vec<_> = state
+        .process_executions
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, process)| {
+            process.owner == owner
+                && execution.is_none_or(|id| id == process.execution)
+                && task.is_none_or(|id| Some(id) == process.task.as_deref())
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    let processes: Vec<_> = {
+        let processes = state.processes.read().unwrap();
+        ids.iter()
+            .filter_map(|id| processes.get(id).cloned())
+            .collect()
+    };
+    // 准入已经关闭，登记快照完成后不再阻塞其他聊天启动。
+    drop(_guard);
+    let mut failure = None;
+    for process in processes {
+        if let Err(error) = process.terminate_as(ProcessStatus::Terminated).await {
+            failure = Some(error);
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 impl Default for ShellState {
@@ -107,6 +237,8 @@ impl Default for ShellState {
             owner_cwds: RwLock::new(HashMap::new()),
             owner_exec_locks: Mutex::new(HashMap::new()),
             spawn_lock: tokio::sync::Mutex::new(()),
+            executions: Mutex::new(HashMap::new()),
+            process_executions: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -135,6 +267,7 @@ pub async fn shell_exec(
     state: &ShellState,
     registry: &WorkspaceRegistry,
     owner_session_id: String,
+    execution_id: Option<String>,
     command: String,
     initial_cwd: String,
     cwd: Option<String>,
@@ -192,6 +325,18 @@ pub async fn shell_exec(
     // 容量检查与登记必须覆盖同一个 spawn 临界区，否则并发调用可以穿透进程上限。
     // 锁在登记后立即释放，不占用后续首次等待时间。
     let spawn_guard = state.spawn_lock.lock().await;
+    let task_id = if let Some(execution_id) = execution_id.as_ref() {
+        let scopes = state.executions.lock().unwrap();
+        let scope = scopes
+            .get(&(owner_session_id.clone(), execution_id.clone()))
+            .ok_or("Agent execution is closed")?;
+        if scope.cancelled {
+            return Err("Agent execution is cancelled".into());
+        }
+        scope.task_id.clone()
+    } else {
+        None
+    };
     state.cleanup();
     state.enforce_limits(&owner_session_id)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -226,6 +371,16 @@ pub async fn shell_exec(
             ProcessPurpose::Shell,
         )?
     };
+    if let Some(execution_id) = execution_id.as_ref() {
+        state.process_executions.lock().unwrap().insert(
+            id.clone(),
+            ProcessExecution {
+                owner: owner_session_id.clone(),
+                execution: execution_id.clone(),
+                task: task_id,
+            },
+        );
+    }
     state.processes.write().unwrap().insert(id, process.clone());
     drop(spawn_guard);
 
@@ -250,7 +405,14 @@ pub async fn shell_exec(
             .await
             .map_err(|error| error.to_string())?;
     if explicit_cwd.is_none() && response.status != ProcessStatus::Running {
-        if let Some(cwd_after) = response.cwd_after.clone() {
+        // owner 清理已撤销准入时，晚到结果不能恢复已删除的聊天 cwd。
+        let scopes = state.executions.lock().unwrap();
+        let active = execution_id.as_ref().is_none_or(|execution| {
+            scopes
+                .get(&(owner_session_id.clone(), execution.clone()))
+                .is_some_and(|scope| !scope.cancelled)
+        });
+        if let Some(cwd_after) = response.cwd_after.clone().filter(|_| active) {
             state
                 .owner_cwds
                 .write()
@@ -360,6 +522,12 @@ pub fn shell_list(
 /// 删除聊天时终止并清理该 owner 的全部 Agent 进程。
 pub async fn shell_clear_owner(state: &ShellState, owner_session_id: String) -> Result<(), String> {
     validate_owner(&owner_session_id)?;
+    // 先撤销准入，再等待在途启动登记，避免清理期间排队的执行恢复启动。
+    state
+        .executions
+        .lock()
+        .unwrap()
+        .retain(|(owner, _), _| owner != &owner_session_id);
     let _spawn_guard = state.spawn_lock.lock().await;
     let processes: Vec<_> = state
         .processes
@@ -369,21 +537,30 @@ pub async fn shell_clear_owner(state: &ShellState, owner_session_id: String) -> 
         .filter(|process| process.owner_session_id == owner_session_id)
         .cloned()
         .collect();
-    for process in &processes {
-        process.terminate_as(ProcessStatus::Terminated).await?;
-    }
-    state
-        .processes
-        .write()
-        .unwrap()
-        .retain(|_, process| process.owner_session_id != owner_session_id);
     state.owner_cwds.write().unwrap().remove(&owner_session_id);
     state
         .owner_exec_locks
         .lock()
         .unwrap()
         .remove(&owner_session_id);
-    Ok(())
+    drop(_spawn_guard);
+    let mut failed = std::collections::HashSet::new();
+    let mut failure = None;
+    for process in &processes {
+        if let Err(error) = process.terminate_as(ProcessStatus::Terminated).await {
+            failed.insert(process.id.clone());
+            failure = Some(error);
+        }
+    }
+    let mut registered = state.processes.write().unwrap();
+    let mut executions = state.process_executions.lock().unwrap();
+    for process in processes {
+        if !failed.contains(&process.id) {
+            registered.remove(&process.id);
+            executions.remove(&process.id);
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 impl ShellState {
@@ -504,11 +681,13 @@ impl ShellState {
         let processes = self.processes.read().unwrap();
         let app_running = processes
             .values()
-            .filter(|process| process.is_running())
+            .filter(|process| process.holds_resources())
             .count();
         let owner_running = processes
             .values()
-            .filter(|process| process.is_running() && process.owner_session_id == owner_session_id)
+            .filter(|process| {
+                process.holds_resources() && process.owner_session_id == owner_session_id
+            })
             .count();
         validate_running_counts(app_running, owner_running)
     }
@@ -516,11 +695,12 @@ impl ShellState {
     fn cleanup(&self) {
         let mut processes = self.processes.write().unwrap();
         processes.retain(|_, process| {
-            process.is_running() || process.finished_age().is_some_and(|age| age < FINISHED_TTL)
+            process.holds_resources()
+                || process.finished_age().is_some_and(|age| age < FINISHED_TTL)
         });
         let mut finished: Vec<_> = processes
             .iter()
-            .filter(|(_, process)| !process.is_running())
+            .filter(|(_, process)| !process.holds_resources())
             .filter_map(|(id, process)| process.finished_age().map(|age| (id.clone(), age)))
             .collect();
         if finished.len() > MAX_FINISHED_RECORDS {
@@ -530,6 +710,10 @@ impl ShellState {
                 processes.remove(&id);
             }
         }
+        self.process_executions
+            .lock()
+            .unwrap()
+            .retain(|id, _| processes.contains_key(id));
     }
 }
 
@@ -1142,6 +1326,99 @@ fn drain<R: Read>(reader: &mut R) -> (Vec<u8>, bool) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn execution_stop_closes_admission_and_preserves_sibling_tasks() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().to_string_lossy().into_owned();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let state = ShellState::default();
+        let owner = uuid::Uuid::new_v4().to_string();
+        let first = uuid::Uuid::new_v4().to_string();
+        let sibling = uuid::Uuid::new_v4().to_string();
+        shell_open_execution(&state, owner.clone(), first.clone(), Some("first".into())).unwrap();
+        shell_open_execution(
+            &state,
+            owner.clone(),
+            sibling.clone(),
+            Some("sibling".into()),
+        )
+        .unwrap();
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 30";
+        #[cfg(unix)]
+        let command = "sleep 30";
+        let run = |execution: String| {
+            shell_exec(
+                &state,
+                &registry,
+                owner.clone(),
+                Some(execution),
+                command.into(),
+                cwd.clone(),
+                Some(cwd.clone()),
+                AgentPermissionMode::FullAccess,
+                0,
+                0,
+                8192,
+                ShellKind::Default,
+                false,
+                Some(WorkspaceEnv::Local),
+            )
+        };
+        let first_process = run(first.clone()).await.unwrap();
+        let sibling_process = run(sibling.clone()).await.unwrap();
+        shell_stop_execution(&state, uuid::Uuid::new_v4().to_string(), first.clone())
+            .await
+            .unwrap();
+        assert!(state.processes.read().unwrap()[&first_process.process_id].is_running());
+        // 模拟启动临界区被占用，停止必须先关闭准入，随后排队的启动不能逃逸。
+        let spawn_guard = state.spawn_lock.lock().await;
+        let (stopped, late) = tokio::join!(
+            shell_stop_execution(&state, owner.clone(), first.clone()),
+            async {
+                tokio::task::yield_now().await;
+                drop(spawn_guard);
+                run(first.clone()).await
+            }
+        );
+        stopped.unwrap();
+        assert!(late.err().unwrap().contains("cancelled"));
+        assert_eq!(
+            state.processes.read().unwrap()[&first_process.process_id]
+                .response(0, 8192)
+                .status,
+            ProcessStatus::Terminated
+        );
+        assert!(state.processes.read().unwrap()[&sibling_process.process_id].is_running());
+        shell_close_execution(&state, owner.clone(), sibling.clone())
+            .await
+            .unwrap();
+        assert!(run(sibling.clone()).await.err().unwrap().contains("closed"));
+        shell_stop_task(&state, owner.clone(), "sibling".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.processes.read().unwrap()[&sibling_process.process_id]
+                .response(0, 8192)
+                .status,
+            ProcessStatus::Terminated
+        );
+        let late_execution = uuid::Uuid::new_v4().to_string();
+        shell_open_execution(&state, owner.clone(), late_execution.clone(), None).unwrap();
+        let spawn_guard = state.spawn_lock.lock().await;
+        let (cleared, late) = tokio::join!(shell_clear_owner(&state, owner.clone()), async {
+            tokio::task::yield_now().await;
+            drop(spawn_guard);
+            run(late_execution).await
+        });
+        cleared.unwrap();
+        assert!(late.err().unwrap().contains("closed"));
+        assert!(state.executions.lock().unwrap().is_empty());
+        assert!(state.processes.read().unwrap().is_empty());
+        assert!(state.process_executions.lock().unwrap().is_empty());
+    }
+
     use super::*;
 
     #[cfg(unix)]
@@ -1293,6 +1570,7 @@ mod tests {
             &state,
             &registry,
             owner.clone(),
+            None,
             command.into(),
             cwd.clone(),
             Some(cwd),

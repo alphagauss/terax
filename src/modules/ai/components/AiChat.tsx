@@ -718,12 +718,34 @@ const RenderedMessage = memo(function RenderedMessage({
   // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
   // 不应因后续工具调用继续显示流式状态。
   const streamingPartIdx = streaming ? message.parts.length - 1 : -1;
+  const subagentParts = messageMetadata(message).subagents;
+  const subagentCallIds = useMemo(
+    () =>
+      message.parts
+        .filter((part) => isSubagentToolPart(part as AnyPart, true))
+        .map((part) => toolCallIdFromPart(part as AnyPart)),
+    [message.parts],
+  );
+  // 只订阅子任务调用是否已有执行事实，进度变化不重算分组。
+  const liveSubagentPresence = useChatDisplayStore(useChatStore, (state) =>
+    subagentCallIds
+      .map((id) => state.subagentDisplaysBySession[sessionId]?.[id] ? "1" : "0")
+      .join(""),
+  );
+  const subagentCalls = useMemo(
+    () =>
+      new Set([
+        ...(subagentParts?.displaysByToolCallId.keys() ?? []),
+        ...subagentCallIds.filter((_, index) => liveSubagentPresence[index] === "1"),
+      ]),
+    [subagentParts?.displaysByToolCallId, subagentCallIds, liveSubagentPresence],
+  );
   const groups = useMemo(
     () =>
       message.role === "user"
         ? []
-        : buildMessageGroups(message.parts as AnyPart[]),
-    [message.parts, message.role],
+        : buildMessageGroups(message.parts as AnyPart[], subagentCalls),
+    [message.parts, message.role, subagentCalls],
   );
   const editing = useChatStore(
     (state) =>
@@ -732,7 +754,6 @@ const RenderedMessage = memo(function RenderedMessage({
   );
   const timestamp = useMessageTimestamp(message);
   const copyText = useMemo(() => messageTextForCopy(message), [message]);
-  const subagentParts = messageMetadata(message).subagents;
   const fileEdits = messageMetadata(message).fileEdits;
   const fileEditContext = useMemo(
     () => ({ sessionId, calls: fileEdits?.calls }),
@@ -845,6 +866,7 @@ const RenderedMessage = memo(function RenderedMessage({
                           sessionId={sessionId}
                           streaming={streaming}
                           streamingPartIdx={streamingPartIdx}
+                          subagentCalls={subagentCalls}
                           subagentParts={subagentParts}
                         />
                       ))}
@@ -860,6 +882,7 @@ const RenderedMessage = memo(function RenderedMessage({
                   sessionId={sessionId}
                   streaming={streaming}
                   streamingPartIdx={streamingPartIdx}
+                  subagentCalls={subagentCalls}
                   subagentParts={subagentParts}
                 />
               );
@@ -977,12 +1000,14 @@ const RenderedLeafGroup = memo(function RenderedLeafGroup({
   streaming,
   streamingPartIdx,
   subagentParts,
+  subagentCalls,
 }: {
   group: LeafGroup;
   message: UIMessage;
   sessionId: string;
   streaming: boolean;
   streamingPartIdx: number;
+  subagentCalls: ReadonlySet<string>;
   subagentParts: ReturnType<typeof messageMetadata>["subagents"];
 }) {
   if (group.kind === "reads") {
@@ -1007,6 +1032,7 @@ const RenderedLeafGroup = memo(function RenderedLeafGroup({
       <RenderedPart
         sessionId={sessionId}
         part={group.part}
+        hasSubagentDisplay={subagentCalls.has(toolCallIdFromPart(group.part))}
         streaming={group.idx === streamingPartIdx}
         reasoningStreaming={
           streaming &&
@@ -1164,7 +1190,10 @@ function partKey(p: AnyPart, idx: number): string {
 }
 
 /** 将正文和 Subagent 之间的其余可展示内容归入独立活动块。 */
-export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
+export function buildMessageGroups(
+  parts: AnyPart[],
+  subagentCalls?: ReadonlySet<string>,
+): MessageGroup[] {
   const groups: MessageGroup[] = [];
   let plain: { parts: AnyPart[]; startIndex: number } | undefined;
   let activity:
@@ -1216,7 +1245,9 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
       }
       continue;
     }
-    if (isActivityBoundary(part)) {
+    if (
+      isActivityBoundary(part, subagentCalls?.has(toolCallIdFromPart(part)))
+    ) {
       flushActivity();
       appendPlain(part, index);
       continue;
@@ -1302,12 +1333,27 @@ function isToolPart(part: AnyPart): boolean {
   return type === "dynamic-tool" || type.startsWith("tool-");
 }
 
-function isSubagentToolPart(part: AnyPart): boolean {
+function isSubagentToolPart(part: AnyPart, hasDisplay = false): boolean {
   if (!isToolPart(part)) return false;
+  const tool = part as unknown as AnyToolPart;
+  const name =
+    tool.type === "dynamic-tool"
+      ? tool.toolName
+      : tool.type.replace(/^tool-/, "");
+  if (name === "run_subagent") return true;
+  const output = tool.output as
+    | { taskId?: string; status?: string }
+    | undefined;
   return (
-    partType(part) === "tool-run_subagent" ||
-    (partType(part) === "dynamic-tool" &&
-      (part as { toolName?: string }).toolName === "run_subagent")
+    name === "subagent_task" &&
+    (tool.input as { action?: string } | undefined)?.action === "send" &&
+    (hasDisplay ||
+      (Boolean(output?.taskId) &&
+        (output?.status === "running" ||
+          output?.status === "completed" ||
+          output?.status === "incomplete" ||
+          output?.status === "cancelled" ||
+          output?.status === "failed")))
   );
 }
 
@@ -1322,8 +1368,11 @@ function isVisibleActivityPart(part: AnyPart): boolean {
   return partType(part) === "reasoning" || isToolPart(part);
 }
 
-function isActivityBoundary(part: AnyPart): boolean {
-  return isBodyTextPart(part) || isSubagentToolPart(part);
+function isActivityBoundary(
+  part: AnyPart,
+  hasSubagentDisplay = false,
+): boolean {
+  return isBodyTextPart(part) || isSubagentToolPart(part, hasSubagentDisplay);
 }
 
 /** 仅为展示压缩摘要；摘要尚未形成时回退到工具动作，不改写工具输入。 */
@@ -1580,7 +1629,9 @@ const RenderedPart = memo(function RenderedPart({
   reasoningDurationMs,
   persistedSubagent,
   subagentResult,
+  hasSubagentDisplay,
 }: {
+  hasSubagentDisplay: boolean;
   sessionId: string;
   part: AnyPart;
   streaming: boolean;
@@ -1617,15 +1668,7 @@ const RenderedPart = memo(function RenderedPart({
     (typeof part.type === "string" && part.type.startsWith("tool-"))
   ) {
     const toolPart = part as unknown as AnyToolPart;
-    const toolName =
-      toolPart.type === "dynamic-tool"
-        ? toolPart.toolName
-        : toolPart.type.replace(/^tool-/, "");
-    const managedTask = toolName === "subagent_task" &&
-      (toolPart.input as { action?: string })?.action === "send" &&
-      Boolean((toolPart.output as { taskId?: string })?.taskId) &&
-      (toolPart.output as { status?: string })?.status !== "queued";
-    if (toolName === "run_subagent" || managedTask) {
+    if (isSubagentToolPart(part, hasSubagentDisplay)) {
       return (
         <LiveSubagentCard
           sessionId={sessionId}

@@ -40,9 +40,9 @@ describe("Subagent display data", () => {
     );
   });
 
-  it("terminalizes interrupted tasks without persisting task or result text", () => {
+  it.each(["running", "stopping"] as const)("terminalizes interrupted %s tasks without persisting task or result text", (status) => {
     const snapshot = toSubagentDisplaySnapshot(
-      runningDisplay,
+      { ...runningDisplay, status },
       "cancelled",
       500,
     );

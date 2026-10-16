@@ -143,6 +143,7 @@ impl Host {
                     &self.shell,
                     &self.registry,
                     arg(a, "ownerSessionId")?,
+                    arg(a, "executionId")?,
                     arg(a, "command")?,
                     arg(a, "initialCwd")?,
                     arg(a, "cwd")?,
@@ -179,6 +180,32 @@ impl Host {
                 arg(a, "includeExited")?,
                 env,
             )),
+            "shell_open_execution" => value(shell::shell_open_execution(
+                &self.shell,
+                arg(a, "ownerSessionId")?,
+                arg(a, "executionId")?,
+                arg(a, "taskId")?,
+            )),
+            "shell_close_execution" => value(
+                shell::shell_close_execution(
+                    &self.shell,
+                    arg(a, "ownerSessionId")?,
+                    arg(a, "executionId")?,
+                )
+                .await,
+            ),
+            "shell_stop_execution" => value(
+                shell::shell_stop_execution(
+                    &self.shell,
+                    arg(a, "ownerSessionId")?,
+                    arg(a, "executionId")?,
+                )
+                .await,
+            ),
+            "shell_stop_task" => value(
+                shell::shell_stop_task(&self.shell, arg(a, "ownerSessionId")?, arg(a, "taskId")?)
+                    .await,
+            ),
             "shell_clear_owner" => {
                 value(shell::shell_clear_owner(&self.shell, arg(a, "ownerSessionId")?).await)
             }

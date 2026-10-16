@@ -105,6 +105,7 @@ export async function clearAgentTurnCoordinator(
  */
 export class AgentTurnCoordinator {
   private readonly running = new Map<string, RunningTask>();
+  private readonly stopping = new Map<string, Promise<void>>();
   private readonly finished = new Map<
     string,
     { toolCallId: string; result: SubagentTaskResult }
@@ -129,12 +130,17 @@ export class AgentTurnCoordinator {
   }
 
   get isIdle(): boolean {
-    return this.running.size === 0 && !this.inbox.hasPending;
+    return (
+      this.running.size === 0 &&
+      this.stopping.size === 0 &&
+      !this.inbox.hasPending
+    );
   }
 
   /** 启动一个同步等待或后台 Subagent，超过当前聊天额度时立即拒绝。 */
   async start(options: {
     taskId?: string;
+    existingTaskIds?: Iterable<string>;
     task: string;
     label?: string;
     toolCallId: string;
@@ -161,8 +167,16 @@ export class AgentTurnCoordinator {
       };
     }
 
-    const taskId = options.taskId ?? crypto.randomUUID();
-    if (this.running.has(taskId))
+    const taskId =
+      options.taskId ??
+      createTaskId(
+        new Set([
+          ...(options.existingTaskIds ?? []),
+          ...this.running.keys(),
+          ...this.finished.keys(),
+        ]),
+      );
+    if (this.isRunning(taskId))
       return { status: "rejected", error: "Task is already running." };
     const label = normalizeLabel(options.label, options.task);
     const controller = new AbortController();
@@ -195,7 +209,7 @@ export class AgentTurnCoordinator {
       details: Partial<Pick<SubagentDisplayState, "result" | "error">> = {},
     ) => {
       const now = Date.now();
-      if (display.status === "running") {
+      if (display.status === "running" || display.status === "stopping") {
         display = {
           ...display,
           ...details,
@@ -207,7 +221,11 @@ export class AgentTurnCoordinator {
       }
       return now;
     };
-    const cancelDisplay = () => finishDisplay("cancelled");
+    const cancelDisplay = () => {
+      if (display.status !== "running") return;
+      display = { ...display, status: "stopping" };
+      publishDisplay();
+    };
     publishDisplay();
     const done = options
       .run({
@@ -218,6 +236,8 @@ export class AgentTurnCoordinator {
         abortSignal: controller.signal,
         onProgress: updateProgress,
       })
+      // 任务的历次后台进程也必须清理完，才发布终态并允许续跑。
+      .finally(() => this.stopping.get(taskId))
       .then((result): SubagentTaskResult => {
         const now = finishDisplay(result.status, {
           ...(options.wait || result.result === undefined
@@ -233,15 +253,19 @@ export class AgentTurnCoordinator {
         };
       })
       .catch((error): SubagentTaskResult => {
+        const cancelled =
+          controller.signal.aborted &&
+          error instanceof Error &&
+          error.name === "AbortError";
         const now = finishDisplay(
-          controller.signal.aborted ? "cancelled" : "failed",
-          { error: String(error) },
+          cancelled ? "cancelled" : "failed",
+          cancelled ? {} : { error: String(error) },
         );
         return {
           taskId,
           label,
-          status: controller.signal.aborted ? "cancelled" : "failed",
-          error: String(error),
+          status: cancelled ? "cancelled" : "failed",
+          ...(cancelled ? {} : { error: String(error) }),
           durationMs: now - startedAt,
         };
       })
@@ -294,7 +318,7 @@ export class AgentTurnCoordinator {
   }
 
   isRunning(taskId: string): boolean {
-    return this.running.has(taskId);
+    return this.running.has(taskId) || this.stopping.has(taskId);
   }
 
   /** 捕获当前执行再等待；超时只释放等待者，成功时按原工具调用消费后台事件。 */
@@ -348,12 +372,28 @@ export class AgentTurnCoordinator {
   }
 
   /** 等待取消收尾，确保续跑不会与旧执行重叠。 */
-  async stop(taskId: string): Promise<void> {
+  async stop(
+    taskId: string,
+    stopResources?: () => Promise<void>,
+  ): Promise<void> {
     const task = this.running.get(taskId);
-    if (!task) return;
-    task.cancelDisplay();
-    task.controller.abort();
-    await task.done;
+    const cleanup =
+      this.stopping.get(taskId) ?? Promise.resolve().then(stopResources);
+    this.stopping.set(taskId, cleanup);
+    task?.cancelDisplay();
+    task?.controller.abort();
+    try {
+      const [resources, execution] = await Promise.allSettled([
+        cleanup,
+        task?.done,
+      ]);
+      if (resources.status === "rejected") throw resources.reason;
+      if (execution.status === "rejected") throw execution.reason;
+      if (execution.value?.status === "failed")
+        throw new Error(execution.value.error ?? "Task cleanup failed.");
+    } finally {
+      if (this.stopping.get(taskId) === cleanup) this.stopping.delete(taskId);
+    }
   }
 
   /** 等待当前聊天已经登记的全部 Subagent 完成。 */
@@ -369,17 +409,24 @@ export class AgentTurnCoordinator {
     this.waitController.abort();
     this.inbox.cancel();
     const tasks = [...this.running.values()];
+    const cleanup = Promise.allSettled([...this.stopping.values()]);
     for (const task of tasks) {
       task.cancelDisplay();
       task.controller.abort();
     }
-    await Promise.all(tasks.map((task) => task.done));
+    const results = await Promise.all(tasks.map((task) => task.done));
+    const failedCleanup = (await cleanup).find(
+      (result) => result.status === "rejected",
+    );
     this.running.clear();
+    if (failedCleanup?.status === "rejected") throw failedCleanup.reason;
+    const failed = results.find((result) => result.status === "failed");
+    if (failed) throw new Error(failed.error ?? "Task cleanup failed.");
   }
 
   /** 在一个 turn 正常完成后清除临时序号，下一轮重新开始。 */
   reset(): void {
-    if (this.running.size > 0 || this.inbox.hasPending) return;
+    if (!this.isIdle) return;
     this.order = 0;
     this.finished.clear();
     this.sessions = undefined;
@@ -387,6 +434,19 @@ export class AgentTurnCoordinator {
     this.waitController = new AbortController();
     this.cancelled = false;
   }
+}
+
+/** 短 ID 只在当前聊天内唯一，已保存的任务编号不会重用。 */
+function createTaskId(existing: ReadonlySet<string>): string {
+  const alphabet = "23456789abcdefghjkmnpqrstuvwxyz";
+  let id: string;
+  do {
+    id = Array.from(
+      crypto.getRandomValues(new Uint8Array(4)),
+      (value) => alphabet[value % alphabet.length],
+    ).join("");
+  } while (existing.has(id));
+  return id;
 }
 
 function reduceDisplayProgress(

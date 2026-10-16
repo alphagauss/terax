@@ -7,6 +7,7 @@ import { isToolSummary, type ToolSummary } from "@/modules/ai/lib/toolSummary";
 
 export type SubagentDisplayStatus =
   | "running"
+  | "stopping"
   | "completed"
   | "incomplete"
   | "failed"
@@ -34,7 +35,7 @@ export type SubagentDisplayState = {
 };
 
 type SubagentDisplaySnapshotStep = Omit<SubagentDisplayStep, "status"> & {
-  status: Exclude<SubagentDisplayStatus, "running">;
+  status: Exclude<SubagentDisplayStatus, "running" | "stopping">;
 };
 
 /** 从子会话事实派生、只服务历史展示的终态快照。 */
@@ -45,7 +46,7 @@ export type SubagentDisplaySnapshot = Pick<
   result?: string;
   error?: string;
   version: 2;
-  status: Exclude<SubagentDisplayStatus, "running">;
+  status: Exclude<SubagentDisplayStatus, "running" | "stopping">;
   durationMs: number;
   steps: SubagentDisplaySnapshotStep[];
 };
@@ -78,7 +79,10 @@ export function toSubagentDisplaySnapshot(
   interruptedStatus: "failed" | "cancelled",
   now = Date.now(),
 ): SubagentDisplaySnapshot {
-  const status = state.status === "running" ? interruptedStatus : state.status;
+  const status =
+    state.status === "running" || state.status === "stopping"
+      ? interruptedStatus
+      : state.status;
   return {
     ...(state.result === undefined ? {} : { result: state.result }),
     ...(state.error === undefined ? {} : { error: state.error }),
@@ -92,7 +96,7 @@ export function toSubagentDisplaySnapshot(
       (step): SubagentDisplaySnapshotStep => ({
         ...step,
         status:
-          step.status === "running"
+          step.status === "running" || step.status === "stopping"
             ? status === "cancelled"
               ? "cancelled"
               : "failed"
@@ -127,7 +131,7 @@ export function isSubagentDisplaySnapshot(
 
 function isTerminalStatus(
   value: unknown,
-): value is Exclude<SubagentDisplayStatus, "running"> {
+): value is Exclude<SubagentDisplayStatus, "running" | "stopping"> {
   return (
     value === "completed" ||
     value === "incomplete" ||

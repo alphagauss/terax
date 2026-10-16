@@ -15,7 +15,6 @@ import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
 import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import {
-  describeToolCall,
   formatToolSummary,
   type ToolSummary,
 } from "@/modules/ai/lib/toolSummary";
@@ -80,11 +79,6 @@ export function SubagentCard({
   backgroundResult,
 }: Props) {
   const { t } = useTranslation("ai");
-  const toolName =
-    part.type === "tool-subagent_task" ||
-    ("toolName" in part && part.toolName === "subagent_task")
-      ? "subagent_task"
-      : "run_subagent";
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
   const task = stringValue(input?.task) ?? stringValue(input?.message) ?? "";
@@ -107,35 +101,29 @@ export function SubagentCard({
     status === "running" ? "process" : "result",
   );
   const [taskOpen, setTaskOpen] = useState(false);
-  const taskCanExpand = task.length > 180 || task.split("\n").length > 3;
+  const label = display?.label ?? stringValue(input?.label) ?? t("chat.subagent.title");
+
+  useEffect(() => {
+    if (status !== "running" && status !== "stopping") setTab("result");
+  }, [status]);
 
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="group/subagent overflow-hidden rounded-md border border-border/50 bg-card/50"
+      className="group/subagent overflow-hidden rounded-md border border-primary/20 bg-primary/5"
     >
       <CollapsibleTrigger className="flex w-full min-w-0 items-start gap-2 px-2 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <HugeiconsIcon
           icon={RobotIcon}
           size={13}
           strokeWidth={1.75}
-          className="mt-0.5 shrink-0 text-muted-foreground"
+          className="mt-0.5 shrink-0 text-primary"
         />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-[12px] font-medium text-foreground">
-              {toolName}
-            </span>
-            <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-              {formatToolSummary(
-                describeToolCall(
-                  toolName,
-                  input ?? { label: display?.label },
-                  part.state !== "input-streaming",
-                ),
-                t,
-              )}
+            <span className="min-w-0 truncate text-[12px] font-medium text-foreground">
+              {label}
             </span>
             {!open &&
               headline.kind === "running" &&
@@ -173,30 +161,17 @@ export function SubagentCard({
 
       <CollapsibleContent className="terax-collapsible-content border-t border-border/30">
         <div className="space-y-2.5 px-2.5 py-2">
-          <section>
-            <div className="text-[10px] font-medium text-muted-foreground">
+          <Collapsible open={taskOpen} onOpenChange={setTaskOpen}>
+            <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">
+              <HugeiconsIcon icon={ArrowRight01Icon} size={10} className={cn(taskOpen && "rotate-90")} />
               {t("chat.subagent.task")}
-            </div>
-            <div
-              className={cn(
-                "mt-1 whitespace-pre-wrap wrap-break-word text-[11.5px] leading-relaxed text-foreground/85",
-                !taskOpen && taskCanExpand && "line-clamp-3",
-              )}
-            >
-              {task || t("chat.subagent.emptyTask")}
-            </div>
-            {taskCanExpand ? (
-              <button
-                type="button"
-                onClick={() => setTaskOpen((value) => !value)}
-                className="mt-1 text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              >
-                {taskOpen
-                  ? t("chat.subagent.collapse")
-                  : t("chat.subagent.expand")}
-              </button>
-            ) : null}
-          </section>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="mt-1 whitespace-pre-wrap wrap-break-word text-[11.5px] leading-relaxed text-foreground">
+                {task || t("chat.subagent.emptyTask")}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           <div className="flex w-fit rounded-md bg-muted/50 p-0.5 text-[10.5px]">
             <TabButton
@@ -288,7 +263,7 @@ function ProcessList({
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px]"
         >
           <StepStatus status={step.status} />
-          <span className="shrink-0 font-medium text-foreground/90">
+          <span className="shrink-0 font-medium text-foreground">
             {step.toolName}
           </span>
           {step.summary ? (
@@ -315,10 +290,10 @@ function ResultPanel({
   result?: SubagentResultView;
 }) {
   const { t } = useTranslation("ai");
-  if (status === "running") {
+  if (status === "running" || status === "stopping") {
     return (
       <div className="rounded-md bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground">
-        {t("chat.subagent.waitingResult")}
+        {t(status === "stopping" ? "chat.subagent.stopping" : "chat.subagent.waitingResult")}
       </div>
     );
   }
@@ -365,7 +340,7 @@ function StatusIcon({ status }: { status: SubagentDisplayStatus }) {
         icon={CheckmarkCircle02Icon}
         size={12}
         strokeWidth={2}
-        className="shrink-0 text-emerald-500"
+        className="shrink-0 text-success"
       />
     );
   }
@@ -390,7 +365,7 @@ function StatusIcon({ status }: { status: SubagentDisplayStatus }) {
 
 function StepStatus({ status }: { status: SubagentDisplayStep["status"] }) {
   if (status === "running") {
-    return <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />;
+    return <span className="size-1.5 shrink-0 rounded-full bg-warning" />;
   }
   if (status === "completed") {
     return (
@@ -398,7 +373,7 @@ function StepStatus({ status }: { status: SubagentDisplayStep["status"] }) {
         icon={CheckmarkCircle02Icon}
         size={11}
         strokeWidth={2}
-        className="shrink-0 text-emerald-500"
+        className="shrink-0 text-success"
       />
     );
   }
@@ -479,7 +454,7 @@ function useStableHeadline(actual: Headline): Headline {
       shownRef.current = next;
       setShown(next);
     };
-    if (!mustHold) {
+    if (!mustHold || (actual.kind === "terminal" && actual.status === "stopping")) {
       applyLatest();
       return;
     }
@@ -520,6 +495,7 @@ function resolveStatus(
   if (backgroundResult) return backgroundResult.status;
   const output = objectValue("output" in part ? part.output : undefined);
   const outputStatus = stringValue(output?.status);
+  if (outputStatus === "stopping") return "stopping";
   if (outputStatus === "cancelled") return "cancelled";
   if (outputStatus === "completed") return "completed";
   if (outputStatus === "incomplete") return "incomplete";
@@ -604,6 +580,7 @@ function terminalSummary(
   display: Display | undefined,
   t: ReturnType<typeof useTranslation<"ai">>["t"],
 ): string {
+  if (status === "stopping") return t("chat.subagent.stopping");
   if (status === "failed") return t("chat.subagent.failed");
   if (status === "cancelled") return t("chat.subagent.cancelled");
   if (status === "incomplete") return t("chat.subagent.stepLimit");

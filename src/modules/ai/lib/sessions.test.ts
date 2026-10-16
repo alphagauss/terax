@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: ipc }));
 
 import {
   canRevealSessionCwd,
+  clearSessionProcesses,
   commitSession,
   deriveTitle,
   listSessions,
@@ -18,6 +19,29 @@ import {
   resolveSessionCwd,
   type SessionMeta,
 } from "./sessions";
+
+it("等待工具收尾后释放文件状态，即使进程终止失败也不提前返回", async () => {
+  ipc.mockReset();
+  ipc.mockImplementation(async (command) => {
+    if (command === "shell_clear_owner") throw new Error("cleanup failed");
+  });
+  let finish!: () => void;
+  const tools = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const cleanup = clearSessionProcesses("session", tools);
+  await Promise.resolve();
+  expect(ipc).not.toHaveBeenCalledWith(
+    "agent_file_clear_owner",
+    expect.anything(),
+  );
+  finish();
+  await expect(cleanup).rejects.toThrow("cleanup failed");
+  expect(ipc).toHaveBeenCalledWith("agent_file_clear_owner", {
+    ownerSessionId: "session",
+  });
+  ipc.mockReset();
+});
 
 it("从真实用户正文生成标题，不读取结构化片段", () => {
   expect(

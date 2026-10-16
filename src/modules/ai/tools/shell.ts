@@ -208,24 +208,29 @@ export function buildShellTools(ctx: ToolContext) {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };
         try {
-          const response = await native.shellExec({
-            ownerSessionId: sessionId,
-            command: input.command,
-            initialCwd: ctx.getCwd(),
-            cwd: input.cwd ? resolvePath(input.cwd, ctx.getCwd()) : null,
-            permissionMode: accessModeForCall(
-              ctx.getPermissionMode(),
-              approvalRequired,
-            ),
-            timeoutSecs:
-              input.timeout_secs === null
-                ? 0
-                : (input.timeout_secs ?? DEFAULT_TIMEOUT_SECS),
-            yieldTimeMs: input.yield_time_ms ?? DEFAULT_YIELD_MS,
-            maxOutputBytes: input.max_output_bytes ?? DEFAULT_OUTPUT_BYTES,
-            shell: input.shell ?? "default",
-            login: input.login ?? false,
-          });
+          const execute = (executionId?: string) =>
+            native.shellExec({
+              ownerSessionId: sessionId,
+              ...(executionId ? { executionId } : {}),
+              command: input.command,
+              initialCwd: ctx.getCwd(),
+              cwd: input.cwd ? resolvePath(input.cwd, ctx.getCwd()) : null,
+              permissionMode: accessModeForCall(
+                ctx.getPermissionMode(),
+                approvalRequired,
+              ),
+              timeoutSecs:
+                input.timeout_secs === null
+                  ? 0
+                  : (input.timeout_secs ?? DEFAULT_TIMEOUT_SECS),
+              yieldTimeMs: input.yield_time_ms ?? DEFAULT_YIELD_MS,
+              maxOutputBytes: input.max_output_bytes ?? DEFAULT_OUTPUT_BYTES,
+              shell: input.shell ?? "default",
+              login: input.login ?? false,
+            });
+          const response = await (ctx.shellExecution
+            ? ctx.shellExecution.run(execute)
+            : execute());
           return redactProcessResponse(response);
         } catch (error) {
           return { error: String(error) };
