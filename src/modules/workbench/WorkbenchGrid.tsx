@@ -9,7 +9,7 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable";
+} from "@/components/controls/resizable";
 import { TabBar } from "@/modules/tabs";
 import {
   useWorkbenchDragSnapshot,
@@ -136,7 +136,7 @@ function WorkbenchGroup({
       {groupTabs.length > 0 && !hideTabBars ? (
         <div
           data-workbench-tab-bar={group.id}
-          className="flex h-9 shrink-0 items-center border-b border-border/60 bg-card px-1.5"
+          className="flex h-9 shrink-0 items-center border-b border-layout-divider bg-card px-1.5"
         >
           <TabBar
             groupId={group.id}

@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("applyTheme", () => {
-  it("applies optional interaction colors and resets omissions to Modern", () => {
+  it("applies optional interaction and divider colors and resets omissions to Modern", () => {
     const customized: Theme = {
       id: "interaction-customized",
       name: "Interaction Customized",
@@ -28,6 +28,7 @@ describe("applyTheme", () => {
           colors: {
             interactiveHover: "custom-hover",
             interactiveActive: "custom-active",
+            layoutDivider: "#abcdef",
           },
         },
       },
@@ -46,6 +47,9 @@ describe("applyTheme", () => {
     expect(
       document.documentElement.style.getPropertyValue("--interactive-active"),
     ).toBe("custom-active");
+    expect(
+      document.documentElement.style.getPropertyValue("--layout-divider"),
+    ).toBe("#abcdef");
 
     applyTheme(fallback, "dark");
 
@@ -59,10 +63,22 @@ describe("applyTheme", () => {
       document.documentElement.style.getPropertyValue("--foreground"),
     ).toBe(darkModernVariant.colors.foreground);
     expect(
+      document.documentElement.style.getPropertyValue("--layout-divider"),
+    ).toBe(darkModernVariant.colors.layoutDivider);
+    expect(
       document.documentElement.style.getPropertyValue(
         "--terminal-ansi-yellow",
       ),
     ).toBe(darkModernVariant.terminal.ansi[3]);
+
+    applyTheme(fallback, "light");
+    expect(
+      document.documentElement.style.getPropertyValue("--layout-divider"),
+    ).toBe(lightModernVariant.colors.layoutDivider);
+    clearTheme();
+    expect(
+      document.documentElement.style.getPropertyValue("--layout-divider"),
+    ).toBe("");
   });
 
   it("uses the active mode semantic colors for editor Git markers", () => {

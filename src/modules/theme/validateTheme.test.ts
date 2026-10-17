@@ -77,7 +77,7 @@ describe("validateTheme", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("accepts registered interaction, Git, chart, and scrollbar colors", () => {
+  it("accepts registered interaction, divider, Git, chart, and scrollbar colors", () => {
     const result = validateTheme(
       baseTheme({
         variants: {
@@ -86,6 +86,7 @@ describe("validateTheme", () => {
             colors: {
               interactiveHover: "rgba(255,255,255,0.09)",
               interactiveActive: "rgba(255,255,255,0.13)",
+              layoutDivider: "#d7d7d7",
               success: "#73c991",
               warning: "#e2c08d",
               info: "#4daafc",

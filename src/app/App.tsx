@@ -11,7 +11,7 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable";
+} from "@/components/controls/resizable";
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import { ErrorHost } from "@/components/errors/ErrorHost";
 import { Toaster } from "@/components/ui/sonner";
@@ -1990,7 +1990,7 @@ export default function App() {
                     zenMode || primaryPresentationMaximized || undefined
                   }
                   className={cn(
-                    "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
+                    "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-transparent bg-sidebar transition-[opacity,translate] duration-pane ease-standard dark:border-layout-divider",
                     primaryPresentationMaximized && "invisible",
                     sidebar.runtime.primary.collapsed
                       ? "pointer-events-none -translate-x-1.5 opacity-0"
@@ -2124,7 +2124,7 @@ export default function App() {
                 >
                   <aside
                     data-sidebar-drop-zone="secondary"
-                    className="sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-l border-border/60 bg-sidebar"
+                    className="sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-l border-transparent bg-sidebar dark:border-layout-divider"
                   >
                     {sidebar.activityBar.position !== "bottom" ? (
                       <SecondarySidebarTabs

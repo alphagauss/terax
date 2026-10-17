@@ -47,6 +47,7 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
+    --color-layout-divider: var(--layout-divider);
     --color-destructive: var(--destructive);
     --color-success: var(--success);
     --color-warning: var(--warning);
@@ -158,6 +159,7 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --warning: #895503;
     --info: #005fb8;
     --border: #e5e5e5;
+    --layout-divider: color-mix(in srgb, var(--border) 92%, var(--foreground));
     --input: #e5e5e5;
     --ring: #005fb8;
     --interactive-hover: rgba(59, 59, 59, 0.09);
@@ -176,7 +178,7 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --chart-4: #af00db;
     --chart-5: #ad0707;
     --radius: 0.5rem;
-    --sidebar: #f8f8f8;
+    --sidebar: #f5f5f5;
     --sidebar-foreground: #333333;
     --sidebar-primary: #005fb8;
     --sidebar-primary-foreground: #ffffff;
@@ -206,6 +208,7 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --warning: #e2c08d;
     --info: #4daafc;
     --border: #2b2b2b;
+    --layout-divider: color-mix(in srgb, var(--border) 60%, transparent);
     --input: #313131;
     --ring: #0078d4;
     --interactive-hover: rgba(204, 204, 204, 0.09);

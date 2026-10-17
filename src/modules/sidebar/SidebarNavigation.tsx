@@ -607,7 +607,7 @@ export function SidebarActivityBar({
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="vertical"
       className={cn(
-        "flex min-h-0 shrink-0 flex-col items-center border-r border-border/60 bg-sidebar",
+        "flex min-h-0 shrink-0 flex-col items-center border-r border-layout-divider bg-sidebar",
         compact ? "w-9" : "w-11",
       )}
     >
@@ -635,8 +635,8 @@ export function SidebarActivityBar({
       className={cn(
         "flex shrink-0 items-center gap-1 bg-sidebar px-1.5 py-1",
         activityBar.position === "bottom"
-          ? "border-t border-border/60"
-          : "border-b border-border/60",
+          ? "border-t border-layout-divider"
+          : "border-b border-layout-divider",
       )}
     >
       <NavigationViewport
@@ -706,7 +706,9 @@ export function SecondarySidebarTabs({
       style={{ height: SIDEBAR_COMPOSITE_BAR_HEIGHT }}
       className={cn(
         "flex shrink-0 items-center gap-1 bg-sidebar px-1.5 py-1",
-        bottom ? "border-t border-border/60" : "border-b border-border/60",
+        bottom
+          ? "border-t border-layout-divider"
+          : "border-b border-layout-divider",
       )}
     >
       <NavigationViewport

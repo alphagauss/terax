@@ -25,6 +25,7 @@ export type ThemeColors = Partial<{
   warning: string;
   info: string;
   border: string;
+  layoutDivider: string;
   input: string;
   ring: string;
   interactiveHover: string;

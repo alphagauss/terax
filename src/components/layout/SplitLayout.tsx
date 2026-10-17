@@ -130,7 +130,7 @@ export function ResizeHandle({
       aria-valuemax={maxSize}
       aria-valuenow={size}
       className={cn(
-        "relative z-30 shrink-0 touch-none bg-border outline-none after:absolute focus-visible:bg-primary",
+        "relative z-30 shrink-0 touch-none bg-layout-divider outline-none after:absolute focus-visible:bg-primary",
         horizontal
           ? "w-px cursor-ew-resize after:inset-y-0 after:-left-1 after:w-2"
           : "h-px cursor-ns-resize after:inset-x-0 after:-top-1 after:h-2",

@@ -96,7 +96,7 @@ export function Header({
   return (
     <div
       data-tauri-drag-region
-      className={`flex h-8 shrink-0 items-center gap-2 border-b border-border/60 bg-card select-none ${
+      className={`flex h-8 shrink-0 items-center gap-2 border-b border-layout-divider bg-sidebar select-none dark:bg-card ${
         IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2"
       }`}
     >

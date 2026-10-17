@@ -8,7 +8,7 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable";
+} from "@/components/controls/resizable";
 import {
   Tooltip,
   TooltipContent,
@@ -278,7 +278,7 @@ function SidebarSectionHeader({
   return (
     <div
       style={{ height: SIDEBAR_SECTION_HEADER_HEIGHT }}
-      className="group flex shrink-0 items-center border-b border-border/50 bg-sidebar px-1.5"
+      className="group flex shrink-0 items-center border-b border-layout-divider bg-sidebar px-1.5"
     >
       <button
         type="button"

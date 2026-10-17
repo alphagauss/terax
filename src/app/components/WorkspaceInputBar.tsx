@@ -53,7 +53,7 @@ export function WorkspaceInputBar({
   if (!isBlockTab || !controller || terminalId === null) return null;
 
   return (
-    <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
+    <div className="shrink-0 border-t border-layout-divider bg-card/40 px-3 py-2">
       <div className="flex flex-col gap-2 rounded-lg px-1 py-1">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {os ? (

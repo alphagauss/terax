@@ -26,6 +26,7 @@ export const THEME_COLOR_VARIABLES = {
   warning: "--warning",
   info: "--info",
   border: "--border",
+  layoutDivider: "--layout-divider",
   input: "--input",
   ring: "--ring",
   interactiveHover: "--interactive-hover",
