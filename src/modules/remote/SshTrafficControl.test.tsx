@@ -31,10 +31,7 @@ vi.mock("@/modules/workspace", () => ({
 vi.mock("@/modules/remote/native", () => ({
   remoteNative: { trafficSnapshot: mocks.trafficSnapshot },
 }));
-vi.mock("@hugeicons/core-free-icons", () => ({
-  ArrowDown02Icon: {},
-  ArrowUp02Icon: {},
-}));
+
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

@@ -6,25 +6,23 @@
 import i18n from "@/i18n";
 import type { ActivityBarPosition, ActivityBarSize } from "@/modules/sidebar";
 import type { Tab } from "@/modules/workbench";
-import {
-  Cancel01Icon,
-  DashboardSquare01Icon,
-  FileEditIcon,
-  FileSearchIcon,
-  Globe02Icon,
-  IncognitoIcon,
-  KeyboardIcon,
-  LayoutTwoColumnIcon,
-  LayoutTwoRowIcon,
-  PaintBoardIcon,
-  Search01Icon,
-  Settings01Icon,
-  SidebarLeftIcon,
-  SourceCodeIcon,
-  SparklesIcon,
-  TerminalIcon,
-  ViewIcon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import DashboardSquare01Icon from "@hugeicons/core-free-icons/DashboardSquare01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import FileSearchIcon from "@hugeicons/core-free-icons/FileSearchIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
+import LayoutTwoColumnIcon from "@hugeicons/core-free-icons/LayoutTwoColumnIcon";
+import LayoutTwoRowIcon from "@hugeicons/core-free-icons/LayoutTwoRowIcon";
+import PaintBoardIcon from "@hugeicons/core-free-icons/PaintBoardIcon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
+import SourceCodeIcon from "@hugeicons/core-free-icons/SourceCodeIcon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import type { PaletteItem } from "./types";
 
 const t = (key: string, opts?: Record<string, unknown>) =>

@@ -3,11 +3,9 @@
  * 标签的计数与范围信息保持紧凑但清晰可读。
  */
 
-import {
-  CodeIcon,
-  HashtagIcon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";

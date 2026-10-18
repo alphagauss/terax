@@ -12,7 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
-import { Route01Icon } from "@hugeicons/core-free-icons";
+import Route01Icon from "@hugeicons/core-free-icons/Route01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

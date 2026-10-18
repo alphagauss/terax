@@ -4,7 +4,7 @@
  */
 
 import { Button } from "@/components/controls/button";
-import { Key01Icon } from "@hugeicons/core-free-icons";
+import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 

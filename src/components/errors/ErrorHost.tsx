@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { writeClipboardText } from "@/lib/clipboard";
 import {

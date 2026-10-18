@@ -28,7 +28,8 @@ import {
   setLspActivation,
   setLspCustomServers,
 } from "@/modules/settings/store";
-import { Delete02Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";

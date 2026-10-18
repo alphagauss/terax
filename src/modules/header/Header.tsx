@@ -10,14 +10,12 @@ import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
 import { useTheme } from "@/modules/theme";
-import {
-  CommandIcon,
-  Moon02Icon,
-  Settings01Icon,
-  SidebarLeftIcon,
-  SidebarRightIcon,
-  Sun03Icon,
-} from "@hugeicons/core-free-icons";
+import CommandIcon from "@hugeicons/core-free-icons/CommandIcon";
+import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
+import SidebarRightIcon from "@hugeicons/core-free-icons/SidebarRightIcon";
+import Sun03Icon from "@hugeicons/core-free-icons/Sun03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";

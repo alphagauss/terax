@@ -21,13 +21,11 @@ import {
   type ShortcutId,
 } from "@/modules/shortcuts";
 import { listBuiltinThemes, useTheme } from "@/modules/theme";
-import {
-  AlertCircleIcon,
-  ArrowTurnBackwardIcon,
-  CommandIcon,
-  Tick02Icon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
+import ArrowTurnBackwardIcon from "@hugeicons/core-free-icons/ArrowTurnBackwardIcon";
+import CommandIcon from "@hugeicons/core-free-icons/CommandIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

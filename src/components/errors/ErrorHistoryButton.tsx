@@ -1,7 +1,7 @@
 /** 标题栏中的当前窗口错误入口；没有记录时不占用空间。 */
 import { useStore } from "zustand";
 import { useTranslation } from "react-i18next";
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";

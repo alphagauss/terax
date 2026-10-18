@@ -118,15 +118,7 @@ vi.mock("@/modules/workspace", () => ({
       env: { kind: mocks.environmentKind, profileId: "server" },
     }),
 }));
-vi.mock("@hugeicons/core-free-icons", () => ({
-  FileAddIcon: {},
-  Folder01Icon: {},
-  FolderAddIcon: {},
-  FolderOpenIcon: {},
-  ListChevronsDownUpIcon: {},
-  Refresh01Icon: {},
-  Search01Icon: {},
-}));
+
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

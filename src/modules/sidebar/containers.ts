@@ -3,13 +3,11 @@
  * 注册表只描述导航和布局约束，不持有 React 运行时状态。
  */
 
-import {
-  AiChat01Icon,
-  Message01Icon,
-  FolderGitTwoIcon,
-  FolderTreeIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import AiChat01Icon from "@hugeicons/core-free-icons/AiChat01Icon";
+import Message01Icon from "@hugeicons/core-free-icons/Message01Icon";
+import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
+import FolderTreeIcon from "@hugeicons/core-free-icons/FolderTreeIcon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import type { SidebarContainerDefinition, SidebarContainerId } from "./types";
 
 export const SIDEBAR_CONTAINERS = [

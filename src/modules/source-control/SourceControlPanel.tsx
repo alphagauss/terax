@@ -62,24 +62,22 @@ import {
   type SourceControlFileEntry,
   useSourceControlPanel,
 } from "@/modules/source-control/useSourceControlPanel";
-import {
-  Add01Icon,
-  AiContentGenerator02Icon,
-  Alert02Icon,
-  ArrowDown01Icon,
-  ArrowTurnBackwardIcon,
-  ArrowUp01Icon,
-  CheckmarkCircle01Icon,
-  Download01Icon,
-  FileEditIcon,
-  Folder01Icon,
-  FolderCloudIcon,
-  FolderGitTwoIcon,
-  MinusSignIcon,
-  Refresh01Icon,
-  Search01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import AiContentGenerator02Icon from "@hugeicons/core-free-icons/AiContentGenerator02Icon";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowTurnBackwardIcon from "@hugeicons/core-free-icons/ArrowTurnBackwardIcon";
+import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
+import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FolderCloudIcon from "@hugeicons/core-free-icons/FolderCloudIcon";
+import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type KeyboardEvent,

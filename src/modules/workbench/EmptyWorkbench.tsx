@@ -7,12 +7,10 @@ import { pathBasename } from "@/lib/utils";
 import { useSpaces } from "@/modules/spaces/lib/useSpaces";
 import { DEFAULT_SPACE_ID } from "@/modules/workbench/types";
 import { Button } from "@/components/controls/button";
-import {
-  ComputerTerminal02Icon,
-  Globe02Icon,
-  IncognitoIcon,
-  PencilEdit02Icon,
-} from "@hugeicons/core-free-icons";
+import ComputerTerminal02Icon from "@hugeicons/core-free-icons/ComputerTerminal02Icon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 

@@ -16,16 +16,14 @@ import { cn } from "@/lib/utils";
 import { useShortcutLabel } from "@/modules/shortcuts";
 import { labelFor, TabIcon } from "@/modules/tabs";
 import type { Tab } from "@/modules/workbench";
-import {
-  ArrowRight01Icon,
-  Cancel01Icon,
-  Delete02Icon,
-  FolderOpenIcon,
-  SquareLock01Icon,
-  SquareUnlock01Icon,
-  PencilEdit02Icon,
-  PlusSignIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
+import SquareLock01Icon from "@hugeicons/core-free-icons/SquareLock01Icon";
+import SquareUnlock01Icon from "@hugeicons/core-free-icons/SquareUnlock01Icon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";

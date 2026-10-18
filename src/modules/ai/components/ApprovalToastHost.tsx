@@ -10,14 +10,12 @@ import {
 import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
-import {
-  Cancel01Icon,
-  Edit02Icon,
-  FilePlusIcon,
-  TerminalIcon,
-  Tick02Icon,
-  ToolsIcon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import FilePlusIcon from "@hugeicons/core-free-icons/FilePlusIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";

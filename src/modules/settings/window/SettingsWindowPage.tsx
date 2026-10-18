@@ -20,17 +20,15 @@ import { ModelsSection } from "@/settings/sections/ModelsSection";
 import { RemoteSection } from "@/settings/sections/RemoteSection";
 import { ShortcutsSection } from "@/settings/sections/ShortcutsSection";
 import { ThemesSection } from "@/settings/sections/ThemesSection";
-import {
-  AiScanIcon,
-  InformationCircleIcon,
-  KeyboardIcon,
-  PaintBoardIcon,
-  PlugIcon,
-  ServerStack03Icon,
-  Settings01Icon,
-  SourceCodeIcon,
-  UserMultiple02Icon,
-} from "@hugeicons/core-free-icons";
+import AiScanIcon from "@hugeicons/core-free-icons/AiScanIcon";
+import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
+import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
+import PaintBoardIcon from "@hugeicons/core-free-icons/PaintBoardIcon";
+import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
+import ServerStack03Icon from "@hugeicons/core-free-icons/ServerStack03Icon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import SourceCodeIcon from "@hugeicons/core-free-icons/SourceCodeIcon";
+import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type ComponentType,

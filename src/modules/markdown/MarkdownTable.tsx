@@ -13,13 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { cn } from "@/lib/utils";
-import {
-  Cancel01Icon,
-  Copy01Icon,
-  Download01Icon,
-  MaximizeScreenIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import MaximizeScreenIcon from "@hugeicons/core-free-icons/MaximizeScreenIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import {

@@ -13,7 +13,7 @@ import {
 } from "@/components/controls/dialog";
 import { Input } from "@/components/controls/input";
 import { currentWorkspaceEnv } from "@/modules/workspace";
-import { File02Icon } from "@hugeicons/core-free-icons";
+import File02Icon from "@hugeicons/core-free-icons/File02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";

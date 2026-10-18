@@ -14,6 +14,17 @@ import Inspect from "vite-plugin-inspect";
 
 const host = process.env.TAURI_DEV_HOST;
 
+// 只限制前端监听；根目录的后台源码、数据和构建产物不参与页面热更新。
+const frontendWatchIgnored = [
+  "src-tauri",
+  "target",
+  ".cargo-test-target",
+  "artifacts",
+].map(
+  (directory) =>
+    `${path.resolve(import.meta.dirname, directory).replaceAll("\\", "/")}/**`,
+);
+
 // Bundle/treemap analysis is opt-in: `ANALYZE=true pnpm build` emits stats.html.
 const analyze = process.env.ANALYZE === "true";
 
@@ -62,6 +73,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
       process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome120" : "es2022",
     chunkSizeWarningLimit: 1500,
     rolldownOptions: {
+      // 开发依赖扫描也复用这些明确入口，不扫描仓库内其他 HTML 快照。
       input: {
         main: path.resolve(import.meta.dirname, "index.html"),
         auxiliary: path.resolve(import.meta.dirname, "auxiliary.html"),
@@ -151,7 +163,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: frontendWatchIgnored,
     },
   },
 }));

@@ -26,7 +26,8 @@ import { ChannelConversation } from "@/modules/channels/components/ChannelConver
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
 import { channelTargetLabel } from "@/modules/channels/types";
 import type { Chat, UIMessage } from "@ai-sdk/react";
-import { Add01Icon, ArrowUp02Icon } from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowUp02Icon from "@hugeicons/core-free-icons/ArrowUp02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";

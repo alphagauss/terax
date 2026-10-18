@@ -10,7 +10,7 @@ import {
 import { DiffStats } from "@/modules/ai/components/FileEditStats";
 import { FileDiffSegments } from "@/modules/ai/components/FileEditsCard";
 import type { FileEditsTab } from "@/modules/workbench/types";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 export function FileEditsView({ tab }: { tab: FileEditsTab }) {

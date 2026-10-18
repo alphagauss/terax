@@ -20,12 +20,10 @@ import {
 } from "@/modules/ai/config";
 import { ModelCatalogError, modelCatalog } from "@/modules/ai/lib/modelCatalog";
 import type { ResolvedProviderConnection } from "@/modules/ai/providerRegistry";
-import {
-  Add01Icon,
-  ArrowDown01Icon,
-  Cancel01Icon,
-  ReloadIcon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import ReloadIcon from "@hugeicons/core-free-icons/ReloadIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

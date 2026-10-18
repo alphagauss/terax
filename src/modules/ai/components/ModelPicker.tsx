@@ -22,7 +22,7 @@ import {
   type ResolvedModel,
 } from "@/modules/ai/config";
 import { cn } from "@/lib/utils";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 type ModelOption = { ref: ModelRef; info: ResolvedModel };

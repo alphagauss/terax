@@ -5,7 +5,8 @@
 
 import { Button } from "@/components/controls/button";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import GithubIcon from "@hugeicons/core-free-icons/GithubIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import { useTranslation } from "react-i18next";
-import { MoreVerticalIcon } from "@hugeicons/core-free-icons";
+import MoreVerticalIcon from "@hugeicons/core-free-icons/MoreVerticalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MessageAction } from "@/components/ai-elements/message";
 import {

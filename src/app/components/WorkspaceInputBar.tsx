@@ -6,11 +6,9 @@
 import { Chip } from "@/modules/ai/components/Chip";
 import { useBlockController } from "@/modules/terminal/lib/blockController";
 import { useTheme } from "@/modules/theme";
-import {
-  CommandLineIcon,
-  Folder01Icon,
-  GitBranchIcon,
-} from "@hugeicons/core-free-icons";
+import CommandLineIcon from "@hugeicons/core-free-icons/CommandLineIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { OsIcon } from "./OsIcon";
 import { useGitBranch } from "./useGitBranch";

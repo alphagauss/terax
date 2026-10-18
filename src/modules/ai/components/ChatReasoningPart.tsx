@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
-import { ChevronDown } from "@hugeicons/core-free-icons";
+import ChevronDown from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

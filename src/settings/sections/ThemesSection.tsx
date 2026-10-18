@@ -44,7 +44,8 @@ import {
 import { listBuiltinThemes } from "@/modules/theme/themes";
 import { DEFAULT_THEME_ID } from "@/modules/theme/types";
 import { validateTheme } from "@/modules/theme/validateTheme";
-import { Edit02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMemo, useRef, useState } from "react";

@@ -100,14 +100,12 @@ import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
 import { ProviderKeyCard } from "@/settings/components/ProviderKeyCard";
 import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
-import {
-  Add01Icon,
-  ArrowDown01Icon,
-  Cancel01Icon,
-  CheckmarkCircle02Icon,
-  ChevronDown,
-  Mic01Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import ChevronDown from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 import { reportError } from "@/lib/errors";

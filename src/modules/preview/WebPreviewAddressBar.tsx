@@ -12,11 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Input } from "@/components/controls/input";
-import {
-  ArrowReloadHorizontalIcon,
-  Globe02Icon,
-  LinkSquare02Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowReloadHorizontalIcon from "@hugeicons/core-free-icons/ArrowReloadHorizontalIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {

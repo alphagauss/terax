@@ -1,9 +1,7 @@
-import {
-  CommandLineIcon,
-  File01Icon,
-  Folder01Icon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import CommandLineIcon from "@hugeicons/core-free-icons/CommandLineIcon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 
 export type IconData = readonly (readonly [string, Record<string, unknown>])[];
 

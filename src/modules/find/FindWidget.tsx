@@ -5,15 +5,13 @@
 
 import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  ArrowDown01Icon,
-  ArrowUp01Icon,
-  Cancel01Icon,
-  ChevronRightIcon,
-  ReplaceAllIcon,
-  ReplaceIcon,
-  TextSelectionIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import ChevronRightIcon from "@hugeicons/core-free-icons/ChevronRightIcon";
+import ReplaceAllIcon from "@hugeicons/core-free-icons/ReplaceAllIcon";
+import ReplaceIcon from "@hugeicons/core-free-icons/ReplaceIcon";
+import TextSelectionIcon from "@hugeicons/core-free-icons/TextSelectionIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,

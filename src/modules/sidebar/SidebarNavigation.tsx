@@ -24,11 +24,9 @@ import {
 } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
-import {
-  Cancel01Icon,
-  FullScreenIcon,
-  MaximizeScreenIcon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import FullScreenIcon from "@hugeicons/core-free-icons/FullScreenIcon";
+import MaximizeScreenIcon from "@hugeicons/core-free-icons/MaximizeScreenIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type PointerEvent, type ReactNode, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";

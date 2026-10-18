@@ -1,5 +1,6 @@
 import { useDiagnosticsStore } from "@/modules/editor";
-import { Alert02Icon, CancelCircleIcon } from "@hugeicons/core-free-icons";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import CancelCircleIcon from "@hugeicons/core-free-icons/CancelCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 type Props = {

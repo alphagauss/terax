@@ -66,16 +66,14 @@ import {
 import { newGroupId, newProfileId } from "@/modules/remote/store";
 import type { SshProfile } from "@/modules/remote/types";
 import { spawnWorkspaceProcess } from "@/modules/workspace-process";
-import {
-  Add01Icon,
-  ArrowDown01Icon,
-  Delete02Icon,
-  Download01Icon,
-  Edit02Icon,
-  FloppyDiskIcon,
-  FolderAddIcon,
-  MoreHorizontalIcon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import FloppyDiskIcon from "@hugeicons/core-free-icons/FloppyDiskIcon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { reportError } from "@/lib/errors";

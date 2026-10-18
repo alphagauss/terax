@@ -18,7 +18,7 @@ import { useChatStore } from "@/modules/ai/store/chatStore";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { messageMetadata } from "@/modules/ai/lib/conversation";
 import type { MessageAttachment } from "@/modules/ai/lib/messageAttachments";
-import { File01Icon } from "@hugeicons/core-free-icons";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 const AttachmentPreview = lazy(

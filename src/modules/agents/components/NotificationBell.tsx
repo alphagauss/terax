@@ -14,12 +14,10 @@ import {
 } from "@/components/ui/popover";
 import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
-import {
-  CheckmarkCircle02Icon,
-  Loading03Icon,
-  Notification01Icon,
-  Notification03Icon,
-} from "@hugeicons/core-free-icons";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Loading03Icon from "@hugeicons/core-free-icons/Loading03Icon";
+import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
+import Notification03Icon from "@hugeicons/core-free-icons/Notification03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useRef, useState } from "react";

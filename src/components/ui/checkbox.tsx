@@ -3,7 +3,8 @@ import { Checkbox as CheckboxPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { MinusSignIcon, Tick02Icon } from "@hugeicons/core-free-icons"
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon"
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon"
 
 function Checkbox({
   className,

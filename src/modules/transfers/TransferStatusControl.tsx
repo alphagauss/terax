@@ -26,19 +26,17 @@ import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import {
-  ArrowDataTransferVerticalIcon,
-  ArrowDown01Icon,
-  ArrowRight01Icon,
-  Cancel01Icon,
-  CleanIcon,
-  Delete02Icon,
-  Download01Icon,
-  PauseIcon,
-  PlayIcon,
-  Refresh01Icon,
-  Upload01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDataTransferVerticalIcon from "@hugeicons/core-free-icons/ArrowDataTransferVerticalIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import CleanIcon from "@hugeicons/core-free-icons/CleanIcon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import PauseIcon from "@hugeicons/core-free-icons/PauseIcon";
+import PlayIcon from "@hugeicons/core-free-icons/PlayIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Upload01Icon from "@hugeicons/core-free-icons/Upload01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { TFunction } from "i18next";
 import { useMemo, useRef, useState } from "react";

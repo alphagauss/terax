@@ -25,17 +25,15 @@ import {
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import {
-  AbsoluteIcon,
-  ArrowDown01Icon,
-  CodeIcon,
-  PaintBrush04Icon,
-  PencilEdit02Icon,
-  Settings01Icon,
-  ShieldUserIcon,
-  SparklesIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import AbsoluteIcon from "@hugeicons/core-free-icons/AbsoluteIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import PaintBrush04Icon from "@hugeicons/core-free-icons/PaintBrush04Icon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import ShieldUserIcon from "@hugeicons/core-free-icons/ShieldUserIcon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";

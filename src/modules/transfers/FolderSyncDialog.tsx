@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { HelpCircleIcon } from "@hugeicons/core-free-icons";
+import HelpCircleIcon from "@hugeicons/core-free-icons/HelpCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";

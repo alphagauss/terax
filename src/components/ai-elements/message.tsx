@@ -15,7 +15,8 @@ import {
 } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
-import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";

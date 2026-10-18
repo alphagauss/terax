@@ -40,25 +40,23 @@ import { toggleFavoriteModel } from "@/modules/ai/lib/modelPrefs";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setDesktopPermissionMode } from "@/modules/settings/store";
-import {
-  Add01Icon,
-  AiBookIcon,
-  ArrowDown01Icon,
-  ArrowUp02Icon,
-  Clock01Icon,
-  Cancel01Icon,
-  FavouriteIcon,
-  Folder01Icon,
-  HandIcon,
-  Mic01Icon,
-  PlugIcon,
-  Refresh01Icon,
-  Search01Icon,
-  SecurityWarningIcon,
-  StarIcon,
-  Tick01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import AiBookIcon from "@hugeicons/core-free-icons/AiBookIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowUp02Icon from "@hugeicons/core-free-icons/ArrowUp02Icon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import FavouriteIcon from "@hugeicons/core-free-icons/FavouriteIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import HandIcon from "@hugeicons/core-free-icons/HandIcon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import SecurityWarningIcon from "@hugeicons/core-free-icons/SecurityWarningIcon";
+import StarIcon from "@hugeicons/core-free-icons/StarIcon";
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

@@ -11,13 +11,11 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import {
-  File01Icon,
-  FolderOpenIcon,
-  GlobalSearchIcon,
-  TerminalIcon,
-  ToolsIcon,
-} from "@hugeicons/core-free-icons";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
+import GlobalSearchIcon from "@hugeicons/core-free-icons/GlobalSearchIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";

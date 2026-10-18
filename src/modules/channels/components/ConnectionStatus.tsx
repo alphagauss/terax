@@ -6,7 +6,7 @@
 import { cn } from "@/lib/utils";
 import type { ChannelSnapshot } from "@/modules/channels/types";
 import { useTranslation } from "react-i18next";
-import { AlertCircleIcon } from "@hugeicons/core-free-icons";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Hint } from "@/components/controls/tooltip";
 

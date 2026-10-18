@@ -19,7 +19,8 @@ import {
 } from "@/modules/remote";
 import { TransferStatusControl } from "@/modules/transfers";
 import type { WorkspaceEnv } from "@/modules/workspace";
-import { IncognitoIcon, SourceCodeIcon } from "@hugeicons/core-free-icons";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import SourceCodeIcon from "@hugeicons/core-free-icons/SourceCodeIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { ActivePath } from "./ActivePath";

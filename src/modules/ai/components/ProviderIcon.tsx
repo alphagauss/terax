@@ -4,7 +4,7 @@
  */
 import type { ProviderId } from "@/modules/ai/config";
 import { cn } from "@/lib/utils";
-import { PlugIcon } from "@hugeicons/core-free-icons";
+import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import openai from "@lobehub/icons-static-svg/icons/openai.svg";
 import anthropic from "@lobehub/icons-static-svg/icons/anthropic.svg";

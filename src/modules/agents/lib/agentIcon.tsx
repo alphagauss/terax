@@ -1,9 +1,7 @@
-import {
-  ChatGptIcon,
-  ClaudeIcon,
-  GoogleGeminiIcon,
-  RoboticIcon,
-} from "@hugeicons/core-free-icons";
+import ChatGptIcon from "@hugeicons/core-free-icons/ChatGptIcon";
+import ClaudeIcon from "@hugeicons/core-free-icons/ClaudeIcon";
+import GoogleGeminiIcon from "@hugeicons/core-free-icons/GoogleGeminiIcon";
+import RoboticIcon from "@hugeicons/core-free-icons/RoboticIcon";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 
 function iconFor(agent: string): IconSvgElement {

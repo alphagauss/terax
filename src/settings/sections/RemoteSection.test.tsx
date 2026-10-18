@@ -189,16 +189,7 @@ vi.mock("@/components/layout/PageHeader", () => ({
     createElement("h1", null, title),
 }));
 
-vi.mock("@hugeicons/core-free-icons", () => ({
-  Add01Icon: {},
-  ArrowDown01Icon: {},
-  Delete02Icon: {},
-  Download01Icon: {},
-  Edit02Icon: {},
-  FloppyDiskIcon: {},
-  FolderAddIcon: {},
-  MoreHorizontalIcon: {},
-}));
+
 
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 

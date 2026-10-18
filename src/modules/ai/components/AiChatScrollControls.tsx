@@ -4,7 +4,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { ArrowDown02Icon } from "@hugeicons/core-free-icons";
+import ArrowDown02Icon from "@hugeicons/core-free-icons/ArrowDown02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";

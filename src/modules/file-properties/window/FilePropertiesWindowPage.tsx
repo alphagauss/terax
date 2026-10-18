@@ -19,13 +19,11 @@ import {
   type PropertyKind,
   scanDirectoryProperties,
 } from "@/modules/file-properties/native";
-import {
-  Copy01Icon,
-  File02Icon,
-  Folder01Icon,
-  Refresh01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import File02Icon from "@hugeicons/core-free-icons/File02Icon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";

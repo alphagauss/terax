@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
-import { ListViewIcon } from "@hugeicons/core-free-icons";
+import ListViewIcon from "@hugeicons/core-free-icons/ListViewIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 type Props = {

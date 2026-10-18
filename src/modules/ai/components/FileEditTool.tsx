@@ -9,7 +9,7 @@ import {
   formatToolSummary,
 } from "@/modules/ai/lib/toolSummary";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
-import { FileEditIcon } from "@hugeicons/core-free-icons";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 

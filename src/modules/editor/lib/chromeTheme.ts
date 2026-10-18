@@ -1,23 +1,21 @@
 import { detectMonoFontFamily } from "@/lib/fonts";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import {
-  AbsoluteIcon,
-  BoxIcon,
-  BracketsIcon,
-  CodeIcon,
-  File01Icon,
-  FlashIcon,
-  Folder01Icon,
-  FunctionIcon,
-  HashtagIcon,
-  Key01Icon,
-  LeftToRightListBulletIcon,
-  MathIcon,
-  PackageIcon,
-  PuzzleIcon,
-  TextFontIcon,
-} from "@hugeicons/core-free-icons";
+import AbsoluteIcon from "@hugeicons/core-free-icons/AbsoluteIcon";
+import BoxIcon from "@hugeicons/core-free-icons/BoxIcon";
+import BracketsIcon from "@hugeicons/core-free-icons/BracketsIcon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import FlashIcon from "@hugeicons/core-free-icons/FlashIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FunctionIcon from "@hugeicons/core-free-icons/FunctionIcon";
+import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
+import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
+import LeftToRightListBulletIcon from "@hugeicons/core-free-icons/LeftToRightListBulletIcon";
+import MathIcon from "@hugeicons/core-free-icons/MathIcon";
+import PackageIcon from "@hugeicons/core-free-icons/PackageIcon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
+import TextFontIcon from "@hugeicons/core-free-icons/TextFontIcon";
 
 type IconGroup = "fn" | "val" | "type" | "iface" | "misc";
 type ThemeSpec = Parameters<typeof EditorView.theme>[0];

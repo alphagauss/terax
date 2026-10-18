@@ -54,15 +54,13 @@ import { requestTransferPanel } from "@/modules/transfers/store";
 import type { TransferStrategy } from "@/modules/transfers/types";
 import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import {
-  FileAddIcon,
-  Folder01Icon,
-  FolderAddIcon,
-  FolderOpenIcon,
-  ListChevronsDownUpIcon,
-  Refresh01Icon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import FileAddIcon from "@hugeicons/core-free-icons/FileAddIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
+import ListChevronsDownUpIcon from "@hugeicons/core-free-icons/ListChevronsDownUpIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,

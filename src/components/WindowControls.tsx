@@ -6,12 +6,10 @@
 import { closeIconButtonClassName } from "@/components/controls/close-button";
 import { Hint } from "@/components/controls/tooltip";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
-import {
-  Cancel01Icon,
-  Copy01Icon,
-  MinusSignIcon,
-  SquareIcon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import SquareIcon from "@hugeicons/core-free-icons/SquareIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";

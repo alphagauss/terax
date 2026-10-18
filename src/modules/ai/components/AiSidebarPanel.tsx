@@ -64,15 +64,13 @@ import {
   useChatDisplayActive,
   useChatDisplayStore,
 } from "@/modules/ai/hooks/chatDisplay";
-import {
-  ArrowDown01Icon,
-  Delete02Icon,
-  FilterIcon,
-  MessageSearch01Icon,
-  PencilEdit02Icon,
-  Tick02Icon,
-  Wrench01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import FilterIcon from "@hugeicons/core-free-icons/FilterIcon";
+import MessageSearch01Icon from "@hugeicons/core-free-icons/MessageSearch01Icon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

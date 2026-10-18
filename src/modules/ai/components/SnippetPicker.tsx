@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { CommandDefinition } from "@/modules/ai/commands/registry";
 import { useTranslation } from "react-i18next";
-import { CommandLineIcon } from "@hugeicons/core-free-icons";
+import CommandLineIcon from "@hugeicons/core-free-icons/CommandLineIcon";
 import type { Snippet } from "../lib/snippets";
 
 export type PickerItem =

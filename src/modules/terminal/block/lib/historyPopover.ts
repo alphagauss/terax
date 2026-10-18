@@ -11,7 +11,7 @@ import {
   type Tooltip,
   type TooltipView,
 } from "@codemirror/view";
-import { Clock01Icon } from "@hugeicons/core-free-icons";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import { hugeIcon } from "./completionIcons";
 import i18n from "@/i18n";
 

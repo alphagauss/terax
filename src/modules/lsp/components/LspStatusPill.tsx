@@ -6,14 +6,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { setLspActivation } from "@/modules/settings/store";
-import {
-  Cancel01Icon,
-  Copy01Icon,
-  Loading03Icon,
-  RefreshIcon,
-  SourceCodeIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import Loading03Icon from "@hugeicons/core-free-icons/Loading03Icon";
+import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
+import SourceCodeIcon from "@hugeicons/core-free-icons/SourceCodeIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";

@@ -34,7 +34,7 @@ import {
 } from "@/settings/components/ConnectionSettingsLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { reportError } from "@/lib/errors";

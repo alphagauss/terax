@@ -88,17 +88,15 @@ import {
   useChatStore,
 } from "@/modules/ai/store/chatStore";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
-import {
-  ArrowRight01Icon,
-  CodeIcon,
-  Copy01Icon,
-  PencilEdit02Icon,
-  GitBranchIcon,
-  File01Icon,
-  HashtagIcon,
-  TerminalIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
   ChatStatus,

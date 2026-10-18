@@ -21,7 +21,8 @@ import {
   resolveMarkdownImagePath,
 } from "@/modules/markdown/lib/localImages";
 import { useWorkspaceEnvStore, type WorkspaceEnv } from "@/modules/workspace";
-import { Copy01Icon, Download01Icon } from "@hugeicons/core-free-icons";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import {

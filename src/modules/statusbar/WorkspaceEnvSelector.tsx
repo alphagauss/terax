@@ -24,12 +24,10 @@ import {
   useWorkspaceEnvStore,
   type WorkspaceEnv,
 } from "@/modules/workspace";
-import {
-  Folder01Icon,
-  Refresh01Icon,
-  ServerStack03Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import ServerStack03Icon from "@hugeicons/core-free-icons/ServerStack03Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";

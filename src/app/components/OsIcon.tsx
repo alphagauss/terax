@@ -1,4 +1,5 @@
-import { AppleIcon, WindowsOldIcon } from "@hugeicons/core-free-icons";
+import AppleIcon from "@hugeicons/core-free-icons/AppleIcon";
+import WindowsOldIcon from "@hugeicons/core-free-icons/WindowsOldIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 const LINUX_PATH =

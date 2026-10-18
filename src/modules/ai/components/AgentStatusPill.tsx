@@ -5,7 +5,7 @@
 
 import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
-import { AiChat01Icon } from "@hugeicons/core-free-icons";
+import AiChat01Icon from "@hugeicons/core-free-icons/AiChat01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { useChatStore } from "../store/chatStore";

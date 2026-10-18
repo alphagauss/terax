@@ -109,19 +109,7 @@ vi.mock("@/modules/workspace", () => ({
     select: (state: { env: { kind: string } }) => unknown,
   ) => select({ env: { kind: "wsl" } }),
 }));
-vi.mock("@hugeicons/core-free-icons", () => ({
-  ArrowDataTransferVerticalIcon: {},
-  ArrowDown01Icon: {},
-  ArrowRight01Icon: {},
-  Cancel01Icon: {},
-  CleanIcon: {},
-  Delete02Icon: {},
-  Download01Icon: {},
-  PauseIcon: {},
-  PlayIcon: {},
-  Refresh01Icon: {},
-  Upload01Icon: {},
-}));
+
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

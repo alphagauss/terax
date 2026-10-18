@@ -43,15 +43,13 @@ import type { Tab, WorkbenchDirection } from "@/modules/workbench/types";
 import type { WorkspacePageHandoffMenuActions } from "@/modules/workspace-handoff";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
-import {
-  Cancel01Icon,
-  ComputerTerminal02Icon,
-  GitCompareIcon,
-  Globe02Icon,
-  IncognitoIcon,
-  PencilEdit02Icon,
-  PlusSignIcon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import ComputerTerminal02Icon from "@hugeicons/core-free-icons/ComputerTerminal02Icon";
+import GitCompareIcon from "@hugeicons/core-free-icons/GitCompareIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Fragment,

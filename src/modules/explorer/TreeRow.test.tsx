@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/components/ui/spinner", () => ({
   Spinner: () => createElement("span", { "data-spinner": "" }),
 }));
-vi.mock("@hugeicons/core-free-icons", () => ({ ArrowRight01Icon: {} }));
+
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("./InlineInput", () => ({ InlineInput: () => null }));
 vi.mock("./lib/gitStatusColor", () => ({

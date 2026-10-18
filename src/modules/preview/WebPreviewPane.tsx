@@ -1,4 +1,5 @@
-import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,

@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { ChevronDown } from "@hugeicons/core-free-icons";
+import ChevronDown from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";

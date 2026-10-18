@@ -11,14 +11,12 @@ import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/modules/theme";
 import type { MermaidConfig } from "@streamdown/mermaid";
-import {
-  ArrowAllDirectionIcon,
-  Copy01Icon,
-  FitToScreenIcon,
-  Tick02Icon,
-  ZoomInAreaIcon,
-  ZoomOutAreaIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowAllDirectionIcon from "@hugeicons/core-free-icons/ArrowAllDirectionIcon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import FitToScreenIcon from "@hugeicons/core-free-icons/FitToScreenIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import ZoomInAreaIcon from "@hugeicons/core-free-icons/ZoomInAreaIcon";
+import ZoomOutAreaIcon from "@hugeicons/core-free-icons/ZoomOutAreaIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { useIsCodeFenceIncomplete } from "streamdown";

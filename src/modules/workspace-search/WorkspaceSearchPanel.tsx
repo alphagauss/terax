@@ -14,13 +14,11 @@ import {
   FindPatternField,
   type FindPatternFieldHandle,
 } from "@/modules/find";
-import {
-  ArrowRight01Icon,
-  Cancel01Icon,
-  ListChevronsDownUpIcon,
-  MoreHorizontalIcon,
-  Refresh01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import ListChevronsDownUpIcon from "@hugeicons/core-free-icons/ListChevronsDownUpIcon";
+import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,

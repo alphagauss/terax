@@ -49,13 +49,11 @@ import {
   useCommitGraph,
 } from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
-import {
-  ArrowDown01Icon,
-  Cancel01Icon,
-  CloudIcon,
-  GitBranchIcon,
-  Tag01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import CloudIcon from "@hugeicons/core-free-icons/CloudIcon";
+import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
+import Tag01Icon from "@hugeicons/core-free-icons/Tag01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openUrl } from "@tauri-apps/plugin-opener";
