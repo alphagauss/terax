@@ -221,11 +221,13 @@ mod tests {
         assert_eq!(first.stderr, "e");
         assert_eq!(first.next_offset, 4);
         assert!(first.truncated);
+        assert_eq!(first.dropped_bytes, 0);
 
         let second = log.read(first.next_offset, 8);
         assert_eq!(second.stderr, "rr");
         assert_eq!(second.next_offset, 6);
         assert!(!second.truncated);
+        assert_eq!(second.dropped_bytes, 0);
     }
 
     #[test]

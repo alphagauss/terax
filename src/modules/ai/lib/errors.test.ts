@@ -102,6 +102,46 @@ describe("formatAiError", () => {
     }
   });
 
+  it.each([
+    [60000, "expected number <= 30000, received 60000"],
+    [120000, "expected number <= 30000, received 120000"],
+    [-1, "expected number >= 0, received -1"],
+  ])(
+    "reports numeric bounds even without a useful issue message (%s)",
+    async (value, detail) => {
+      const input = { yield_time_ms: value };
+      const parsed = z
+        .object({ yield_time_ms: z.number().int().min(0).max(30000) })
+        .safeParse(input);
+      if (parsed.success) throw new Error("expected invalid test input");
+      const issues = parsed.error.issues.map((issue) => ({
+        ...issue,
+        message: "Invalid input",
+      }));
+      const error = new InvalidToolInputError({
+        toolName: "shell_exec",
+        toolInput: JSON.stringify(input),
+        cause: new TypeValidationError({ value: input, cause: { issues } }),
+      });
+      const transported = JSON.parse(
+        JSON.stringify({
+          name: error.name,
+          toolName: "shell_exec",
+          cause: {
+            name: "AI_TypeValidationError",
+            value: input,
+            cause: { issues },
+          },
+        }),
+      );
+      const expected = `Invalid input for tool shell_exec: yield_time_ms: ${detail}. Call the tool again with input that matches the schema. The tool was not executed.`;
+      expect(formatAiError(error)).toBe(expected);
+      expect(formatAiError(transported)).toBe(expected);
+      expect(await reportInvalidToolInput({ error })).toBeNull();
+      expect(error.message).toBe(expected);
+    },
+  );
+
   it("does not treat incomplete error objects as validated tool failures", () => {
     for (const error of [
       {
@@ -128,6 +168,7 @@ describe("formatAiError", () => {
     const inputs = [
       '{"files":[{"path":"a.py","edits":[]}',
       JSON.stringify({ files: [{ edits: [] }], path: "a.py" }),
+      JSON.stringify({ yield_time_ms: 60000 }),
     ];
     let step = 0;
     const model = new MockLanguageModelV4({
@@ -141,7 +182,7 @@ describe("formatAiError", () => {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: `call-${step}`,
-                  toolName: "apply_patch",
+                  toolName: step === 3 ? "shell_exec" : "apply_patch",
                   input,
                 });
               }
@@ -171,6 +212,12 @@ describe("formatAiError", () => {
       model,
       instructions: "Stable instructions",
       tools: {
+        shell_exec: {
+          inputSchema: z.object({
+            yield_time_ms: z.number().int().min(0).max(30000),
+          }),
+          execute,
+        },
         apply_patch: {
           inputSchema: z.object({
             files: z.array(
@@ -181,7 +228,7 @@ describe("formatAiError", () => {
         },
       },
       repairToolCall: reportInvalidToolInput,
-      stopWhen: isStepCount(3),
+      stopWhen: isStepCount(4),
     };
     const messages = [{ role: "user" as const, content: "edit" }];
     const result = streamText({ ...options, messages });
@@ -206,12 +253,18 @@ describe("formatAiError", () => {
           "files[0].path: expected string, received undefined",
         ),
       },
+      {
+        type: "error-text",
+        value: expect.stringContaining(
+          "yield_time_ms: expected number <= 30000, received 60000",
+        ),
+      },
     ]);
     for (const output of outputs) {
       expect(JSON.stringify(output)).toContain("The tool was not executed.");
       expect(JSON.stringify(output)).not.toContain("a.py");
     }
-    for (let index = 1; index < 3; index++) {
+    for (let index = 1; index < 4; index++) {
       const previous = model.doStreamCalls[index - 1];
       const current = model.doStreamCalls[index];
       expect(current.prompt.slice(0, previous.prompt.length)).toEqual(
@@ -225,9 +278,9 @@ describe("formatAiError", () => {
       messages: [...messages, ...JSON.parse(JSON.stringify(responseMessages))],
     });
     await restored.consumeStream();
-    const previous = model.doStreamCalls[2];
+    const previous = model.doStreamCalls[3];
     expect(
-      model.doStreamCalls[3].prompt.slice(0, previous.prompt.length),
+      model.doStreamCalls[4].prompt.slice(0, previous.prompt.length),
     ).toEqual(previous.prompt);
   });
 

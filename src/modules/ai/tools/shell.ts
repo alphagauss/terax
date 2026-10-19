@@ -39,7 +39,7 @@ const outputOptions = {
     .min(0)
     .optional()
     .describe(
-      "Byte offset for returned output and wait_for matching; defaults to 0. Reuse next_offset for only subsequent output. Use 0 to also search earlier output still retained in the buffer.",
+      "Byte offset for returned output and wait_for matching; defaults to 0. Reuse the returned next_offset exactly for only subsequent output; do not calculate offsets from visible output length. Use 0 to also search earlier output still retained in the buffer.",
     ),
   max_output_bytes: z
     .number()
@@ -57,7 +57,7 @@ const waitOptions = {
     .max(30_000)
     .optional()
     .describe(
-      "Maximum time to wait before returning a poll or write response when wait_for is omitted. Defaults to 1000. This does not change the process timeout.",
+      "Maximum time to wait before returning a poll or write response when wait_for is omitted: 0-30000 ms, defaults to 1000. If still running, call shell_process again to continue waiting. This does not change the process timeout.",
     ),
   wait_for: z
     .string()
@@ -203,7 +203,7 @@ export function buildShellTools(ctx: ToolContext) {
           .max(30_000)
           .optional()
           .describe(
-            "Maximum time this call waits for the initial process result. Defaults to 10000. This does not change or disable the process timeout.",
+            "Maximum time this call waits for the initial process result: 0-30000 ms, defaults to 10000. If still running, use shell_process with action=poll to continue waiting. This does not change or disable the process timeout.",
           ),
         max_output_bytes: z
           .number()

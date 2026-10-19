@@ -2154,6 +2154,40 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
     }
 
     #[tokio::test]
+    async fn closing_stdin_delivers_eof_after_written_input() {
+        let directory = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let command = "while ($null -ne ($line = [Console]::ReadLine())) { [Console]::WriteLine('got:' + $line) }; [Console]::WriteLine('eof')";
+        #[cfg(unix)]
+        let command =
+            "while IFS= read -r line; do printf 'got:%s\\n' \"$line\"; done; printf 'eof\\n'";
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            WorkspaceEnv::Local,
+            command.into(),
+            directory.path().to_string_lossy().into_owned(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::Shell,
+        )
+        .unwrap();
+
+        process.write("hello\n".into()).await.unwrap();
+        let observed = process.wait_snapshot(0, Duration::from_secs(5), Some("got:hello"), 8192);
+        assert_eq!(observed.wait_for_matched, Some(true));
+        assert_eq!(observed.status, ProcessStatus::Running);
+        assert!(!observed.stdout.contains("eof"));
+        // 必须继续读取到 EOF 才能退出，避免只验证固定行数读取完成。
+        process.close_stdin().await.unwrap();
+        let response =
+            process.wait_snapshot(observed.next_offset, Duration::from_secs(5), None, 8192);
+        assert_eq!(response.status, ProcessStatus::Exited);
+        assert_eq!(response.exit_code, Some(0));
+        assert!(response.stdout.contains("eof"));
+    }
+
+    #[tokio::test]
     async fn local_termination_locks_terminated_state() {
         let directory = tempfile::tempdir().unwrap();
         #[cfg(windows)]

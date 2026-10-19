@@ -46,10 +46,20 @@ function formatInvalidToolInput(error: unknown): string | null {
   if (!issue) return null;
   const path = Array.isArray(issue.path) ? issue.path : [];
   const actual = valueAtPath(validation.value, path);
-  const detail =
+  let detail =
     issue.code === "invalid_type" && typeof issue.expected === "string"
       ? `${formatIssuePath(path)}: expected ${issue.expected}, received ${valueType(actual)}`
       : `${formatIssuePath(path)}: ${typeof issue.message === "string" ? issue.message : "invalid value"}`;
+  const bound = issue.code === "too_big" ? issue.maximum : issue.minimum;
+  if (
+    (issue.code === "too_big" || issue.code === "too_small") &&
+    issue.origin === "number" &&
+    typeof bound === "number" &&
+    typeof actual === "number"
+  ) {
+    const comparison = issue.code === "too_big" ? "<" : ">";
+    detail = `${formatIssuePath(path)}: expected number ${comparison}${issue.inclusive ? "=" : ""} ${bound}, received ${actual}`;
+  }
   const encodedStructure =
     typeof actual === "string" &&
     (issue.expected === "array" || issue.expected === "object");
@@ -78,6 +88,10 @@ function errorRecord(value: unknown): Record<string, unknown> | null {
 
 type ValidationIssue = {
   code?: unknown;
+  origin?: unknown;
+  maximum?: unknown;
+  minimum?: unknown;
+  inclusive?: unknown;
   expected?: unknown;
   message?: unknown;
   path?: unknown;

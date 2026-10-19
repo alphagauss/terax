@@ -144,6 +144,33 @@ describe("AI tool approval mode", () => {
     ).toMatchObject({ success: true });
   });
 
+  it.each([0, 30000, -1, 30001, 60000, 120000, 0.5])(
+    "validates shell wait boundaries without clamping (%s)",
+    async (yieldTimeMs) => {
+      const tools = buildShellTools(context);
+      const inputs = [
+        [asSchema(tools.shell_exec.inputSchema), { command: "echo safe" }],
+        [
+          asSchema(tools.shell_process.inputSchema),
+          {
+            process_id: "00000000-0000-4000-8000-000000000002",
+            action: "poll",
+          },
+        ],
+      ] as const;
+      for (const [schema, input] of inputs) {
+        if (!schema.validate) throw new Error("shell validator missing");
+        const result = await schema.validate({
+          ...input,
+          yield_time_ms: yieldTimeMs,
+        });
+        expect(result.success).toBe(yieldTimeMs === 0 || yieldTimeMs === 30000);
+        if (result.success)
+          expect(result.value.yield_time_ms).toBe(yieldTimeMs);
+      }
+    },
+  );
+
   it.each([
     ["poll", undefined, true],
     ["write", "status\n", true],
