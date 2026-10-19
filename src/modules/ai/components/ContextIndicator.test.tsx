@@ -424,7 +424,7 @@ it.each([false, true])(
       },
     ];
     const render = () =>
-      act(async () =>
+      act(() =>
         root.render(
           <ContextIndicator
             sessionId={id}
@@ -433,7 +433,11 @@ it.each([false, true])(
           />,
         ),
       );
-    await render();
+    render();
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      "miniWindow.context.estimating",
+    );
     const label = () =>
       container.querySelector("button[aria-label]")?.getAttribute("aria-label");
     await vi.waitFor(async () => {

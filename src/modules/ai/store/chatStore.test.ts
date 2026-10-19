@@ -290,7 +290,7 @@ describe("chat store multi-process lifecycle", () => {
     useChatStore.setState({ runLockSessionIds: { [first.id]: true } });
     expect(canReviseHistory(first.id)).toBe(false);
     expect(await editLastMessage(first.id, "user", "changed")).toBe(false);
-    await forkSession(first.id, "turn");
+    await forkSession(first.id, { kind: "reply", turn_id: "turn" });
     expect(io.revise).toHaveBeenCalledTimes(1);
   });
 
@@ -334,41 +334,71 @@ describe("chat store multi-process lifecycle", () => {
     sending.mockRestore();
   });
 
-  it("分叉直接使用已提交记录和参数，不重复读盘或调用模型", async () => {
-    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
-    const source = await loadChat(first.id);
-    const sending = vi.spyOn(source, "sendMessage");
-    const selections = { "builtin:ollama/test": { temperature: "low" } };
-    useChatStore.setState({
-      parameterSelectionsBySession: { [first.id]: selections },
-    });
-    const saved: SessionFile = {
-      ...sessionFile(second),
-      messages: [
-        {
-          role: "user",
-          message_id: "original-user",
-          content: "original",
+  it.each([
+    { kind: "reply", turn_id: "turn" },
+    { kind: "compaction", checkpoint_id: "checkpoint" },
+  ] as const)(
+    "从 $kind 分叉保留已提交记录和参数，不调用模型",
+    async (target) => {
+      useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+      const source = await loadChat(first.id);
+      const sending = vi.spyOn(source, "sendMessage");
+      const selections = { "builtin:ollama/test": { temperature: "low" } };
+      useChatStore.setState({
+        parameterSelectionsBySession: { [first.id]: selections },
+      });
+      const saved: SessionFile = {
+        ...sessionFile(second),
+        messages: [
+          {
+            role: "user",
+            message_id: "original-user",
+            content: "original",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      };
+      if (target.kind === "compaction")
+        saved.messages.push({
+          role: "event",
+          content: {
+            event: "compaction",
+            id: target.checkpoint_id,
+            throughUserMessageId: "original-user",
+            summary: "saved handoff",
+          },
+          turn_id: "compact-turn",
           timestamp: new Date().toISOString(),
-        },
-      ],
-    };
-    io.revise.mockResolvedValue({ meta: second, session: saved });
-    io.list.mockResolvedValue([first, second]);
-    io.read.mockClear();
-    await forkSession(first.id, "turn");
-    expect(useChatStore.getState().activeSessionId).toBe(second.id);
-    expect(getSessionParameterSelections(second.id)).toEqual(selections);
-    expect(io.workspaceSet).toHaveBeenCalledWith(
-      `ai:parameters:${second.id}`,
-      selections,
-    );
-    const fork = await loadChat(second.id);
-    expect(fork.messages[0].id).toBe("original-user");
-    expect(io.read).not.toHaveBeenCalled();
-    expect(sending).not.toHaveBeenCalled();
-    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
-  });
+        });
+      io.revise.mockResolvedValue({ meta: second, session: saved });
+      io.list.mockResolvedValue([first, second]);
+      io.read.mockClear();
+      await forkSession(first.id, target);
+      expect(io.revise).toHaveBeenCalledWith(first.id, first.fingerprint, {
+        kind: "fork",
+        target,
+        label: expect.any(String),
+      });
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+      expect(getSessionParameterSelections(second.id)).toEqual(selections);
+      expect(io.workspaceSet).toHaveBeenCalledWith(
+        `ai:parameters:${second.id}`,
+        selections,
+      );
+      const fork = await loadChat(second.id);
+      expect(fork.messages[0].id).toBe("original-user");
+      if (target.kind === "compaction") {
+        expect(
+          JSON.stringify(await convertToAgentModelMessages(fork.messages)),
+        ).toContain("saved handoff");
+      }
+      expect(io.read).not.toHaveBeenCalled();
+      expect(sending).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().runLockSessionIds[first.id],
+      ).toBeUndefined();
+    },
+  );
 
   it("切换或刷新会话取消原位编辑，其他状态更新保留编辑", () => {
     const editingMessage = { sessionId: first.id, messageId: "user" };
@@ -394,7 +424,7 @@ describe("chat store multi-process lifecycle", () => {
       useChatStore.setState({ sessions: [session], activeSessionId: first.id });
       expect(canReviseHistory(first.id)).toBe(false);
       expect(await editLastMessage(first.id, "user", "changed")).toBe(false);
-      await forkSession(first.id, "turn");
+      await forkSession(first.id, { kind: "reply", turn_id: "turn" });
     }
     expect(io.acquire).not.toHaveBeenCalled();
     expect(io.revise).not.toHaveBeenCalled();

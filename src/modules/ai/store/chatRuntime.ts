@@ -44,6 +44,7 @@ import { availableAgentTools } from "@/modules/ai/lib/agentTools";
 import { parseSessionAgent } from "@/modules/ai/lib/agents";
 import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
 import {
+  type SessionForkTarget,
   resolveSessionCwd,
   reviseSessionHistory,
   releaseSessionRun,
@@ -691,12 +692,12 @@ export async function editLastMessage(
   });
 }
 
-/** 从完整终态复制原始记录；标题与分叉路径始终只属于本地 metadata。 */
+/** 复制至选定回复或压缩检查点的原始记录；创建后不自动请求模型。 */
 export async function forkSession(
   sessionId: string,
-  turnId: string | undefined,
+  target: SessionForkTarget,
 ) {
-  if (!turnId || !canReviseHistory(sessionId)) return;
+  if (!canReviseHistory(sessionId)) return;
   const state = useChatStore.getState();
   const fingerprint = state.sessions.find(
     (s) => s.id === sessionId,
@@ -709,7 +710,7 @@ export async function forkSession(
       fingerprint,
       {
         kind: "fork",
-        turn_id: turnId,
+        target,
         label: i18n.t("ai:chat.forkTitle"),
       },
     );

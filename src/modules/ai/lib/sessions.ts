@@ -225,13 +225,18 @@ function parseTimestamp(value: string): number {
   return timestamp;
 }
 
+/** 分叉边界使用持久化身份，压缩检查点不依赖普通助手回复。 */
+export type SessionForkTarget =
+  | { kind: "reply"; turn_id: string }
+  | { kind: "compaction"; checkpoint_id: string };
+
 /** 在持有运行锁期间原子修改历史，原生层再次校验磁盘版本。 */
 export async function reviseSessionHistory(
   id: string,
   fingerprint: string,
   action:
     | { kind: "edit"; message_id: string; text: string; turn_id: string }
-    | { kind: "fork"; turn_id: string; label: string },
+    | { kind: "fork"; target: SessionForkTarget; label: string },
 ): Promise<{ meta: SessionMeta; session: SessionFile }> {
   const result = await invoke<{
     meta: IpcSessionMeta;

@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import { Textarea } from "@/components/controls/textarea";
+import type { SessionForkTarget } from "@/modules/ai/lib/sessions";
 import { reportError } from "@/lib/errors";
 import {
   canReviseHistory,
@@ -489,7 +490,11 @@ export function AiChatView({
     Boolean(state.runLockSessionIds[sessionId]),
   );
   const editing = useChatStore((state) => state.editingMessage);
-  const historyAvailable = !isBusy && !locked && canReviseHistory(sessionId);
+  const commandActive = useChatDisplayStore(useCommandStore, (state) =>
+    Boolean(state.active[sessionId]),
+  );
+  const historyAvailable =
+    !isBusy && !locked && !commandActive && canReviseHistory(sessionId);
   const { hitStepCap, compacting } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
@@ -568,11 +573,12 @@ export function AiChatView({
                     forkable={
                       historyAvailable &&
                       !editing &&
-                      messageMetadata(m).turnStatus === "completed" &&
-                      Boolean(messageMetadata(m).turnId) &&
-                      m.parts.some(
-                        (part) => part.type === "text" && part.text.trim(),
-                      )
+                      (Boolean(messageMetadata(m).compaction) ||
+                        (messageMetadata(m).turnStatus === "completed" &&
+                          Boolean(messageMetadata(m).turnId) &&
+                          m.parts.some(
+                            (part) => part.type === "text" && part.text.trim(),
+                          )))
                     }
                     streaming={m.id === streamingMessageId && !compacting}
                     appearing={m.id === appearingUserMessageId}
@@ -764,15 +770,24 @@ const RenderedMessage = memo(function RenderedMessage({
     [sessionId, fileEdits?.calls],
   );
   const compaction = messageMetadata(message).compaction;
+  const turnId = messageMetadata(message).turnId;
   if (compaction)
     return (
       <div
         data-conversation-message-id={message.id}
-        className="flex items-center gap-3 text-xs text-muted-foreground"
+        className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-xs text-muted-foreground"
       >
-        <span className="h-px flex-1 bg-border" />
+        <span className="h-px bg-border" />
         <span>{t("chat.contextCompacted")}</span>
-        <span className="h-px flex-1 bg-border" />
+        <span className="flex items-center gap-2">
+          {forkable && (
+            <ForkAction
+              sessionId={sessionId}
+              target={{ kind: "compaction", checkpoint_id: compaction.id }}
+            />
+          )}
+          <span className="h-px flex-1 bg-border" />
+        </span>
       </div>
     );
   const failure = messageMetadata(message).runFailure;
@@ -907,22 +922,11 @@ const RenderedMessage = memo(function RenderedMessage({
             sessionId={sessionId}
             turnId={messageMetadata(message).turnId}
           >
-            {forkable && (
-              <MessageAction
-                tooltip={t("chat.fork")}
-                label={t("chat.fork")}
-                onClick={() =>
-                  void forkSession(
-                    sessionId,
-                    messageMetadata(message).turnId,
-                  ).catch((error) =>
-                    reportError(t("chat.historyActionFailed"), { error }),
-                  )
-                }
-                className="size-5"
-              >
-                <HugeiconsIcon icon={GitBranchIcon} size={12} />
-              </MessageAction>
+            {forkable && turnId && (
+              <ForkAction
+                sessionId={sessionId}
+                target={{ kind: "reply", turn_id: turnId }}
+              />
             )}
           </MessageMeta>
         ) : null}
@@ -930,6 +934,34 @@ const RenderedMessage = memo(function RenderedMessage({
     </FileEditContext.Provider>
   );
 });
+
+/** 两类分叉共用运行状态和错误反馈；创建分支不会请求模型。 */
+function ForkAction({
+  sessionId,
+  target,
+}: {
+  sessionId: string;
+  target: SessionForkTarget;
+}) {
+  const { t } = useTranslation("ai");
+  const label = t(
+    target.kind === "compaction" ? "chat.forkCompaction" : "chat.fork",
+  );
+  return (
+    <MessageAction
+      tooltip={label}
+      label={label}
+      onClick={() =>
+        void forkSession(sessionId, target).catch((error) =>
+          reportError(t("chat.historyActionFailed"), { error }),
+        )
+      }
+      className="size-5"
+    >
+      <HugeiconsIcon icon={GitBranchIcon} size={12} />
+    </MessageAction>
+  );
+}
 
 /** 原位只修改正文，附件和底部草稿保持原样，成功提交后才结束编辑。 */
 function MessageEditor({

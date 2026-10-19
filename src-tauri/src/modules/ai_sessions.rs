@@ -695,9 +695,17 @@ pub enum HistoryAction {
         turn_id: String,
     },
     Fork {
-        turn_id: String,
+        target: ForkTarget,
         label: String,
     },
+}
+
+/// 分叉定位到完整回复或已提交的压缩检查点，不把同轮后续记录带入分支。
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ForkTarget {
+    Reply { turn_id: String },
+    Compaction { checkpoint_id: String },
 }
 
 /// 返回已提交的记录，调用方无需再次读盘即可安装一致的内存历史。
@@ -778,22 +786,37 @@ fn revise_history_file(
             record["turn_id"] = Value::String(turn_id);
             record.as_object_mut().unwrap().remove("guided");
         }
-        HistoryAction::Fork { turn_id, label } => {
-            let end = session
-                .messages
-                .iter()
-                .rposition(|r| r["turn_id"] == turn_id)
-                .ok_or("Final reply is unavailable")?;
-            let final_record = session.messages[..=end]
-                .iter()
-                .rev()
-                .find(|r| {
-                    r["turn_id"] == turn_id && (r["role"] == "model" || r["role"] == "assistant")
-                })
-                .ok_or("Final reply is unavailable")?;
-            if final_record["turn_status"] != "completed" {
-                return Err("Reply is not complete".into());
-            }
+        HistoryAction::Fork { target, label } => {
+            let end = match target {
+                ForkTarget::Reply { turn_id } => {
+                    let end = session
+                        .messages
+                        .iter()
+                        .rposition(|r| r["turn_id"] == turn_id)
+                        .ok_or("Final reply is unavailable")?;
+                    let final_record = session.messages[..=end]
+                        .iter()
+                        .rev()
+                        .find(|r| {
+                            r["turn_id"] == turn_id
+                                && (r["role"] == "model" || r["role"] == "assistant")
+                        })
+                        .ok_or("Final reply is unavailable")?;
+                    if final_record["turn_status"] != "completed" {
+                        return Err("Reply is not complete".into());
+                    }
+                    end
+                }
+                ForkTarget::Compaction { checkpoint_id } => session
+                    .messages
+                    .iter()
+                    .position(|r| {
+                        r["role"] == "event"
+                            && r["content"]["event"] == "compaction"
+                            && r["content"]["id"] == checkpoint_id
+                    })
+                    .ok_or("Compaction checkpoint is unavailable")?,
+            };
             let number = session
                 .metadata
                 .get("forkCount")
@@ -1096,7 +1119,9 @@ mod tests {
                 "local",
                 &metadata(dir.path(), source).unwrap().fingerprint,
                 HistoryAction::Fork {
-                    turn_id: "first".into(),
+                    target: ForkTarget::Reply {
+                        turn_id: "first".into(),
+                    },
                     label: "分叉".into(),
                 },
                 file.updated_at.clone(),
@@ -1132,12 +1157,71 @@ mod tests {
             "local",
             &metadata(dir.path(), id).unwrap().fingerprint,
             HistoryAction::Fork {
-                turn_id: "later".into(),
+                target: ForkTarget::Reply {
+                    turn_id: "later".into()
+                },
                 label: "Fork".into()
             },
             file.updated_at
         )
         .is_err());
+    }
+
+    #[test]
+    fn forks_at_exact_compaction_checkpoints_without_a_completed_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut file = session(id, "original");
+        file.messages.extend(vec![
+            json!({"role":"model","turn_id":"first","content":[{"role":"assistant","content":"answer"}],"turn_status":"completed"}),
+            json!({"role":"usage","turn_id":"manual","content":{"purpose":"compaction"}}),
+            json!({"role":"event","turn_id":"manual","turn_status":"running","content":{"event":"compaction","id":"manual-checkpoint","summary":"manual handoff"}}),
+            json!({"role":"model","turn_id":"active","content":[],"turn_status":"running"}),
+            json!({"role":"event","turn_id":"active","turn_status":"running","content":{"event":"compaction","id":"automatic-checkpoint","summary":"automatic handoff"}}),
+            json!({"role":"model","turn_id":"active","content":[{"role":"assistant","content":"later answer"}],"turn_status":"completed"}),
+            json!({"role":"user","content":{"event":"compaction","id":"fake-checkpoint"}}),
+        ]);
+        write_session(dir.path(), &file).unwrap();
+        for (checkpoint_id, end) in [("manual-checkpoint", 3), ("automatic-checkpoint", 5)] {
+            let action: HistoryAction = serde_json::from_value(json!({
+                "kind":"fork", "label":"Fork",
+                "target":{"kind":"compaction","checkpoint_id":checkpoint_id}
+            }))
+            .unwrap();
+            let fork = revise_history_file(
+                dir.path(),
+                id,
+                "local",
+                &metadata(dir.path(), id).unwrap().fingerprint,
+                action,
+                file.updated_at.clone(),
+            )
+            .unwrap();
+            assert_eq!(fork.session.messages, file.messages[..=end]);
+            assert_ne!(fork.session.id, file.id);
+            assert_eq!(
+                read_session(dir.path(), id).unwrap().messages,
+                file.messages
+            );
+        }
+        for checkpoint_id in ["missing", "fake-checkpoint"] {
+            let before = metadata(dir.path(), id).unwrap().fingerprint;
+            assert!(revise_history_file(
+                dir.path(),
+                id,
+                "local",
+                &before,
+                HistoryAction::Fork {
+                    target: ForkTarget::Compaction {
+                        checkpoint_id: checkpoint_id.into()
+                    },
+                    label: "Fork".into()
+                },
+                file.updated_at.clone(),
+            )
+            .is_err());
+            assert_eq!(metadata(dir.path(), id).unwrap().fingerprint, before);
+        }
     }
 
     #[test]

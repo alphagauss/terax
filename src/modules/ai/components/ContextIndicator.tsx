@@ -159,6 +159,15 @@ export function ContextIndicator({
     )
   )
     return null;
+  if (needsEstimate && postCompaction === undefined)
+    return (
+      <span
+        role="status"
+        className="shrink-0 text-[10.5px] text-muted-foreground"
+      >
+        {t("miniWindow.context.estimating")}
+      </span>
+    );
   return (
     <Context usedTokens={used} maxTokens={max}>
       <ContextTrigger

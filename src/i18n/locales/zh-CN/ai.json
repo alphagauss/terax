@@ -6,6 +6,7 @@
     "closeTitle": "关闭 (Esc)",
     "context": {
       "usage": "上下文",
+      "estimating": "正在估算上下文…",
       "compactedEstimate": "压缩后预计上下文，包含消息、系统提示和工具定义；下一次模型调用完成后更新为实际用量。",
       "lastCall": "最近一次模型调用用量",
       "footerApprox": "本地预估：字符数 × 0.8。媒体及不可见推理的用量未知。",
@@ -140,6 +141,7 @@
   "chat": {
     "edit": "编辑消息",
     "fork": "分叉会话",
+    "forkCompaction": "从此压缩结果分叉",
     "forkTitle": "分叉",
     "cancelEdit": "取消",
     "resend": "重新发送",

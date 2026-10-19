@@ -6,6 +6,7 @@
     "closeTitle": "Close (Esc)",
     "context": {
       "usage": "Context",
+      "estimating": "Estimating context…",
       "compactedEstimate": "Estimated context after compaction, including messages, instructions and tool definitions. Actual usage will update after the next model call.",
       "lastCall": "Last model call usage",
       "footerApprox": "Local estimate: characters × 0.8. Media and hidden reasoning usage are unknown.",
@@ -140,6 +141,7 @@
   "chat": {
     "edit": "Edit message",
     "fork": "Fork conversation",
+    "forkCompaction": "Fork from this compaction",
     "forkTitle": "Fork",
     "cancelEdit": "Cancel",
     "resend": "Resend",
