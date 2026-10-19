@@ -323,7 +323,7 @@ function ProcessList({
         >
           <StepStatus status={step.status} />
           <span className="shrink-0 font-medium text-foreground">
-            {step.toolName}
+            {step.toolName === "web_search" || step.toolName === "web_fetch" ? t(`chat.web.${step.toolName}`) : step.toolName}
           </span>
           {step.summary ? (
             <span className="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground">
@@ -628,7 +628,7 @@ function runningActionLabel(
   t: ReturnType<typeof useTranslation<"ai">>["t"],
 ): string {
   if (action.kind === "thinking") return t("chat.subagent.thinking");
-  const label = action.toolName;
+  const label = action.toolName === "web_search" || action.toolName === "web_fetch" ? t(`chat.web.${action.toolName}`) : action.toolName;
   const summary = formatToolSummary(action.summary, t);
   return summary ? `${label} ${summary}` : label;
 }

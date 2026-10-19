@@ -17,6 +17,8 @@ export const AGENT_TOOL_IDS = [
   "run_subagent",
   "subagent_task",
   "message",
+  "web_search",
+  "web_fetch",
 ] as const;
 
 export type AgentToolId = (typeof AGENT_TOOL_IDS)[number];
@@ -43,6 +45,7 @@ export const AGENT_TOOL_GROUPS = [
     tools: ["run_subagent", "subagent_task"],
   },
   { id: "channels", tools: ["message"] },
+  { id: "web", tools: ["web_search", "web_fetch"] },
 ] as const satisfies readonly {
   id: string;
   tools: readonly AgentToolId[];
@@ -51,6 +54,8 @@ export const AGENT_TOOL_GROUPS = [
 const TOOL_IDS = new Set<string>(AGENT_TOOL_IDS);
 const EDIT_TOOLS: readonly AgentToolId[] = ["write_file", "apply_patch"];
 const SUBAGENT_READ_ONLY_TOOLS = new Set<AgentToolId>([
+  "web_search",
+  "web_fetch",
   "read_file",
   "find_files",
   "grep",

@@ -291,7 +291,14 @@
     "guided": "Guided",
     "runFailed": "The model request failed and this turn did not complete: {{error}}",
     "compacting": "Compacting conversation",
-    "compactionFailed": "Compaction did not produce a complete summary. The existing context is preserved."
+    "compactionFailed": "Compaction did not produce a complete summary. The existing context is preserved.",
+    "web": {
+      "web_search": "Searching the web",
+      "web_fetch": "Fetching webpage",
+      "empty": "No matching results.",
+      "truncated": "Content truncated.",
+      "openError": "Could not open source"
+    }
   },
   "filePicker": {
     "currentSpace": "{{name}} (Current Space)",

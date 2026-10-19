@@ -4,6 +4,7 @@
  */
 
 import { buildMessageTools } from "@/modules/ai/tools/message";
+import { buildWebTools } from "@/modules/ai/tools/web";
 import {
   AGENT_TOOL_IDS,
   type AgentToolId,
@@ -43,6 +44,7 @@ export function buildTools(
     ...buildShellTools(ctx),
     ...buildSubagentTools(startSubagent, manageSubagent),
     ...buildTerminalTools(ctx),
+    ...buildWebTools(ctx),
   } as const;
   const allowed = new Set(normalizeAgentTools(allowedTools));
   return Object.fromEntries(

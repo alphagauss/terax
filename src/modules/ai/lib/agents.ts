@@ -4,6 +4,7 @@
  */
 
 import { publishAgentConfigurations } from "./agentConfiguration";
+import { resolveToolAvailability } from "./toolAvailability";
 import i18n from "@/i18n";
 import { readSharedStore, setSharedStoreKey } from "@/lib/sharedStore";
 import { invoke } from "@tauri-apps/api/core";
@@ -39,8 +40,10 @@ let loadingAgents: Promise<Agent[]> | undefined;
 /** 串行读取并发布配置，避免保存与共享存储刷新交错时旧读取覆盖新值。 */
 export function loadAgents(): Promise<Agent[]> {
   const load = async () => {
-    const agents = resolveAgentRecords(await readSharedStore("ai-agents"));
-    publishAgentConfigurations(agents);
+    const values = await readSharedStore("ai-agents");
+    const settings = await readSharedStore("settings");
+    const agents = resolveAgentRecords(values);
+    publishAgentConfigurations(agents, resolveToolAvailability(settings));
     return agents;
   };
   loadingAgents = loadingAgents ? loadingAgents.then(load, load) : load();

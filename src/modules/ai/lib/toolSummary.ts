@@ -74,6 +74,12 @@ export function describeToolCall(
     parts.push(values ? { label: name, values } : { label: name });
   };
   switch (toolName) {
+    case "web_search":
+      parts.push(text("query"));
+      break;
+    case "web_fetch":
+      parts.push(text("url"));
+      break;
     case "read_file": {
       parts.push(text("path"));
       const start = number("start_line");

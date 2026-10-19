@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AgentEditorDialog } from "./AgentsSection";
 import { MAIN_AGENT, CHANNEL_AGENT } from "@/modules/ai/lib/agents";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { publishAgentConfigurations } from "@/modules/ai/lib/agentConfiguration";
 
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 vi.mock("react-i18next", () => ({
@@ -18,6 +19,24 @@ const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount());
   document.body.replaceChildren();
+  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: false, web_fetch: false });
+});
+
+it("disables unavailable tools while preserving checked and unchecked selections", async () => {
+  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: false, web_fetch: false });
+  await renderEditor({ ...MAIN_AGENT, tools: ["web_search"] });
+  const search = document.querySelector("#agent-tool-web_search") as HTMLButtonElement;
+  const fetch = document.querySelector("#agent-tool-web_fetch") as HTMLButtonElement;
+  expect(search.disabled).toBe(true);
+  expect(search.getAttribute("aria-checked")).toBe("true");
+  expect(fetch.disabled).toBe(true);
+  expect(fetch.getAttribute("aria-checked")).toBe("false");
+  expect(document.body.textContent).toContain("agents.agentDialog.enableToolFirst");
+  await act(async () => publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: true, web_fetch: true }));
+  expect(search.disabled).toBe(false);
+  expect(search.getAttribute("aria-checked")).toBe("true");
+  expect(fetch.disabled).toBe(false);
+  expect(fetch.getAttribute("aria-checked")).toBe("false");
 });
 
 async function renderEditor(
@@ -61,7 +80,7 @@ it("shows ordered prompt sections without loading a workspace and uses individua
   expect(document.querySelector("#agent-tool-workspaceRead")).toBeNull();
   expect(
     document.querySelectorAll('[id^="agent-tool-"][role="checkbox"]'),
-  ).toHaveLength(13);
+  ).toHaveLength(15);
 });
 
 it("saves an explicitly empty prompt and only the necessary dependency, preserving edits on failure", async () => {

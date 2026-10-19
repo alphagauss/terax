@@ -4,6 +4,7 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
+import { WebToolsSettings } from "@/settings/components/WebToolsSettings";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,7 +63,8 @@ import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { getToolAvailability, subscribeToolAvailability } from "@/modules/ai/lib/agentConfiguration";
 import { Trans, useTranslation } from "react-i18next";
 import { reportError } from "@/lib/errors";
 import { FormField } from "@/components/layout/FormField";
@@ -143,6 +145,7 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+      <WebToolsSettings />
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
@@ -419,6 +422,7 @@ export function AgentEditorDialog({
   onSave: (a: Agent) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const toolAvailability = useSyncExternalStore(subscribeToolAvailability, getToolAvailability);
   const [draft, setDraft] = useState<Agent | null>(agent);
   const [workspaceFiles, setWorkspaceFiles] = useState("");
   const [saving, setSaving] = useState(false);
@@ -627,6 +631,7 @@ export function AgentEditorDialog({
                   </div>
                   {group.tools.map((id) => {
                     const unavailable = !availableTools.includes(id);
+                    const disabled = toolAvailability[id] === false;
                     return (
                       <label
                         key={id}
@@ -636,7 +641,7 @@ export function AgentEditorDialog({
                         <Checkbox
                           id={`agent-tool-${id}`}
                           checked={draft.tools.includes(id)}
-                          disabled={saving || unavailable}
+                          disabled={saving || unavailable || disabled}
                           onCheckedChange={(value) =>
                             setDraft({
                               ...draft,
@@ -656,6 +661,11 @@ export function AgentEditorDialog({
                           {unavailable && (
                             <span className="text-muted-foreground">
                               {t("agents.agentDialog.unavailable")}
+                            </span>
+                          )}
+                          {!unavailable && disabled && (
+                            <span className="text-muted-foreground">
+                              {t("agents.agentDialog.enableToolFirst")}
                             </span>
                           )}
                         </span>

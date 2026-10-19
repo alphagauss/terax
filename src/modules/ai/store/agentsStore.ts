@@ -45,6 +45,11 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       const agents = await loadAgents();
       set({ agents, hydrated: true });
 
+      await onSharedStoreChange("settings", async () => {
+        // 只发布有效运行配置，保留编辑中的原始工具勾选。
+        await loadAgents();
+      });
+
       await onSharedStoreChange("ai-agents", async () => {
         const fresh = await loadAgents();
         const draftAgentId = fresh.some(

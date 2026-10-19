@@ -31,6 +31,8 @@ import {
   buildAgentSystemPrompt,
 } from "@/modules/ai/lib/prompt";
 import type { ToolContext } from "@/modules/ai/tools/tools";
+import { prepareWebServices } from "@/modules/ai/web/runtime";
+import type { WebServices } from "@/modules/ai/web/types";
 import type { UIMessage } from "@ai-sdk/react";
 import type { AgentConfiguration } from "./agentConfiguration";
 
@@ -94,6 +96,7 @@ type SendOptions = {
  * 初始化包含读取工作区文件；不监听文档，审批续跑保持本轮快照。
  */
 export function createSessionTransport(deps: SessionTransportDependencies) {
+  let webSnapshot: { turnId: string; services: WebServices } | undefined;
   let modelTurnId: string | null = null;
   let modelSnapshot: {
     model: ModelRef;
@@ -193,7 +196,18 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       });
     }
     const frozenModel = modelSnapshot;
+    const webKey = deps.getKeys().deepseek;
+    const webBaseURL = deps.getProviderBaseURLs?.().deepseek;
     const { systemPrompt, agent, environment } = await getRuntime();
+    if (!webSnapshot || webSnapshot.turnId !== turnId) {
+      webSnapshot = {
+        turnId,
+        services: agent.tools.some((id) => id === "web_search" || id === "web_fetch")
+          ? prepareWebServices(webKey, webBaseURL)
+          : {},
+      };
+    }
+    const webServices = webSnapshot.services;
     const result = await runAgentStream({
       openSubagentSessions: () =>
         openSubagentSessions(deps.toolContext.getSessionId(), turnId),
@@ -218,7 +232,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,
       allowedTools: agent.tools,
-      toolContext: { ...deps.toolContext, environment },
+      toolContext: { ...deps.toolContext, environment, webServices },
       turnId,
       getCompactionConfiguration: deps.getCompactionConfiguration,
       onCompacting: deps.onCompacting,

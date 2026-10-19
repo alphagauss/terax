@@ -4,6 +4,8 @@
  */
 
 export type ToolContext = {
+  /** 本轮冻结的网络服务，子任务继承同一连接与凭据。 */
+  webServices?: import("@/modules/ai/web/types").WebServices;
   /** 当前执行拥有的 Shell 资源，取消时关闭启动准入并终止进程树。 */
   shellExecution?: import("@/modules/ai/lib/shellExecution").ShellExecution;
   /** 与本轮系统提示共用的执行环境快照，Subagent 原样继承。 */

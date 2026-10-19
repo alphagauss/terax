@@ -514,6 +514,7 @@
       "empty": "No snippets yet. Create one and insert it with <code>#handle</code> in the AI input."
     },
     "agentDialog": {
+      "enableToolFirst": "Enable this tool in its settings first.",
       "newTitle": "New agent",
       "editTitle": "Edit agent",
       "icon": "Icon",
@@ -547,6 +548,9 @@
       },
       "channels": {
         "label": "Channel messages"
+      },
+      "web": {
+        "label": "Web"
       }
     },
     "delete": {
@@ -602,7 +606,9 @@
       "get_terminal_output": "Read the active non-private terminal scrollback.",
       "subagent_task": "Inspect, stop, or continue subagent tasks.",
       "run_subagent": "Delegate a task to a subagent.",
-      "message": "Send text and attachments to the current channel."
+      "message": "Send text and attachments to the current channel.",
+      "web_search": "Search the public web.",
+      "web_fetch": "Fetch webpage text through the selected service."
     }
   },
   "remote": {
@@ -753,5 +759,15 @@
     "images": "Markdown network images",
     "scope": "Applies to Terax built-in requests. Terminal commands, external agents, Git processes, web previews and Python data sources manage their own networking. Proxy failures never fall back to a direct connection.",
     "sshHint": "Controls the connection to this SSH server. Changes apply on the next connection, not to programs running on the server."
+  },
+  "webTools": {
+    "title": "Web tools",
+    "description": "Choose a service for each tool. Disabled tools are unavailable to all agents; existing selections are preserved. Changes apply to the next turn.",
+    "search": "Search service",
+    "fetch": "Fetch service",
+    "disabled": "Disabled",
+    "connection": "DeepSeek uses the API key, base URL and proxy configured in Models. No DeepSeek chat model is required. Queries and URLs are sent to the service and may incur API charges.",
+    "loadError": "Could not load web services",
+    "saveError": "Could not save web service"
   }
 }

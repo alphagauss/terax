@@ -104,6 +104,8 @@ describe("AI tool provider schemas", () => {
     subagent_task: ["action"],
     get_terminal_output: [],
     message: [],
+    web_search: ["query"],
+    web_fetch: ["url"],
   } satisfies Record<keyof typeof tools, readonly string[]>;
   const toolSchemas = Object.entries(tools).map(
     ([name, definition]) =>

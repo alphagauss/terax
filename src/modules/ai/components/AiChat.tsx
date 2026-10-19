@@ -4,6 +4,7 @@
  * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
+import { WebToolResult } from "@/modules/ai/components/WebToolResult";
 import {
   useChatDisplayActive,
   useChatDisplayStore,
@@ -1409,9 +1410,15 @@ export function activityHeadline(part: AnyPart): ChatActivityHeadline {
   return {
     kind: "tool",
     key: toolCallIdFromPart(part) || toolName,
-    text: summary || toolName,
-    ...(summary ? { action: toolName } : {}),
+    text: summary || webToolLabel(toolName),
+    ...(summary ? { action: webToolLabel(toolName) } : {}),
   };
+}
+
+function webToolLabel(name: string): string {
+  return name === "web_search" || name === "web_fetch"
+    ? i18n.t(`ai:chat.web.${name}`)
+    : name;
 }
 
 function compactActivityText(text: string): string {
@@ -1741,14 +1748,20 @@ const RenderedTool = memo(function RenderedTool({
     ) : (
       <Tool
         className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
-        toolName={externalLabel ?? toolName}
+        toolName={externalLabel ?? webToolLabel(toolName)}
         state={display.state}
         summary={externalLabel ? undefined : formatToolSummary(
           describeToolCall(toolName, part.input, part.state !== "input-streaming"),
           t,
         )}
         input={externalLabel ? undefined : part.input}
-        output={"output" in part ? part.output : undefined}
+        output={
+          "output" in part && part.output !== undefined
+            ? (toolName === "web_search" || toolName === "web_fetch") && !display.errorText
+              ? <WebToolResult output={part.output} />
+              : part.output
+            : undefined
+        }
         errorText={display.errorText}
       />
     );

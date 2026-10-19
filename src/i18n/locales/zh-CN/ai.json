@@ -290,7 +290,14 @@
     "guided": "已引导",
     "runFailed": "模型请求失败，本轮未正常完成：{{error}}",
     "compacting": "会话压缩中",
-    "compactionFailed": "压缩未生成完整摘要，原有上下文已保留。"
+    "compactionFailed": "压缩未生成完整摘要，原有上下文已保留。",
+    "web": {
+      "web_search": "正在搜索网页",
+      "web_fetch": "正在抓取网页",
+      "empty": "没有匹配结果。",
+      "truncated": "正文已截断。",
+      "openError": "无法打开来源网页"
+    }
   },
   "filePicker": {
     "currentSpace": "{{name}}（当前 Space）",

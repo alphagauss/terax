@@ -514,6 +514,7 @@
       "empty": "还没有片段。新建一个，并在 AI 输入框中用 <code>#handle</code> 插入。"
     },
     "agentDialog": {
+      "enableToolFirst": "请先在工具设置中启用此工具。",
       "newTitle": "新建智能体",
       "editTitle": "编辑智能体",
       "icon": "图标",
@@ -547,6 +548,9 @@
       },
       "channels": {
         "label": "Channel 消息"
+      },
+      "web": {
+        "label": "网络"
       }
     },
     "delete": {
@@ -602,7 +606,9 @@
       "get_terminal_output": "读取活动非隐私终端的历史输出。",
       "subagent_task": "查看、停止或继续子智能体任务。",
       "run_subagent": "将任务委派给子智能体。",
-      "message": "向当前 Channel 发送文本与附件。"
+      "message": "向当前 Channel 发送文本与附件。",
+      "web_search": "搜索公开网页。",
+      "web_fetch": "通过所选服务抓取网页正文。"
     }
   },
   "remote": {
@@ -753,5 +759,15 @@
     "images": "Markdown 网络图片",
     "scope": "作用于 Terax 内置请求。终端命令、外部 Agent、Git 进程、网页预览和 Python 数据源独立管理网络。代理失败时不会回退直连。",
     "sshHint": "仅控制到此 SSH 服务器的连接，下次连接生效，不控制服务器中运行的程序。"
+  },
+  "webTools": {
+    "title": "网络工具",
+    "description": "分别选择工具的服务。关闭后所有智能体均不可使用该工具，已有勾选保留。更改从下一轮开始生效。",
+    "search": "搜索服务",
+    "fetch": "抓取服务",
+    "disabled": "关闭",
+    "connection": "DeepSeek 复用模型设置中的 API Key、地址和代理，无须添加或使用 DeepSeek 聊天模型。查询和网址会发送给该服务，并可能产生 API 费用。",
+    "loadError": "无法加载网络服务配置",
+    "saveError": "无法保存网络服务配置"
   }
 }

@@ -40,6 +40,7 @@ describe("agent configuration", () => {
           resolve = done;
         }),
       )
+      .mockResolvedValueOnce({})
       .mockResolvedValueOnce({
         "agent:builtin:main": { instructions: "Saved" },
       });
