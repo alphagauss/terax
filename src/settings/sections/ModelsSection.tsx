@@ -809,41 +809,47 @@ function CompactionCard({
   return (
     <div className="flex flex-col gap-field">
       <SectionHeading>{t("models.compaction.title")}</SectionHeading>
-      <FieldRow label={t("models.parameters.model")}>
-        <ModelPicker
-          model={usage.model}
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <FieldRow label={t("models.parameters.model")}>
+          <ModelPicker
+            model={usage.model}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
+            customProviders={customProviders}
+            inheritLabel={t("models.defaults.followChatModel")}
+            onSelect={(value) => {
+              void setModelUsageModel("compaction", value).catch((e) =>
+                reportError(t("common:errors.saveFailed"), { error: e }),
+              );
+            }}
+          />
+        </FieldRow>
+        <ModelRequestSettings
+          model={model}
           models={models}
           providerBaseURLs={providerBaseURLs}
           customProviders={customProviders}
-          inheritLabel={t("models.defaults.followChatModel")}
-          onSelect={(value) => {
-            void setModelUsageModel("compaction", value).catch((e) =>
-              reportError(t("common:errors.saveFailed"), { error: e }),
-            );
+          parameters={model ? (definitions[modelRefKey(model)] ?? []) : []}
+          selections={
+            model ? (usage.parameterSelections[modelRefKey(model)] ?? {}) : {}
+          }
+          onSelect={setPreview}
+          onParametersChange={(selections) => {
+            if (model) {
+              void setModelUsageParameters(
+                "compaction",
+                model,
+                selections,
+              ).catch((e) =>
+                reportError(t("common:errors.saveFailed"), { error: e }),
+              );
+            }
           }}
         />
-      </FieldRow>
-      <ModelRequestSettings
-        model={model}
-        models={models}
-        providerBaseURLs={providerBaseURLs}
-        customProviders={customProviders}
-        parameters={model ? (definitions[modelRefKey(model)] ?? []) : []}
-        selections={
-          model ? (usage.parameterSelections[modelRefKey(model)] ?? {}) : {}
-        }
-        onSelect={setPreview}
-        onParametersChange={(selections) => {
-          if (model) {
-            void setModelUsageParameters("compaction", model, selections).catch(
-              (e) => reportError(t("common:errors.saveFailed"), { error: e }),
-            );
-          }
-        }}
-      />
-      <p className="text-xs text-muted-foreground">
-        {t("models.compaction.followHelp")}
-      </p>
+        <p className="text-xs text-muted-foreground">
+          {t("models.compaction.followHelp")}
+        </p>
+      </div>
     </div>
   );
 }
