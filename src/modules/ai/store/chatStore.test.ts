@@ -182,6 +182,7 @@ describe("chat store multi-process lifecycle", () => {
       draftAgentId: MAIN_AGENT_ID,
     });
     useSessionAttentionStore.setState({
+      activeRunSessionIds: {},
       bySession: {},
       revealLatestBySession: {},
       pendingCompletions: [],
@@ -330,6 +331,9 @@ describe("chat store multi-process lifecycle", () => {
       });
     expect(await editLastMessage(first.id, "edited", "changed")).toBe(true);
     expect(sending).toHaveBeenCalledOnce();
+    expect(
+      useSessionAttentionStore.getState().activeRunSessionIds[first.id],
+    ).toBe(true);
     useChatStore.setState({ runLockSessionIds: {} });
     sending.mockRestore();
   });
@@ -394,6 +398,7 @@ describe("chat store multi-process lifecycle", () => {
       }
       expect(io.read).not.toHaveBeenCalled();
       expect(sending).not.toHaveBeenCalled();
+      expect(useSessionAttentionStore.getState().activeRunSessionIds).toEqual({});
       expect(
         useChatStore.getState().runLockSessionIds[first.id],
       ).toBeUndefined();
@@ -908,6 +913,8 @@ describe("chat store multi-process lifecycle", () => {
       runLockSessionIds: { [first.id]: true },
     });
     sessionMetadata.set(first.id, { title: first.title });
+    useSessionAttentionStore.getState().beginRun(first.id);
+    useSessionAttentionStore.getState().markBackgroundRunning(first.id);
     io.commit.mockRejectedValueOnce(new Error("disk full"));
     await expect(
       useChatStore.getState().commitMessages(first.id, []),
@@ -917,7 +924,20 @@ describe("chat store multi-process lifecycle", () => {
     ).toContain("disk full");
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
     expect(io.release).not.toHaveBeenCalled();
+    expect(
+      useSessionAttentionStore.getState().activeRunSessionIds[first.id],
+    ).toBe(true);
+    expect(
+      useSessionAttentionStore.getState().bySession[first.id],
+    ).toBe("background-running");
+    expect(useSessionAttentionStore.getState().pendingCompletions).toEqual([]);
     await useChatStore.getState().commitMessages(first.id, []);
+    expect(
+      useSessionAttentionStore.getState().activeRunSessionIds[first.id],
+    ).toBeUndefined();
+    expect(
+      useSessionAttentionStore.getState().bySession[first.id],
+    ).toBe("completed-unread");
     expect(
       useChatStore.getState().agentMetaBySession[first.id]?.commitError,
     ).toBeUndefined();
@@ -1956,6 +1976,7 @@ describe("chat store multi-process lifecycle", () => {
       draftSessionId: null,
       runLockSessionIds: {},
     });
+    useSessionAttentionStore.getState().beginRun(first.id);
     useSessionAttentionStore.getState().markBackgroundRunning(first.id);
     io.list.mockResolvedValue([second]);
 

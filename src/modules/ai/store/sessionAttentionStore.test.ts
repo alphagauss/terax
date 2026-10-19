@@ -8,6 +8,7 @@ import { useSessionAttentionStore } from "./sessionAttentionStore";
 
 afterEach(() => {
   useSessionAttentionStore.setState({
+    activeRunSessionIds: {},
     bySession: {},
     revealLatestBySession: {},
     pendingCompletions: [],
@@ -17,8 +18,12 @@ afterEach(() => {
 describe("sessionAttentionStore", () => {
   it("keeps completed background sessions unread until viewed", () => {
     const store = useSessionAttentionStore.getState();
+    store.beginRun("s1");
     store.markBackgroundRunning("s1");
     store.finalizeRun("s1", "completed");
+    // 晚到的可见性更新不能把已完成会话重新标为运行中。
+    store.markBackgroundRunning("s1");
+    expect(useSessionAttentionStore.getState().activeRunSessionIds).toEqual({});
 
     expect(useSessionAttentionStore.getState().bySession.s1).toBe(
       "completed-unread",
@@ -30,11 +35,14 @@ describe("sessionAttentionStore", () => {
 
   it("marks failures and clears user-cancelled runs", () => {
     const store = useSessionAttentionStore.getState();
+    store.beginRun("failed");
+    store.beginRun("cancelled");
     store.markBackgroundRunning("failed");
     store.markBackgroundRunning("cancelled");
     store.finalizeRun("failed", "error");
     store.finalizeRun("cancelled", "cancelled");
 
+    expect(useSessionAttentionStore.getState().activeRunSessionIds).toEqual({});
     expect(useSessionAttentionStore.getState().bySession).toEqual({
       failed: "error-unread",
     });

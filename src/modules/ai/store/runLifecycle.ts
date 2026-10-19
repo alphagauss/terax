@@ -8,6 +8,7 @@ import type { UIMessage } from "ai";
 import { observeAgentRun } from "@/modules/ai/lib/runLifecycle";
 import { useApprovalStore } from "@/modules/ai/store/approvalStore";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 import {
   clearTerminalFileMutations,
   clearSessionFileMutations,
@@ -20,6 +21,7 @@ export function startDesktopRunLifecycle(
   sessionId: string,
   chat: Chat<UIMessage>,
 ): void {
+  useSessionAttentionStore.getState().beginRun(sessionId);
   let disposed = false;
   const lifecycle = observeAgentRun(chat, {
     sessionId,

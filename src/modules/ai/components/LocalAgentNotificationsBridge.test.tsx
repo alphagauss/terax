@@ -65,6 +65,7 @@ beforeEach(() => {
   mocks.state.activeSessionId = null;
   mocks.state.runLockSessionIds = {};
   useSessionAttentionStore.setState({
+    activeRunSessionIds: {},
     bySession: { channel: "completed-unread" },
     revealLatestBySession: {},
     pendingCompletions: [
@@ -133,6 +134,43 @@ it("AI 面板不可见时不消费活动会话通知", async () => {
   expect(mocks.dismiss).not.toHaveBeenCalled();
 });
 
+it("分叉切换会话期间的独占锁不产生后台运行标记或完成通知", async () => {
+  useSessionAttentionStore.setState({ bySession: {}, pendingCompletions: [] });
+  mocks.state.activeSessionId = "channel";
+  mocks.state.runLockSessionIds = { regular: true };
+  const render = () =>
+    root.render(
+      <LocalAgentNotificationsBridge visible={true} onActivate={() => {}} />,
+    );
+  await act(async () => render());
+  expect(useSessionAttentionStore.getState().bySession.regular).toBeUndefined();
+  mocks.state.runLockSessionIds = {};
+  await act(async () => render());
+  expect(useSessionAttentionStore.getState().bySession.regular).toBeUndefined();
+  expect(mocks.route).not.toHaveBeenCalled();
+});
+
+it.each(["completed-unread", "error-unread"] as const)(
+  "后台非执行操作借锁不覆盖 %s",
+  async (attention) => {
+    useSessionAttentionStore.setState({
+      activeRunSessionIds: {},
+      bySession: { regular: attention },
+      pendingCompletions: [],
+    });
+    mocks.state.runLockSessionIds = { regular: true };
+    await act(async () =>
+      root.render(
+        <LocalAgentNotificationsBridge visible={false} onActivate={() => {}} />,
+      ),
+    );
+    expect(useSessionAttentionStore.getState().bySession.regular).toBe(
+      attention,
+    );
+    expect(mocks.route).not.toHaveBeenCalled();
+  },
+);
+
 it.each([
   { visible: true, activeSessionId: "regular", consumed: true },
   { visible: true, activeSessionId: "channel", consumed: false },
@@ -143,9 +181,11 @@ it.each([
     mocks.state.activeSessionId = "regular";
     mocks.state.runLockSessionIds = { regular: true };
     useSessionAttentionStore.setState({
+      activeRunSessionIds: {},
       bySession: {},
       pendingCompletions: [],
     });
+    useSessionAttentionStore.getState().beginRun("regular");
     const onActivate = vi.fn();
     const render = () =>
       root.render(

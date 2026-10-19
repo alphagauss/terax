@@ -54,7 +54,9 @@ export function LocalAgentNotificationsBridge({
   const runs = useChatStore((state) => state.agentMetaBySession);
   const sessions = useChatStore((state) => state.sessions);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const runLockSessionIds = useChatStore((state) => state.runLockSessionIds);
+  const activeRunSessionIds = useSessionAttentionStore(
+    (state) => state.activeRunSessionIds,
+  );
   const pendingCompletionCount = useSessionAttentionStore(
     (state) => state.pendingCompletions.length,
   );
@@ -70,7 +72,7 @@ export function LocalAgentNotificationsBridge({
 
   useLayoutEffect(() => {
     const attention = useSessionAttentionStore.getState();
-    for (const sessionId of Object.keys(runLockSessionIds)) {
+    for (const sessionId of Object.keys(activeRunSessionIds)) {
       if (focused && visible && activeSessionId === sessionId) {
         attention.markViewed(sessionId);
       } else {
@@ -84,7 +86,7 @@ export function LocalAgentNotificationsBridge({
         sessionId: activeSessionId,
       });
     }
-  }, [activeSessionId, focused, runLockSessionIds, visible]);
+  }, [activeSessionId, focused, activeRunSessionIds, visible]);
 
   useEffect(() => {
     const interactiveRuns = Object.fromEntries(
