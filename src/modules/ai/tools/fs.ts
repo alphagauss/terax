@@ -23,7 +23,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a known UTF-8 text file with 1-based line numbers. The response reports end_line, total_lines, next_line, truncated, and line_truncated; continue from next_line when present. line_truncated=true means one long line was only partially returned and cannot be continued by line number, so never use that partial content for a complete rewrite. Repeating the same unchanged range returns unchanged=true unless force=true. Binary, oversized, and special-device paths are refused. Outside-workspace and sensitive paths require approval unless full access is enabled.",
+        "Read a known UTF-8 text file with 1-based line numbers. The response reports end_line, total_lines, next_line, truncated, and line_truncated; continue from next_line when present. line_truncated=true means one long line was only partially returned and cannot be continued by line number, so never use that partial content for a complete rewrite. unchanged=true means duplicate content was omitted, not that the file is empty; reuse the previous read or set force=true to retrieve it again. Binary, non-UTF-8, oversized, and special-device paths are refused; non-UTF-8 text may be reported as binary. Outside-workspace and sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
         path: z.string().min(1),
         start_line: z
@@ -49,7 +49,7 @@ export function buildFsTools(ctx: ToolContext) {
       execute: async ({ path, start_line, line_count, force }) => {
         const approvalRequired = needsPathApproval(path);
         try {
-          return await native.agentFileRead({
+          const result = await native.agentFileRead({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
             permissionMode: accessModeForCall(
@@ -61,6 +61,18 @@ export function buildFsTools(ctx: ToolContext) {
             lineCount: line_count,
             force,
           });
+          return {
+            path: result.path,
+            content: result.content,
+            size: result.size,
+            start_line: result.startLine,
+            end_line: result.endLine,
+            total_lines: result.totalLines,
+            next_line: result.nextLine,
+            truncated: result.truncated,
+            line_truncated: result.lineTruncated,
+            unchanged: result.unchanged,
+          };
         } catch (error) {
           return { error: String(error), path };
         }

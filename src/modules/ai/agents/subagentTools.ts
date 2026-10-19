@@ -8,7 +8,10 @@ import {
 } from "@/modules/ai/agents/subagentSession";
 import type { RunAgentOptions } from "@/modules/ai/lib/agent";
 import { native } from "@/modules/ai/lib/native";
-import type { SubagentStarter } from "@/modules/ai/tools/subagent";
+import {
+  subagentToolResult,
+  type SubagentStarter,
+} from "@/modules/ai/tools/subagent";
 import { buildTools } from "@/modules/ai/tools/tools";
 
 /** 延迟加载子会话，普通工具调用不读取额外历史。 */
@@ -47,12 +50,12 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
     async (input, execution) => {
       const store = await sessions();
       const describe = (task: SubagentSession) => ({
-        taskId: task.taskId,
+        task_id: task.taskId,
         label: task.label,
         status: coordinator.isRunning(task.taskId) ? "running" : task.status,
         ...(task.error ? { error: task.error } : {}),
-        pendingMessages: task.pending.length,
-        currentTool: coordinator.isRunning(task.taskId)
+        pending_messages: task.pending.length,
+        current_tool: coordinator.isRunning(task.taskId)
           ? task.executions?.find(
               (entry) =>
                 entry.status === "started" &&
@@ -77,7 +80,7 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
       if (input.action === "wait") {
         // 在首次等待前捕获历史结果，避免并行续跑改变本次等待的执行归属。
         const restored = restoredSubagentResult(task);
-        return (
+        return subagentToolResult(
           (await coordinator.wait(
             task.taskId,
             input.timeoutMs ?? 30000,
@@ -159,19 +162,21 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
           throw error;
         }
         return {
-          taskId: task.taskId,
+          task_id: task.taskId,
           status: "queued",
           message: "Instructions queued for the next execution boundary.",
         };
       }
-      return start(
-        {
-          task: input.message ?? "",
-          label: task.label,
-          wait: input.wait ?? false,
-          ...execution,
-        },
-        task.taskId,
+      return subagentToolResult(
+        await start(
+          {
+            task: input.message ?? "",
+            label: task.label,
+            wait: input.wait ?? false,
+            ...execution,
+          },
+          task.taskId,
+        ),
       );
     },
   );

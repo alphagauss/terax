@@ -115,7 +115,7 @@ export function SubagentCard({
   const tab = chosenTab ?? (status === "running" || status === "stopping" ? "process" : "result");
   const [taskOpen, setTaskOpen] = useState(false);
   const label = latestDisplay?.label ?? stringValue(input?.label) ?? t("chat.subagent.title");
-  const taskId = latestDisplay?.taskId ?? stringValue(output?.taskId);
+  const taskId = latestDisplay?.taskId ?? stringValue(output?.task_id);
   const color = `var(--chart-${1 + [...(taskId ?? "")].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 5})`;
   const statusLabel = (value: SubagentDisplayStatus) => t(`chat.subagent.${value === "incomplete" ? "stepLimit" : value}`);
 
@@ -258,7 +258,7 @@ export function SubagentCard({
             <TaskUsageDetails
               sessionId={sessionId}
               runId={display?.runId}
-              taskId={display?.taskId ?? stringValue(output?.taskId)}
+              taskId={display?.taskId ?? stringValue(output?.task_id)}
             />
           ) : (
             <ResultPanel status={status} result={result} />

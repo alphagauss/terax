@@ -53,10 +53,16 @@ describe("AI search tools", () => {
   });
 
   it("uses find_files for immediate or recursive discovery", async () => {
+    nativeMock.agentFileFind.mockResolvedValue({
+      root: "src",
+      entries: [],
+      nextOffset: 70,
+      truncated: true,
+    });
     const execute = buildSearchTools(makeContext()).find_files.execute;
     if (!execute) throw new Error("find_files execute missing");
 
-    await execute(
+    const result = await execute(
       {
         path: "src",
         glob: "**/*.ts",
@@ -67,6 +73,12 @@ describe("AI search tools", () => {
       },
       toolOptions,
     );
+    expect(result).toEqual({
+      root: "src",
+      entries: [],
+      next_offset: 70,
+      truncated: true,
+    });
 
     expect(nativeMock.agentFileFind).toHaveBeenCalledWith({
       ownerSessionId: "session",
@@ -83,10 +95,20 @@ describe("AI search tools", () => {
   });
 
   it("maps grep modes and context to the unified backend", async () => {
+    nativeMock.agentFileGrep.mockResolvedValue({
+      root: "src",
+      output: "content",
+      hits: [],
+      files: [],
+      counts: [],
+      filesScanned: 3,
+      nextOffset: 35,
+      truncated: true,
+    });
     const execute = buildSearchTools(makeContext()).grep.execute;
     if (!execute) throw new Error("grep execute missing");
 
-    await execute(
+    const result = await execute(
       {
         pattern: "literal text",
         path: "src",
@@ -99,6 +121,16 @@ describe("AI search tools", () => {
       },
       toolOptions,
     );
+    expect(result).toEqual({
+      root: "src",
+      output: "content",
+      hits: [],
+      files: [],
+      counts: [],
+      files_scanned: 3,
+      next_offset: 35,
+      truncated: true,
+    });
 
     expect(nativeMock.agentFileGrep).toHaveBeenCalledWith({
       ownerSessionId: "session",
@@ -128,6 +160,8 @@ describe("AI search tools", () => {
     expect(properties.syntax.description).toContain("Defaults to regex");
     expect(properties.output.description).toContain("Defaults to content");
     expect(properties.limit.description).toContain("Defaults to 30");
+    expect(tools.grep.description).toContain("Continue from next_offset");
+    expect(tools.grep.description).toContain("lower bounds, not exact totals");
     expect(tools.find_files.description).toContain("require approval");
     if (!grepSchema.validate) throw new Error("grep validator missing");
     for (const output of ["files", "count"]) {

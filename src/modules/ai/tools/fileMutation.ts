@@ -89,7 +89,17 @@ export async function executeFileMutation(
       );
       if (result.error)
         clearPreparedFileMutation(request.sessionId, request.toolCallId);
-      return result;
+      return {
+        ...(result.error === undefined ? {} : { error: result.error }),
+        ...(result.uncertainPaths === undefined
+          ? {}
+          : { uncertain_paths: result.uncertainPaths }),
+        files: result.files.map(({ path, bytesWritten, replacements }) => ({
+          path,
+          bytes_written: bytesWritten,
+          replacements,
+        })),
+      };
     } catch (error) {
       runtime.fail(request.toolCallId, ctx.fileEditTaskId);
       clearPreparedFileMutation(request.sessionId, request.toolCallId);

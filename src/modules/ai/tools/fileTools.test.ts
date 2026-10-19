@@ -122,6 +122,8 @@ describe("AI file tools", () => {
     >;
 
     expect(tools.read_file.description).toContain("line_truncated=true");
+    expect(tools.read_file.description).toContain("continue from next_line");
+    expect(tools.read_file.description).toContain("not that the file is empty");
     expect(readProperties.force.description).toContain("exact range");
     expect(tools.write_file.description).toContain(
       "complete current content is known",
@@ -130,9 +132,34 @@ describe("AI file tools", () => {
   });
 
   it("reads through the owner-scoped native backend", async () => {
+    nativeMock.agentFileRead.mockResolvedValue({
+      path: "a.txt",
+      content: "10| text",
+      size: 100,
+      startLine: 10,
+      endLine: 10,
+      totalLines: 30,
+      nextLine: 11,
+      truncated: true,
+      lineTruncated: false,
+      unchanged: false,
+    });
     const execute = buildFsTools(context).read_file.execute;
     if (!execute) throw new Error("read_file execute missing");
-    await execute({ path: "a.txt", start_line: 10, line_count: 20 }, options);
+    expect(
+      await execute({ path: "a.txt", start_line: 10, line_count: 20 }, options),
+    ).toEqual({
+      path: "a.txt",
+      content: "10| text",
+      size: 100,
+      start_line: 10,
+      end_line: 10,
+      total_lines: 30,
+      next_line: 11,
+      truncated: true,
+      line_truncated: false,
+      unchanged: false,
+    });
     expect(nativeMock.agentFileRead).toHaveBeenCalledWith({
       ownerSessionId: context.getSessionId(),
       root: "/workspace",
@@ -297,7 +324,9 @@ describe("AI file tools", () => {
       { path: "a.txt", content: "new\nmore\n", mode: "rewrite" },
       options,
     );
-    expect(result).toEqual(output);
+    expect(result).toEqual({
+      files: [{ path: "/workspace/a.txt", bytes_written: 9, replacements: 1 }],
+    });
     expect(runtime.getCall(options.toolCallId)).toMatchObject({
       added: 2,
       removed: 1,
@@ -336,7 +365,11 @@ describe("AI file tools", () => {
     if (!tool.execute) throw new Error("write_file execute missing");
     expect(
       await tool.execute({ path: "a.txt", content: "new" }, options),
-    ).toMatchObject({ error: "rollback failed" });
+    ).toEqual({
+      error: "rollback failed",
+      files: [],
+      uncertain_paths: ["/workspace/a.txt"],
+    });
     const runtime = getFileEditRuntime(context.getSessionId());
     expect(runtime.snapshot().files).toEqual([]);
     expect(runtime.getCall(options.toolCallId)?.uncertain).toBe(true);

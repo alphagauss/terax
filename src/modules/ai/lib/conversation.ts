@@ -1393,7 +1393,10 @@ export function formatSubagentResultEvent(event: SubagentResultEvent): string {
     JSON.stringify({
       ...event,
       results: event.results.map(
-        ({ toolCallId: _toolCallId, ...result }) => result,
+        ({ toolCallId: _toolCallId, taskId, ...result }) => ({
+          task_id: taskId,
+          ...result,
+        }),
       ),
     })
   );

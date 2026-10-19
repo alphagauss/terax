@@ -40,7 +40,7 @@ export function buildSearchTools(ctx: ToolContext) {
           ctx.getPermissionMode() === "ask" &&
           pathNeedsApproval(input.path ?? ".", ctx.getCwd());
         try {
-          return await native.agentFileFind({
+          const result = await native.agentFileFind({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
             permissionMode: accessModeForCall(
@@ -55,6 +55,12 @@ export function buildSearchTools(ctx: ToolContext) {
             offset: input.offset,
             limit: input.limit,
           });
+          return {
+            root: result.root,
+            entries: result.entries,
+            next_offset: result.nextOffset,
+            truncated: result.truncated,
+          };
         } catch (error) {
           return { error: String(error), path: input.path ?? "." };
         }
@@ -63,7 +69,7 @@ export function buildSearchTools(ctx: ToolContext) {
 
     grep: tool({
       description:
-        "Search UTF-8 file contents in a file or directory. Limit path to the relevant project or subdirectory before searching. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Continue from next_offset when present. If truncated=true without next_offset, narrow path, include, or pattern. Counts may be incomplete when truncated=true. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
+        "Search UTF-8 file contents in a file or directory. Limit path to the relevant project or subdirectory before searching. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Continue from next_offset when present. If truncated=true without next_offset, narrow path, include, or pattern. Counts are matching-line counts, not occurrence counts; when truncated=true, treat them as lower bounds, not exact totals. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
       inputSchema: z
         .object({
           pattern: z.string().min(1),
@@ -128,7 +134,7 @@ export function buildSearchTools(ctx: ToolContext) {
           ctx.getPermissionMode() === "ask" &&
           pathNeedsApproval(input.path ?? ".", ctx.getCwd());
         try {
-          return await native.agentFileGrep({
+          const result = await native.agentFileGrep({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
             permissionMode: accessModeForCall(
@@ -145,6 +151,16 @@ export function buildSearchTools(ctx: ToolContext) {
             offset: input.offset,
             limit: input.limit,
           });
+          return {
+            root: result.root,
+            output: result.output,
+            hits: result.hits,
+            files: result.files,
+            counts: result.counts,
+            files_scanned: result.filesScanned,
+            next_offset: result.nextOffset,
+            truncated: result.truncated,
+          };
         } catch (error) {
           return { error: String(error), path: input.path ?? "." };
         }

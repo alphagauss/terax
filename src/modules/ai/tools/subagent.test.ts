@@ -5,7 +5,7 @@
 
 import type { ToolExecutionOptions } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { buildSubagentTools } from "./subagent";
+import { buildSubagentTools, subagentToolResult } from "./subagent";
 
 const toolOptions: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
@@ -28,6 +28,34 @@ async function run(
 }
 
 describe("run_subagent", () => {
+  it("将任务结果映射为 snake_case，保留正文与内部结果", async () => {
+    const internal = {
+      taskId: "abcd",
+      label: "review",
+      status: "completed" as const,
+      durationMs: 42,
+      result: '{"taskId":"business-content"}',
+    };
+    const { result } = await run(
+      { task: "review it", wait: true },
+      vi.fn().mockResolvedValue(internal),
+    );
+    expect(result).toEqual({
+      task_id: "abcd",
+      label: "review",
+      status: "completed",
+      duration_ms: 42,
+      result: internal.result,
+    });
+    expect(internal).toHaveProperty("taskId", "abcd");
+    expect(
+      subagentToolResult({ taskId: "abcd", status: "running", timedOut: true }),
+    ).toEqual({
+      task_id: "abcd",
+      status: "running",
+      timed_out: true,
+    });
+  });
   it("拒绝仅包含空白的任务和标签", () => {
     const schema = buildSubagentTools().run_subagent.inputSchema as unknown as {
       safeParse: (input: unknown) => { success: boolean };
@@ -66,25 +94,25 @@ it("validates explicit wait timeouts and requires an owned task identifier", asy
   const schema = tool.inputSchema as unknown as {
     safeParse: (value: unknown) => { success: boolean };
   };
-  for (const timeoutMs of [0, 999, 300001, 1500.5])
+  for (const timeout_ms of [0, 999, 300001, 1500.5])
     expect(
-      schema.safeParse({ action: "wait", taskId: "task", timeoutMs }).success,
+      schema.safeParse({ action: "wait", task_id: "task", timeout_ms }).success,
     ).toBe(false);
   expect(schema.safeParse({ action: "wait" }).success).toBe(false);
   expect(
     schema.safeParse({
       action: "send",
-      taskId: "task",
+      task_id: "task",
       message: "continue",
-      timeoutMs: 1000,
+      timeout_ms: 1000,
     }).success,
   ).toBe(false);
   expect(
-    schema.safeParse({ action: "get", taskId: "task", wait: true }).success,
+    schema.safeParse({ action: "get", task_id: "task", wait: true }).success,
   ).toBe(false);
-  for (const timeoutMs of [undefined, 1000, 300000])
+  for (const timeout_ms of [undefined, 1000, 300000])
     expect(
-      schema.safeParse({ action: "wait", taskId: "task", timeoutMs }).success,
+      schema.safeParse({ action: "wait", task_id: "task", timeout_ms }).success,
     ).toBe(true);
   if (!tool.execute) throw new Error("Missing tool");
   expect(await tool.execute({ action: "wait" }, toolOptions)).toMatchObject({
@@ -92,7 +120,7 @@ it("validates explicit wait timeouts and requires an owned task identifier", asy
   });
   expect(manage).not.toHaveBeenCalled();
   await tool.execute(
-    { action: "wait", taskId: "task", timeoutMs: 1000 },
+    { action: "wait", task_id: "task", timeout_ms: 1000 },
     toolOptions,
   );
   expect(manage).toHaveBeenCalledWith(

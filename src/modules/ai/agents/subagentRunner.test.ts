@@ -239,7 +239,7 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
       messages: [],
       context: {},
     })) as {
-      taskId: string;
+      task_id: string;
       status: string;
       history: unknown[];
       tasks: unknown[];
@@ -249,7 +249,7 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
     (
       await invoke("subagent_task", {
         action: "send",
-        taskId: "foreign",
+        task_id: "foreign",
         message: "continue",
       })
     ).status,
@@ -258,21 +258,21 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
   expect(started.status).toBe("completed");
   const continued = await invoke("subagent_task", {
     action: "send",
-    taskId: started.taskId,
+    task_id: started.task_id,
     message: "second",
     wait: true,
   });
-  expect(continued.taskId).toBe(started.taskId);
+  expect(continued.task_id).toBe(started.task_id);
   expect(continued.status).toBe("completed");
   expect(
-    await invoke("subagent_task", { action: "wait", taskId: started.taskId }),
+    await invoke("subagent_task", { action: "wait", task_id: started.task_id }),
   ).toMatchObject({
-    taskId: started.taskId,
+    task_id: started.task_id,
     status: "completed",
     result: "done",
   });
   expect(
-    (await invoke("subagent_task", { action: "get", taskId: started.taskId }))
+    (await invoke("subagent_task", { action: "get", task_id: started.task_id }))
       .history,
   ).toHaveLength(4);
   expect(
@@ -281,26 +281,26 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
   expect(await invoke("subagent_task", { action: "list" })).toMatchObject({
     concurrency: { limit: 1, running: 0 },
   });
-  expect(await invoke("subagent_task", { action: "get", taskId: "missing" })).toMatchObject({
+  expect(await invoke("subagent_task", { action: "get", task_id: "missing" })).toMatchObject({
     status: "rejected", error: "Task not found in this chat.",
   });
   const cleanup = vi.spyOn(native, "shellStopTask").mockResolvedValue();
   try {
-    expect(await invoke("subagent_task", { action: "stop", taskId: started.taskId })).toMatchObject({
+    expect(await invoke("subagent_task", { action: "stop", task_id: started.task_id })).toMatchObject({
       status: "completed", cleanup: "completed",
     });
-    expect(cleanup).toHaveBeenCalledWith("child-test", started.taskId);
+    expect(cleanup).toHaveBeenCalledWith("child-test", started.task_id);
     cleanup.mockRejectedValueOnce(new Error("cleanup failed"));
-    await expect(invoke("subagent_task", { action: "stop", taskId: started.taskId })).rejects.toThrow("cleanup failed");
+    await expect(invoke("subagent_task", { action: "stop", task_id: started.task_id })).rejects.toThrow("cleanup failed");
   } finally {
     cleanup.mockRestore();
   }
-  required(store.tasks.get(started.taskId)).status = "context_exhausted";
+  required(store.tasks.get(started.task_id)).status = "context_exhausted";
   expect(
     (
       await invoke("subagent_task", {
         action: "send",
-        taskId: started.taskId,
+        task_id: started.task_id,
         message: "retry",
       })
     ).status,
@@ -447,13 +447,13 @@ it("keeps the running child history and message inbox when approval recreates th
   const created = (await before.run_subagent?.execute?.(
     { task: "first", wait: false },
     execution,
-  )) as { taskId: string };
+  )) as { task_id: string };
   await started;
   const after = buildManagedSubagentTools(options);
   const sent = await after.subagent_task?.execute?.(
     {
       action: "send",
-      taskId: created.taskId,
+      task_id: created.task_id,
       message: "additional requirement",
     },
     { ...execution, toolCallId: "send" },
@@ -462,7 +462,7 @@ it("keeps the running child history and message inbox when approval recreates th
   release();
   expect(
     await after.subagent_task?.execute?.(
-      { action: "wait", taskId: created.taskId },
+      { action: "wait", task_id: created.task_id },
       { ...execution, toolCallId: "wait" },
     ),
   ).toMatchObject({ status: "completed", result: "done" });

@@ -43,7 +43,7 @@ it("groups executions across message segments without exposing future turns or c
     type: "dynamic-tool",
     toolName: "subagent_task",
     toolCallId: "queued",
-    input: { action: "send", taskId: "abcd", message: "supplement" },
+    input: { action: "send", task_id: "abcd", message: "supplement" },
     state: "output-available",
     output: { status: "queued" },
   });

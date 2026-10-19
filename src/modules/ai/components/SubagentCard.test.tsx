@@ -17,7 +17,7 @@ const part = {
   toolCallId: "parent-call",
   state: "output-available" as const,
   input: { task: "Inspect the persistence boundary", wait: false },
-  output: { taskId: "task-1", status: "running" },
+  output: { task_id: "task-1", status: "running" },
 };
 
 function display(

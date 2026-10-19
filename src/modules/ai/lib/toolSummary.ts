@@ -199,7 +199,7 @@ export function describeToolCall(
       if (value.action === "stop") label("taskStop");
       if (value.action === "send") label("taskSend");
       if (value.action === "wait") label("taskWait");
-      parts.push(text("taskId"));
+      parts.push(text("task_id"));
       break;
     case "run_subagent":
       if (

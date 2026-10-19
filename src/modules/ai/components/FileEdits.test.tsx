@@ -132,7 +132,7 @@ describe("文件改动展示", async () => {
       toolCallId: "spawn",
       state: "output-available" as const,
       input: { task: "Edit" },
-      output: { taskId: "task", status: "running" },
+      output: { task_id: "task", status: "running" },
     };
     const display = {
       taskId: "task",

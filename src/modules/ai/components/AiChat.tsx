@@ -1394,13 +1394,13 @@ function isSubagentToolPart(part: AnyPart, hasDisplay = false): boolean {
       : tool.type.replace(/^tool-/, "");
   if (name === "run_subagent") return true;
   const output = tool.output as
-    | { taskId?: string; status?: string }
+    | { task_id?: string; status?: string }
     | undefined;
   return (
     name === "subagent_task" &&
     (tool.input as { action?: string } | undefined)?.action === "send" &&
     (hasDisplay ||
-      (Boolean(output?.taskId) &&
+      (Boolean(output?.task_id) &&
         (output?.status === "running" ||
           output?.status === "completed" ||
           output?.status === "incomplete" ||

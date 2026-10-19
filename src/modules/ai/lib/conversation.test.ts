@@ -840,6 +840,10 @@ describe("AI session message conversion", () => {
       role: "user",
       content: [{ type: "text", text: formatSubagentResultEvent(event) }],
     });
+    expect(formatSubagentResultEvent(event)).toContain('"task_id":"task-1"');
+    expect(formatSubagentResultEvent(event)).not.toContain('"taskId"');
+    expect(event.results[0]).toHaveProperty("taskId", "task-1");
+    expect(await convertToAgentModelMessages(messages)).toEqual(modelMessages);
   });
 
   it("restores display-only subagent progress without changing provider messages", async () => {
