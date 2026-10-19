@@ -3,12 +3,19 @@ import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { UsageRecord } from "../lib/usage";
-import { recordUsage, releaseUsage, restoreUsage } from "../lib/usageRuntime";
+import {
+  recordUsage,
+  releaseUsage,
+  restoreUsage,
+  pendingUsage,
+} from "../lib/usageRuntime";
 import { estimateMessageTokens } from "../lib/usage";
 import { formatTokens } from "./UsageDetails";
 import {
   conversationEventPart,
   convertToAgentModelMessages,
+  projectSessionMessages,
+  type SessionMessage,
 } from "../lib/conversation";
 import type { UIMessage } from "ai";
 import { ContextIndicator } from "./ContextIndicator";
@@ -475,5 +482,71 @@ it.each([false, true])(
     );
     expect(label()).not.toContain("≈");
     expect(label()).toContain("800");
+  },
+);
+
+it.each([false, true])(
+  "按落盘顺序恢复压缩后的实际用量，是否已有后续主调用=%s",
+  async (hasMainCall) => {
+    const timestamp = "2026-10-19T04:56:25.357Z";
+    const usage = (callId: string, purpose?: "compaction"): SessionMessage => {
+      const { callId: call_id, ...content } = record({
+        callId,
+        purpose,
+        values: { inputTokens: 14477, outputTokens: 65 },
+        context: {
+          overheadHash: "system",
+          prefixHash: "prefix",
+          messageCount: 18,
+          overheadTokens: 100,
+        },
+      });
+      return { role: "usage", call_id, timestamp, content };
+    };
+    const checkpoint: SessionMessage = {
+      role: "event",
+      timestamp,
+      content: {
+        event: "compaction",
+        id: "checkpoint",
+        throughUserMessageId: "user",
+        summary: "handoff",
+      },
+    };
+    const saved: SessionMessage[] = [
+      { role: "user", message_id: "user", content: "request", timestamp },
+      usage("before"),
+      usage("summary", "compaction"),
+      checkpoint,
+      checkpoint,
+      ...(hasMainCall ? [usage("after")] : []),
+      usage("failed-summary", "compaction"),
+    ];
+    const original = JSON.stringify(saved);
+    restoreUsage(id, saved);
+    await act(async () =>
+      root.render(
+        <ContextIndicator
+          sessionId={id}
+          isBusy={false}
+          messages={projectSessionMessages(id, saved)}
+        />,
+      ),
+    );
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      const label = container
+        .querySelector("button")
+        ?.getAttribute("aria-label");
+      if (hasMainCall) {
+        expect(label).toContain("14.5K");
+        expect(label).not.toContain("≈");
+      } else {
+        expect(label).toContain("≈");
+        expect(label).not.toContain("14.5K");
+      }
+    });
+    expect(JSON.stringify(saved)).toBe(original);
+    expect(pendingUsage(id, timestamp)).toEqual([]);
   },
 );

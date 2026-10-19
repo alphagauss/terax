@@ -43,9 +43,19 @@ export function recordUsage(id: string, record: UsageRecord) {
   publish(id);
 }
 export function restoreUsage(id: string, messages: readonly SessionMessage[]) {
+  let compactionId: string | undefined;
   const records = messages.flatMap((message): UsageRecord[] => {
+    if (message.role === "event" && message.content.event === "compaction") {
+      compactionId = message.content.id;
+      return [];
+    }
     if (message.role !== "usage") return [];
-    return [{ ...message.content, callId: message.call_id }];
+    const record = { ...message.content, callId: message.call_id };
+    // 检查点先提交此前用量；其后的主调用才使用新上下文。恢复关联不依赖展示缓存或时间戳。
+    if (!record.taskId && !record.purpose && record.context) {
+      record.context = { ...record.context, compactionId };
+    }
+    return [record];
   });
   const unique = [
     ...new Map(records.map((record) => [record.callId, record])).values(),
