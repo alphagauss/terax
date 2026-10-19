@@ -768,9 +768,11 @@ const RenderedMessage = memo(function RenderedMessage({
     return (
       <div
         data-conversation-message-id={message.id}
-        className="text-xs text-muted-foreground"
+        className="flex items-center gap-3 text-xs text-muted-foreground"
       >
-        {t("chat.contextCompacted")}
+        <span className="h-px flex-1 bg-border" />
+        <span>{t("chat.contextCompacted")}</span>
+        <span className="h-px flex-1 bg-border" />
       </div>
     );
   const failure = messageMetadata(message).runFailure;

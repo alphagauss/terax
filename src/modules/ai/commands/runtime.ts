@@ -1,5 +1,10 @@
 /** 命令先保存调用再执行；提交确认与完成结果分开，桌面和 Channel 共用同一入口。 */
 import i18n from "@/i18n";
+import {
+  useCommandStore,
+  isCommandActive,
+  updateCommand,
+} from "@/modules/ai/commands/store";
 import type { UIMessage } from "ai";
 import {
   resolveCommand,
@@ -28,11 +33,10 @@ type CommandRequest = {
   channelId?: string;
   hasAttachments?: boolean;
   signal?: AbortSignal;
-  startCompaction?: (instructions: string) => Promise<void>;
-  startTask: (message: UIMessage) => Promise<boolean>;
+  startCompaction?: (signal: AbortSignal) => Promise<boolean>;
+  startTask: (message: UIMessage, signal: AbortSignal) => Promise<boolean>;
 };
 type CommandResult = Extract<CommandRecord, { phase: "result" }>;
-const idleCommands = new Map<string, Promise<void>>();
 
 /** 等待已有 Agent 释放锁，保存失败和取消均结束等待。 */
 async function waitForIdle(id: string, signal?: AbortSignal): Promise<void> {
@@ -54,9 +58,44 @@ async function waitForIdle(id: string, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** 调用落盘后返回接收确认；空闲命令按序执行，即时命令不进入该队列。 */
+/** 接收时同步占用命令入口，持久化完成才释放；等待和执行共用取消信号。 */
 export async function submitSessionCommand(
   request: CommandRequest,
+): Promise<{ completed: Promise<CommandResult> }> {
+  const { sessionId } = request;
+  if (
+    isCommandActive(sessionId) ||
+    getAgentMetaForSession(useChatStore.getState(), sessionId).compacting
+  )
+    throw new Error(i18n.t("ai:commands.busy"));
+  const controller = new AbortController();
+  useCommandStore.setState((state) => ({
+    active: { ...state.active, [sessionId]: controller },
+  }));
+  const release = () => {
+    useCommandStore.setState((state) => {
+      const active = { ...state.active };
+      delete active[sessionId];
+      return { active };
+    });
+    releaseUnusedChats();
+  };
+  try {
+    const receipt = await executeSessionCommand({
+      ...request,
+      signal: request.signal
+        ? AbortSignal.any([request.signal, controller.signal])
+        : controller.signal,
+    });
+    return { completed: receipt.completed.finally(release) };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
+async function executeSessionCommand(
+  request: CommandRequest & { signal: AbortSignal },
 ): Promise<{ completed: Promise<CommandResult> }> {
   const { sessionId, command, signal } = request;
   const t = (key: string, values?: Record<string, string>) =>
@@ -75,12 +114,8 @@ export async function submitSessionCommand(
   signal?.throwIfAborted();
   const messages = projectConversationDisplay(sourceMessages);
   const idle = command.definition?.scheduling === "idle";
-  let wasWaiting =
-    idle &&
-    Boolean(
-      idleCommands.has(sessionId) ||
-        useChatStore.getState().runLockSessionIds[sessionId],
-    );
+  const wasWaiting =
+    idle && Boolean(useChatStore.getState().runLockSessionIds[sessionId]);
   const display: CommandDisplay = {
     id: crypto.randomUUID(),
     input: command.raw,
@@ -101,48 +136,52 @@ export async function submitSessionCommand(
     request.channelId,
   );
 
-  wasWaiting ||= idle && idleCommands.has(sessionId);
   const execute = async (): Promise<CommandResult> => {
     let reply: Omit<CommandResult, "id" | "phase">;
     try {
-      if (idle) await waitForIdle(sessionId, signal);
-      const cancelled =
-        wasWaiting &&
-        getAgentMetaForSession(useChatStore.getState(), sessionId).cancelled;
-      signal?.throwIfAborted();
-      if (cancelled) reply = { text: t("commands.cancelled"), status: "error" };
-      else {
-        const outcome = await resolveCommand(
-          command,
-          { sessionId, source: request.source, t, signal },
-          request.hasAttachments,
-        );
-        if (outcome.kind === "reply")
-          reply = {
-            text: outcome.text,
-            status: outcome.error ? "error" : "success",
-          };
-        else if (outcome.kind === "compact") {
-          if (!request.startCompaction)
-            throw new Error("Compaction is unavailable");
-          await request.startCompaction(outcome.instructions);
-          reply = { text: t("commands.compacted"), status: "success" };
-        } else {
-          const id = crypto.randomUUID();
-          const started = await request.startTask({
+      signal.throwIfAborted();
+      const outcome = await resolveCommand(
+        command,
+        { sessionId, source: request.source, t, signal },
+        request.hasAttachments,
+      );
+      if (idle && outcome.kind !== "reply")
+        await waitForIdle(sessionId, signal);
+      signal.throwIfAborted();
+      updateCommand(sessionId, { ...display, pending: "running" });
+      if (outcome.kind === "reply")
+        reply = {
+          text: outcome.text,
+          status: outcome.error ? "error" : "success",
+        };
+      else if (outcome.kind === "compact") {
+        if (!request.startCompaction)
+          throw new Error("Compaction is unavailable");
+        const compacted = await request.startCompaction(signal);
+        reply = {
+          text: t(
+            compacted ? "commands.compacted" : "commands.nothingToCompact",
+          ),
+          status: "success",
+        };
+      } else {
+        const id = crypto.randomUUID();
+        const started = await request.startTask(
+          {
             id,
             role: "user",
             parts: [{ type: "text", text: outcome.prompt }],
             metadata: { createdAt: Date.now(), commandId: display.id },
-          });
-          reply = started
-            ? {
-                text: t("commands.taskAccepted"),
-                status: "success",
-                taskMessageId: id,
-              }
-            : { text: t("commands.taskRejected"), status: "error" };
-        }
+          },
+          signal,
+        );
+        reply = started
+          ? {
+              text: t("commands.taskAccepted"),
+              status: "success",
+              taskMessageId: id,
+            }
+          : { text: t("commands.taskRejected"), status: "error" };
       }
     } catch (error) {
       if (
@@ -165,21 +204,14 @@ export async function submitSessionCommand(
     );
     return result;
   };
-  const completed = (
-    idle
-      ? (idleCommands.get(sessionId) ?? Promise.resolve())
-      : Promise.resolve()
-  ).then(execute);
-  const settled = completed.then(
-    () => undefined,
-    () => {
-      display.pending = undefined;
-    },
-  );
-  if (idle) idleCommands.set(sessionId, settled);
-  void settled.then(() => {
-    if (idleCommands.get(sessionId) === settled) idleCommands.delete(sessionId);
-    releaseUnusedChats();
-  });
-  return { completed };
+  return {
+    completed: execute().catch((error) => {
+      const current = useCommandStore
+        .getState()
+        .sessions[sessionId]?.find((item) => item.id === display.id);
+      if (current?.pending)
+        updateCommand(sessionId, { ...current, pending: undefined });
+      throw error;
+    }),
+  };
 }

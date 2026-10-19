@@ -1,4 +1,4 @@
-/** 随主 Agent 调用完成更新上下文用量，按独立主子会话展示缓存复用诊断；压缩请求不覆盖主请求统计。 */
+/** 压缩后估算有效上下文，主调用完成后使用实际用量；预估不覆盖调用统计或缓存诊断。 */
 
 import {
   Context,
@@ -17,7 +17,12 @@ import {
 import { getModelContextWindow } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { estimateUiMessageTokens } from "@/modules/ai/lib/chatRendering";
-import { estimateTokens } from "@/modules/ai/lib/usage";
+import {
+  convertToAgentModelMessages,
+  expandConversationMessages,
+  messageMetadata,
+} from "@/modules/ai/lib/conversation";
+import { estimateMessageTokens, estimateTokens } from "@/modules/ai/lib/usage";
 import {
   analyzeSessionCacheUsage,
   type CacheAnalysis,
@@ -25,7 +30,7 @@ import {
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
-import { useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 export function ContextIndicator({
@@ -59,6 +64,68 @@ export function ContextIndicator({
   const latest = [...records]
     .reverse()
     .find((record) => !record.taskId && !record.purpose);
+  const recordedOverhead = [...records]
+    .reverse()
+    .find(
+      (record) =>
+        !record.taskId && record.context?.overheadTokens !== undefined,
+    )?.context?.overheadTokens;
+  const checkpoint = useMemo(
+    () =>
+      expandConversationMessages(messages)
+        .map((message) => messageMetadata(message).compaction)
+        .reverse()
+        .find(Boolean),
+    [messages],
+  );
+  const needsEstimate = Boolean(
+    checkpoint && latest?.context?.compactionId !== checkpoint.id,
+  );
+  const [compactedEstimate, setCompactedEstimate] = useState<{
+    sessionId: string | null;
+    checkpointId: string;
+    tokens: number;
+  }>();
+  useEffect(() => {
+    if (
+      !needsEstimate ||
+      !checkpoint ||
+      (compactedEstimate?.sessionId === sessionId &&
+        compactedEstimate.checkpointId === checkpoint.id)
+    )
+      return;
+    let cancelled = false;
+    void convertToAgentModelMessages(messages).then((modelMessages) => {
+      if (cancelled) return;
+      const system = sessionId
+        ? sessionMetadata.get(sessionId)?.systemPrompt
+        : undefined;
+      const overhead =
+        recordedOverhead ??
+        estimateTokens(typeof system === "string" ? system : "");
+      setCompactedEstimate({
+        sessionId,
+        checkpointId: checkpoint.id,
+        tokens: overhead + estimateMessageTokens(modelMessages),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    needsEstimate,
+    checkpoint,
+    messages,
+    sessionId,
+    recordedOverhead,
+    compactedEstimate,
+  ]);
+  const postCompaction =
+    needsEstimate &&
+    compactedEstimate?.sessionId === sessionId &&
+    compactedEstimate.checkpointId === checkpoint?.id
+      ? compactedEstimate.tokens
+      : undefined;
   const estimateRef = useRef({ id: sessionId, tokens: 0 });
   const estimate = useMemo(() => {
     if (latest) return 0;
@@ -78,10 +145,13 @@ export function ContextIndicator({
     return tokens;
   }, [messages, isBusy, sessionId, latest]);
   const model = latest?.model ?? selectedModel;
-  const used = latest?.values.inputTokens ?? estimate;
+  const used = postCompaction ?? latest?.values.inputTokens ?? estimate;
   const max =
     latest?.contextWindow ?? getModelContextWindow(model, providerModels);
-  const approximate = !latest || latest.estimated.includes("inputTokens");
+  const approximate =
+    postCompaction !== undefined ||
+    !latest ||
+    latest.estimated.includes("inputTokens");
   if (
     sessionId === draftSessionId ||
     parseExternalAgentBinding(
@@ -94,6 +164,7 @@ export function ContextIndicator({
       <ContextTrigger
         className={cn(
           "h-6 shrink-0 gap-1 px-0 text-[10.5px]",
+          approximate && "before:content-['≈']",
           cacheWarnings.length > 0 &&
             "relative after:absolute after:right-0 after:top-0.5 after:size-1.5 after:rounded-full after:bg-warning",
         )}
@@ -118,11 +189,22 @@ export function ContextIndicator({
           ))}
           {approximate && (
             <p className="text-muted-foreground">
-              {t("miniWindow.context.footerApprox")}
+              {t(
+                postCompaction !== undefined
+                  ? "miniWindow.context.compactedEstimate"
+                  : "miniWindow.context.footerApprox",
+              )}
             </p>
           )}
           {latest ? (
-            <SessionUsageDetails context={latest} records={records} />
+            <>
+              {postCompaction !== undefined && (
+                <p className="text-muted-foreground">
+                  {t("miniWindow.context.lastCall")}
+                </p>
+              )}
+              <SessionUsageDetails context={latest} records={records} />
+            </>
           ) : (
             <p className="text-muted-foreground">
               {t("miniWindow.context.noUsage")}

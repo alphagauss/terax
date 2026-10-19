@@ -36,7 +36,10 @@ describe("会话命令", () => {
   it("帮助从可用注册表生成，未知命令、参数和附件不会进入模型", async () => {
     expect(
       await resolveCommand(command("/compact 保留测试结果"), context),
-    ).toEqual({ kind: "compact", instructions: "保留测试结果" });
+    ).toMatchObject({ kind: "reply", error: true });
+    expect(await resolveCommand(command("/compact"), context)).toEqual({
+      kind: "compact",
+    });
     expect(
       await resolveCommand(command("/compact"), context, true),
     ).toMatchObject({ kind: "reply", error: true });

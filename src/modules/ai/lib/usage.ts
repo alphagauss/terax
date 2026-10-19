@@ -21,7 +21,13 @@ export type UsageRecord = {
   estimated: UsageField[];
   toolCalls: number;
   timing?: { responseTimeMs: number; timeToFirstOutputMs?: number };
-  context?: { overheadHash: string; prefixHash: string; messageCount: number };
+  context?: {
+    overheadHash: string;
+    prefixHash: string;
+    messageCount: number;
+    overheadTokens?: number;
+    compactionId?: string;
+  };
 };
 
 /** 中文场景的轻量估算；不是 tokenizer 或服务端计费上限。 */

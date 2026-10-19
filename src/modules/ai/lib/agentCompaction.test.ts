@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { readUIMessageStream, type UIMessage } from "ai";
+import { sendCompaction } from "@/modules/ai/lib/sendCompaction";
 import { Chat } from "@ai-sdk/react";
 import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import { runAgentStream, type RunAgentOptions } from "@/modules/ai/lib/agent";
@@ -9,6 +10,7 @@ import { modelRefForProvider } from "@/modules/ai/config";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import {
   convertToAgentModelMessages,
+  modelHistoryPart,
   projectSessionMessages,
   serializeSessionMessages,
   type SessionMessage,
@@ -18,6 +20,16 @@ import {
   releaseUsage,
   usageRecords,
 } from "@/modules/ai/lib/usageRuntime";
+
+import {
+  persistTurnCheckpoint,
+  persistCompletedTurn,
+} from "@/modules/ai/lib/sessionPersistence";
+import { commitSession, type SessionFile } from "@/modules/ai/lib/sessions";
+vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/ai/lib/sessions")>()),
+  commitSession: vi.fn(async () => ({})),
+}));
 
 let activeModel: MockLanguageModelV4;
 vi.mock("@/modules/ai/lib/providerRuntime", () => ({
@@ -420,7 +432,7 @@ describe("Agent compaction", () => {
     const opts = options();
     const execute = vi.fn(() => "must not execute");
     opts.toolContext.getTerminalContext = execute;
-    opts.compactOnly = "";
+    opts.compactOnly = true;
     const { errors } = await consume(opts);
     expect(errors).toHaveLength(1);
     expect(execute).not.toHaveBeenCalled();
@@ -441,7 +453,7 @@ describe("Agent compaction", () => {
         }),
       });
       const opts = options();
-      opts.compactOnly = "";
+      opts.compactOnly = true;
       expect((await consume(opts)).errors).toHaveLength(1);
       expect(opts.onCheckpoint).not.toHaveBeenCalled();
       expect(activeModel.doGenerateCalls).toHaveLength(1);
@@ -452,7 +464,7 @@ describe("Agent compaction", () => {
   it("does not call a provider or create a checkpoint when there is nothing to remove", async () => {
     activeModel = new MockLanguageModelV4({});
     const opts = options();
-    opts.compactOnly = "";
+    opts.compactOnly = true;
     opts.uiMessages = [
       user("plain"),
       {
@@ -465,12 +477,14 @@ describe("Agent compaction", () => {
       id: sessionId,
       messages: opts.uiMessages,
       transport: {
-        sendMessages: async () =>
-          (await runAgentStream(opts)).toUIMessageStream(),
+        sendMessages: async ({ messages }) =>
+          (
+            await runAgentStream({ ...opts, uiMessages: messages })
+          ).toUIMessageStream(),
         reconnectToStream: async () => null,
       },
     });
-    await chat.sendMessage();
+    await sendCompaction(chat);
     expect(chat.messages).toEqual(opts.uiMessages);
     expect(opts.onCheckpoint).not.toHaveBeenCalled();
     expect(activeModel.doGenerateCalls).toHaveLength(0);
@@ -482,18 +496,20 @@ describe("Agent compaction", () => {
       doGenerate: async () => generated(),
     });
     const opts = options();
-    opts.compactOnly = "preserve tests";
+    opts.compactOnly = true;
     opts.uiMessages = history();
     const chat = new Chat<UIMessage>({
       id: sessionId,
       messages: opts.uiMessages,
       transport: {
-        sendMessages: async () =>
-          (await runAgentStream(opts)).toUIMessageStream(),
+        sendMessages: async ({ messages }) =>
+          (
+            await runAgentStream({ ...opts, uiMessages: messages })
+          ).toUIMessageStream(),
         reconnectToStream: async () => null,
       },
     });
-    await chat.sendMessage();
+    await sendCompaction(chat);
     expect(chat.error).toBeUndefined();
     expect(chat.messages).toHaveLength(3);
     expect(chat.messages[1]).toEqual(opts.uiMessages[1]);
@@ -503,8 +519,120 @@ describe("Agent compaction", () => {
     ).toBe(true);
     expect(activeModel.doStreamCalls).toHaveLength(0);
     expect(vi.mocked(opts.onCheckpoint).mock.calls[0][0]).toEqual([]);
+    expect(chat.messages[2].parts).toEqual([
+      expect.objectContaining({ type: "data-compaction" }),
+    ]);
     expect(JSON.stringify(activeModel.doGenerateCalls[0].prompt)).toContain(
-      "preserve tests",
+      "old final answer",
     );
   });
+  it.each([false, true])(
+    "手动压缩与游标一致，恢复和连续压缩不重复记录，失败后重试=%s",
+    async (failFirst) => {
+      let fail = failFirst;
+      activeModel = new MockLanguageModelV4({
+        doGenerate: async () => {
+          if (fail) {
+            fail = false;
+            throw new Error("summary failed");
+          }
+          return generated();
+        },
+      });
+      const opts = options();
+      opts.compactOnly = true;
+      opts.uiMessages = history();
+      opts.uiMessages[1].parts.push(
+        modelHistoryPart(
+          [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "old final answer" }],
+            },
+          ],
+          "original-call",
+        ),
+      );
+      const records = serializeSessionMessages(opts.uiMessages, {
+        timestamp: new Date().toISOString(),
+        turnId: "old-turn",
+      });
+      const session: SessionFile = {
+        id: sessionId,
+        createdAt: 0,
+        updatedAt: 1,
+        cwd: "/workspace",
+        environmentKey: "local",
+        metadata: {},
+        messages: [],
+      };
+      const cursor = {
+        persistedMessages: opts.uiMessages.length,
+        committedParts: 0,
+        turnId: "compact-turn",
+      };
+      vi.mocked(commitSession).mockImplementation(async (file) => {
+        records.push(...file.messages);
+        return {} as Awaited<ReturnType<typeof commitSession>>;
+      });
+      opts.onCheckpoint = (messages, event) =>
+        persistTurnCheckpoint(session, cursor, messages, event).then(
+          () => undefined,
+        );
+      const chat = new Chat<UIMessage>({
+        id: sessionId,
+        messages: opts.uiMessages,
+        transport: {
+          sendMessages: async ({ messages }) =>
+            (
+              await runAgentStream({ ...opts, uiMessages: messages })
+            ).toUIMessageStream(),
+          reconnectToStream: async () => null,
+        },
+      });
+      if (failFirst) {
+        await sendCompaction(chat);
+        expect(chat.error).toBeDefined();
+        await persistCompletedTurn(session, cursor, chat.messages, "error");
+        expect(
+          records.filter(
+            (record) =>
+              record.role === "event" && record.content.event === "compaction",
+          ),
+        ).toHaveLength(0);
+      }
+      await sendCompaction(chat);
+      expect(chat.error).toBeUndefined();
+      expect(chat.messages[chat.messages.length - 1].parts).toEqual([
+        expect.objectContaining({ type: "data-compaction" }),
+      ]);
+      await persistCompletedTurn(session, cursor, chat.messages, "completed");
+      const restored = projectSessionMessages(sessionId, records);
+      expect(
+        records.filter(
+          (record) =>
+            record.role === "event" && record.content.event === "compaction",
+        ),
+      ).toHaveLength(1);
+      expect(records.filter((record) => record.role === "model")).toHaveLength(
+        1,
+      );
+      expect(await convertToAgentModelMessages(restored)).toEqual(
+        await convertToAgentModelMessages(chat.messages),
+      );
+      chat.messages = restored;
+      cursor.persistedMessages = restored.length;
+      await sendCompaction(chat);
+      await persistCompletedTurn(session, cursor, chat.messages, "completed");
+      expect(chat.messages).toEqual(restored);
+      expect(activeModel.doGenerateCalls).toHaveLength(failFirst ? 2 : 1);
+      expect(activeModel.doStreamCalls).toHaveLength(0);
+      expect(
+        records.filter(
+          (record) =>
+            record.role === "event" && record.content.event === "compaction",
+        ),
+      ).toHaveLength(1);
+    },
+  );
 });

@@ -237,10 +237,8 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       getCompactionConfiguration: deps.getCompactionConfiguration,
       onCompacting: deps.onCompacting,
       compactOnly:
-        typeof (options.body as { compaction?: unknown } | undefined)
-          ?.compaction === "string"
-          ? (options.body as { compaction: string }).compaction
-          : undefined,
+        (options.body as { compaction?: boolean } | undefined)?.compaction ===
+        true,
       onFinishMeta: deps.onFinishMeta,
       onSubagentDisplay: deps.onSubagentDisplay,
       onSystemPrompt: deps.onSystemPrompt,

@@ -25,6 +25,7 @@ export async function createContextUsage(options: {
   instructions: unknown;
   tools?: ToolSet;
   purpose?: "compaction";
+  compactionId?: string;
 }) {
   const definitions = await Promise.all(
     Object.entries(options.tools ?? {}).map(async ([name, tool]) => ({
@@ -131,6 +132,8 @@ export async function createContextUsage(options: {
         : {}),
       context: {
         overheadHash,
+        overheadTokens: overhead,
+        compactionId: options.compactionId,
         prefixHash: pending.prefixHash,
         messageCount: pending.messages.length,
       },

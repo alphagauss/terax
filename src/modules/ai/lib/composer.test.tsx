@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useCommandStore } from "../commands/store";
 import { AiComposerProvider, useComposer } from "./composer";
 
 const mocks = vi.hoisted(() => ({
@@ -248,4 +249,40 @@ it("发送确认期间的新输入继续保存", async () => {
     files: [],
     pickedSnippets: [],
   });
+});
+
+it("选择命令提交明确文本，执行期间保留可编辑草稿并禁止再次提交", async () => {
+  mount();
+  act(() => composer.setValue("/co"));
+  await act(async () => {
+    composer.setValue("/compact");
+    composer.submit("/compact");
+  });
+  expect(mocks.send.mock.calls[0][1].parts).toEqual([
+    { type: "text", text: "/compact" },
+  ]);
+  expect(composer.value).toBe("");
+  act(() =>
+    useCommandStore.setState({ active: { draft: new AbortController() } }),
+  );
+  act(() => composer.setValue("next draft"));
+  expect(composer.isBusy).toBe(true);
+  expect(composer.canSend).toBe(false);
+  await act(async () => composer.submit());
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+  expect(composer.value).toBe("next draft");
+  act(() => useCommandStore.setState({ active: {} }));
+});
+
+it("命令选择遇到已有附件时保留正文和附件，不提交无效请求", async () => {
+  mocks.storage.set(key, draft);
+  mount();
+  await act(async () => {
+    composer.setValue("/compact");
+    composer.submit("/compact");
+  });
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(composer.value).toBe("/compact");
+  expect(composer.files).toEqual(draft.files);
+  expect(composer.pickedSnippets).toEqual([snippet]);
 });

@@ -176,11 +176,14 @@ export function AiComposerInput() {
       insert = `#${item.snippet.handle}${needsSpace ? " " : ""}`;
       c.addSnippet(item.snippet);
     } else {
-      insert = `/${item.command.name} `;
+      const text = `${before}/${item.command.name} ${afterRaw.trimStart()}`;
+      c.setValue(text);
+      c.submit(text);
+      setTrigger(null);
+      setActiveIndex(0);
+      return;
     }
-    const after =
-      item.kind === "command" ? afterRaw.replace(/^\s+/, "") : afterRaw;
-    c.setValue(`${before}${insert}${after}`);
+    c.setValue(`${before}${insert}${afterRaw}`);
     setTrigger(null);
     setActiveIndex(0);
     requestAnimationFrame(() => {

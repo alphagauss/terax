@@ -6,6 +6,8 @@
     "closeTitle": "关闭 (Esc)",
     "context": {
       "usage": "上下文",
+      "compactedEstimate": "压缩后预计上下文，包含消息、系统提示和工具定义；下一次模型调用完成后更新为实际用量。",
+      "lastCall": "最近一次模型调用用量",
       "footerApprox": "本地预估：字符数 × 0.8。媒体及不可见推理的用量未知。",
       "estimated": "本地预估",
       "unavailable": "未提供",
@@ -333,8 +335,9 @@
     "unconfirmed": "执行结果未确认",
     "failed": "失败",
     "completed": "已完成",
-    "compactDescription": "压缩会话上下文，可附加保留重点",
-    "compacted": "压缩处理完成；原始历史记录已保留。"
+    "compactDescription": "压缩会话上下文",
+    "compacted": "压缩处理完成；原始历史记录已保留。",
+    "nothingToCompact": "当前无需压缩。"
   },
   "whisper": {
     "transcriptionFailed": "转写失败",

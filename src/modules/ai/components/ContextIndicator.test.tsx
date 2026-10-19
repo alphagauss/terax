@@ -4,6 +4,13 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { UsageRecord } from "../lib/usage";
 import { recordUsage, releaseUsage, restoreUsage } from "../lib/usageRuntime";
+import { estimateMessageTokens } from "../lib/usage";
+import { formatTokens } from "./UsageDetails";
+import {
+  conversationEventPart,
+  convertToAgentModelMessages,
+} from "../lib/conversation";
+import type { UIMessage } from "ai";
 import { ContextIndicator } from "./ContextIndicator";
 
 const chatStoreState = vi.hoisted(() => ({
@@ -364,3 +371,105 @@ it("shows child cache incidents with diagnostic IDs without replacing the main c
     container.querySelector("button")?.getAttribute("aria-label"),
   ).toContain("miniWindow.context.cacheAnomaly");
 });
+
+it.each([false, true])(
+  "压缩预估包含最新工具开销并可恢复，旧调用缺少开销=%s",
+  async (missingOverhead) => {
+    (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    const old = record({
+      context: {
+        overheadHash: "system",
+        prefixHash: "old",
+        messageCount: 2,
+        overheadTokens: missingOverhead ? undefined : 100,
+      },
+    });
+    recordUsage(id, old);
+    recordUsage(
+      id,
+      record({
+        callId: "summary",
+        purpose: "compaction",
+        context: {
+          overheadHash: "summary",
+          prefixHash: "summary",
+          messageCount: 3,
+          overheadTokens: 8000,
+        },
+      }),
+    );
+    const messages: UIMessage[] = [
+      { id: "u", role: "user", parts: [{ type: "text", text: "request" }] },
+      {
+        id: "a",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "x".repeat(20000) },
+          { type: "text", text: "answer" },
+        ],
+      },
+      {
+        id: "c",
+        role: "assistant",
+        parts: [
+          conversationEventPart({
+            event: "compaction",
+            id: "checkpoint",
+            throughUserMessageId: "u",
+            summary: "handoff",
+          }),
+        ],
+      },
+    ];
+    const render = () =>
+      act(async () =>
+        root.render(
+          <ContextIndicator
+            sessionId={id}
+            isBusy={false}
+            messages={messages}
+          />,
+        ),
+      );
+    await render();
+    const label = () =>
+      container.querySelector("button[aria-label]")?.getAttribute("aria-label");
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(label()).toContain("≈");
+    });
+    const estimate = label();
+    expect(estimate).toContain(
+      formatTokens(
+        8000 +
+          estimateMessageTokens(await convertToAgentModelMessages(messages)),
+      ),
+    );
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(label()).toBe(estimate);
+    });
+    await act(async () =>
+      recordUsage(
+        id,
+        record({
+          callId: "after",
+          context: {
+            overheadHash: "system",
+            prefixHash: "after",
+            messageCount: 3,
+            compactionId: "checkpoint",
+          },
+          values: { inputTokens: 800, outputTokens: 20 },
+        }),
+      ),
+    );
+    expect(label()).not.toContain("≈");
+    expect(label()).toContain("800");
+  },
+);

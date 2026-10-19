@@ -41,6 +41,7 @@ import {
   canRevealSessionCwd,
   resolveSessionCwd,
 } from "@/modules/ai/lib/sessions";
+import { useCommandStore } from "@/modules/ai/commands/store";
 import { parseCommand } from "@/modules/ai/commands/registry";
 import type { OpenFileGroup } from "@/modules/ai/lib/openFileCandidates";
 
@@ -119,7 +120,7 @@ type ComposerCtx = {
   canRevealWorkingDirectory: boolean;
   revealingWorkingDirectory: boolean;
   revealWorkingDirectory: () => void;
-  submit: () => void;
+  submit: (text?: string) => void;
   stop: () => void;
   voice: Voice;
   canSend: boolean;
@@ -204,14 +205,24 @@ export function AiComposerProvider({
       currentWorkspaceBootstrap().environmentKey,
     );
   });
-  const isBusy = runLocked || status === "thinking" || status === "streaming";
+  const commandActive = useCommandStore((s) =>
+    Boolean(sessionId && s.active[sessionId]),
+  );
+  const compacting = useChatStore(
+    (s) => getAgentMetaForSession(s, sessionId).compacting,
+  );
+  const isBusy =
+    commandActive ||
+    runLocked ||
+    status === "thinking" ||
+    status === "streaming";
   const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
   const usesExternalAgent = Boolean(
     parseExternalAgentBinding(
       sessionId ? sessionMetadata.get(sessionId) : undefined,
     ) || draftExternalAgentId,
   );
-  const canSteer = !usesExternalAgent;
+  const canSteer = !usesExternalAgent && !commandActive && !compacting;
   const pendingSteering = useChatStore(
     (state) => getAgentMetaForSession(state, sessionId).pendingSteering,
   );
@@ -445,7 +456,7 @@ export function AiComposerProvider({
     setPickedSnippets((prev) => prev.filter((s) => s.id !== id));
 
   /** 空闲时发送新轮次，内置 Agent 运行中则提交引导；成功接收后才清理草稿。 */
-  const submit = () => {
+  const submit = (text = value) => {
     if (
       submittingRef.current ||
       (isBusy && !canSteer) ||
@@ -453,7 +464,7 @@ export function AiComposerProvider({
       !workingDirectory
     )
       return;
-    const trimmed = value.trim();
+    const trimmed = text.trim();
     if (!trimmed && files.length === 0 && pickedSnippets.length === 0) return;
 
     const isCommand = !usesExternalAgent && Boolean(parseCommand(trimmed));
@@ -473,6 +484,10 @@ export function AiComposerProvider({
       if (seenHandles.has(snippet.handle)) continue;
       seenHandles.add(snippet.handle);
       messageSnippets.push(snippet);
+    }
+    if (isCommand && (files.length > 0 || messageSnippets.length > 0)) {
+      toast.info(t("commands.noAttachments"));
+      return;
     }
     for (const file of files) {
       if (file.kind === "file") {
@@ -541,7 +556,6 @@ export function AiComposerProvider({
     const store = useChatStore.getState();
     store.patchAgentMeta(sessionId, {
       hitStepCap: false,
-      compacting: false,
     });
     // 接入确认前禁止重复提交同一份草稿，运行中双击不能变成两条引导。
     submittingRef.current = true;
@@ -566,7 +580,9 @@ export function AiComposerProvider({
           toast.info(t("composer.sessionBusy"));
           return;
         }
-        setValue((current) => (current === submittedValue ? "" : current));
+        setValue((current) =>
+          current === submittedValue || current === text ? "" : current,
+        );
         setFiles((current) =>
           current.filter((file) => !submittedFileIds.has(file.id)),
         );

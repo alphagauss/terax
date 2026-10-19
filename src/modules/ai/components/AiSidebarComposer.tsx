@@ -194,7 +194,7 @@ export function AiSidebarComposer() {
             <Button
               type="button"
               size="icon-sm"
-              onClick={stopping ? c.stop : c.submit}
+              onClick={stopping ? c.stop : () => c.submit()}
               disabled={c.readOnly || (!c.isBusy && !c.canSend)}
               className={cn(
                 "rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",

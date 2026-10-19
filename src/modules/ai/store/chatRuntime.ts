@@ -5,6 +5,8 @@
 
 import { resolveCompactionUsage } from "@/modules/ai/lib/modelUsage";
 
+import { isCommandActive } from "@/modules/ai/commands/store";
+import { sendCompaction } from "@/modules/ai/lib/sendCompaction";
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
 import { parseCommand } from "@/modules/ai/commands/registry";
 import i18n from "@/i18n";
@@ -298,11 +300,18 @@ export async function sendChatMessage(
 ): Promise<boolean> {
   if (
     !isSessionWritable(sessionId) ||
+    isCommandActive(sessionId) ||
+    getAgentMetaForSession(useChatStore.getState(), sessionId).compacting ||
     useChatStore.getState().editingMessage?.sessionId === sessionId
   )
     return false;
   await loadChat(sessionId);
   const state = useChatStore.getState();
+  if (
+    isCommandActive(sessionId) ||
+    getAgentMetaForSession(state, sessionId).compacting
+  )
+    return false;
   const external =
     parseExternalAgentBinding(sessionMetadata.get(sessionId)) ||
     (state.draftSessionId === sessionId && state.draftExternalAgentId);
@@ -321,9 +330,10 @@ export async function sendChatMessage(
       source: { kind: "desktop" },
       hasAttachments:
         hasAttachments || message.parts.some((part) => part.type === "file"),
-      startTask: (task) => startChatMessage(sessionId, task),
-      startCompaction: (instructions) =>
-        startChatCompaction(sessionId, instructions),
+      startTask: (task, signal) =>
+        startChatMessage(sessionId, task, undefined, false, undefined, signal),
+      startCompaction: (signal) =>
+        startChatCompaction(sessionId, undefined, signal),
     });
     void completed.catch((error) =>
       useChatStore.setState({ sessionSyncError: String(error) }),
@@ -396,7 +406,12 @@ export function steerChatMessage(
     parseExternalAgentBinding(sessionMetadata.get(sessionId))
   )
     return null;
-  if (getAgentMetaForSession(state, sessionId).cancelled) return null;
+  if (
+    isCommandActive(sessionId) ||
+    getAgentMetaForSession(state, sessionId).compacting ||
+    getAgentMetaForSession(state, sessionId).cancelled
+  )
+    return null;
   const receipt = getAgentTurnCoordinator(sessionId).inbox.steer(message);
   if (!receipt) return null;
   state.patchAgentMeta(sessionId, {
@@ -420,11 +435,23 @@ export async function startChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
   channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
-  compaction?: string,
+  compaction = false,
   edit?: { messageId: string; text: string; fingerprint: string },
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  const commandInput =
+    compaction ||
+    Boolean(
+      message &&
+        "metadata" in message &&
+        (message.metadata as { commandId?: string } | undefined)?.commandId,
+    );
+  const inputBlocked = () =>
+    (isCommandActive(sessionId) && !commandInput) ||
+    getAgentMetaForSession(useChatStore.getState(), sessionId).compacting;
   if (
     startingSessionIds.has(sessionId) ||
+    inputBlocked() ||
     (!edit && useChatStore.getState().editingMessage?.sessionId === sessionId)
   )
     return false;
@@ -480,7 +507,14 @@ export async function startChatMessage(
     }
     if (chat.status === "submitted" || chat.status === "streaming")
       return false;
+    signal?.throwIfAborted();
+    if (inputBlocked()) return false;
     if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
+    if (signal?.aborted) {
+      pendingTurns.delete(sessionId);
+      await unlockHistory(sessionId);
+      signal.throwIfAborted();
+    }
     if (edit) {
       try {
         const turnId = pendingTurn(sessionId).id;
@@ -516,13 +550,12 @@ export async function startChatMessage(
     if (isUserSubmission(message)) {
       state.promoteSession(sessionId, messagesForPromotion(message), cwd);
     }
-    if (!externalAgent && compaction === undefined)
+    if (!externalAgent && !compaction)
       getAgentTurnCoordinator(sessionId).inbox.open();
     startDesktopRunLifecycle(sessionId, chat);
-    const sending = chat.sendMessage(
-      message,
-      compaction === undefined ? undefined : { body: { compaction } },
-    );
+    const sending = compaction
+      ? sendCompaction(chat)
+      : chat.sendMessage(message);
     void sending;
     return true;
   } finally {
@@ -568,13 +601,23 @@ function messagesForPromotion(
 /** 手动压缩借用同一会话运行锁及停止按钮；命令回执等待持久化完成。 */
 export async function startChatCompaction(
   sessionId: string,
-  instructions: string,
   channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<boolean> {
   signal?.throwIfAborted();
-  await loadChat(sessionId);
-  if (!(await startChatMessage(sessionId, undefined, channel, instructions)))
+  const chat = await loadChat(sessionId);
+  signal?.throwIfAborted();
+  const offset = chat.messages.length;
+  if (
+    !(await startChatMessage(
+      sessionId,
+      undefined,
+      channel,
+      true,
+      undefined,
+      signal,
+    ))
+  )
     throw new Error(i18n.t("ai:commands.taskRejected"));
   await new Promise<void>((resolve, reject) => {
     const stop = () => {
@@ -599,6 +642,11 @@ export async function startChatCompaction(
     if (signal?.aborted) stop();
     check();
   });
+  return chat.messages
+    .slice(offset)
+    .some((message) =>
+      message.parts.some((part) => part.type === "data-compaction"),
+    );
 }
 
 /** 历史操作与运行共用独占锁；不触发终态提交或重新执行旧工具。 */
@@ -618,6 +666,7 @@ export function canReviseHistory(sessionId: string): boolean {
     Boolean(state.sessions.find((s) => s.id === sessionId)?.fingerprint) &&
     isSessionWritable(sessionId) &&
     !state.runLockSessionIds[sessionId] &&
+    !isCommandActive(sessionId) &&
     !startingSessionIds.has(sessionId) &&
     !parseExternalAgentBinding(sessionMetadata.get(sessionId)) &&
     !getAgentMetaForSession(state, sessionId).commitError

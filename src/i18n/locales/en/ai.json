@@ -6,6 +6,8 @@
     "closeTitle": "Close (Esc)",
     "context": {
       "usage": "Context",
+      "compactedEstimate": "Estimated context after compaction, including messages, instructions and tool definitions. Actual usage will update after the next model call.",
+      "lastCall": "Last model call usage",
       "footerApprox": "Local estimate: characters × 0.8. Media and hidden reasoning usage are unknown.",
       "estimated": "Local estimate",
       "unavailable": "Not reported",
@@ -334,8 +336,9 @@
     "unconfirmed": "Result unconfirmed",
     "failed": "Failed",
     "completed": "Completed",
-    "compactDescription": "Compact context, optionally specifying what to preserve",
-    "compacted": "Compaction finished; original history is preserved."
+    "compactDescription": "Compact conversation context",
+    "compacted": "Compaction finished; original history is preserved.",
+    "nothingToCompact": "No additional context needs compaction."
   },
   "whisper": {
     "transcriptionFailed": "Transcription failed",

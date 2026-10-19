@@ -39,6 +39,7 @@ import {
   conversationEventPart,
   convertToAgentModelMessages,
   expandConversationMessages,
+  messageMetadata,
   modelCallPart,
   modelHistoryPart,
   REASONING_DURATION_PART_TYPE,
@@ -95,7 +96,7 @@ export type RunAgentOptions = {
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
   turnId: string;
-  compactOnly?: string;
+  compactOnly?: boolean;
   getCompactionConfiguration?: (
     model: ModelRef,
     parameters: ParameterAssignment[],
@@ -204,10 +205,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
             toolContext: { ...opts.toolContext, shellExecution },
           });
           const modelHistory: ModelMessage[] = [...prunedHistory];
-          const last =
-            opts.compactOnly === undefined
-              ? originalMessages[originalMessages.length - 1]
-              : undefined;
+          const last = !opts.compactOnly
+            ? originalMessages[originalMessages.length - 1]
+            : undefined;
           // 仅保留当前响应的完整 part 前缀，使 checkpoint 与最终 SDK 消息共用显式游标。
           let completedMessage = last?.role === "assistant" ? last : undefined;
           const approvalHistory = approvalModelHistoryDelta(
@@ -280,10 +280,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   ? lastPrompt
                   : undefined,
                 tools: rootTools,
-                instruction: compactionInstruction(
-                  plan,
-                  opts.compactOnly ?? "",
-                ),
+                instruction: compactionInstruction(plan),
                 signal: opts.abortSignal,
               });
               opts.abortSignal?.throwIfAborted();
@@ -321,12 +318,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             opts.abortSignal?.throwIfAborted();
             await opts.onCheckpoint(completedMessages, event);
             if (!streamStarted) {
-              writer.write({
-                type: "start",
-                ...(opts.compactOnly !== undefined
-                  ? { messageId: crypto.randomUUID() }
-                  : {}),
-              });
+              writer.write({ type: "start" });
               streamStarted = true;
             }
             const part = conversationEventPart(event);
@@ -371,7 +363,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             | undefined;
           try {
             opts.abortSignal?.throwIfAborted();
-            if (opts.compactOnly !== undefined) {
+            if (opts.compactOnly) {
               await compact(true);
               coordinator.inbox.close();
               writer.setOutcome({ status: "completed" });
@@ -414,6 +406,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   provider,
                 ).instructions,
                 tools: rootTools,
+                compactionId: expandConversationMessages(liveMessages())
+                  .map((message) => messageMetadata(message).compaction?.id)
+                  .reverse()
+                  .find(Boolean),
               });
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。

@@ -146,7 +146,7 @@ export async function runChannelTurn(
       channelId: await channelOwnerId(connection),
       hasAttachments: message.attachments.length > 0,
       signal,
-      startCompaction: async (instructions) => {
+      startCompaction: async (commandSignal) => {
         const prefs = usePreferencesStore.getState();
         const config = resolveModelUsage(
           getModelUsage(prefs.modelUsages, channelModelUsageId(connection.id)),
@@ -154,16 +154,21 @@ export async function runChannelTurn(
           prefs.defaultModel,
         );
         if (!config) throw new ChannelError("model");
-        await startChatCompaction(
+        return startChatCompaction(
           connection.sessionId,
-          instructions,
           { id: await channelOwnerId(connection), ...config },
-          signal,
+          commandSignal,
         );
       },
-      startTask: async (input) => {
+      startTask: async (input, commandSignal) => {
         task = (
-          await startChannelAgentTurn(connection, message, signal, ready, input)
+          await startChannelAgentTurn(
+            connection,
+            message,
+            commandSignal,
+            ready,
+            input,
+          )
         ).completed;
         return true;
       },
@@ -228,6 +233,9 @@ async function startChannelAgentTurn(
     connection.sessionId,
     taskMessage ?? channelUserMessage(message),
     { id: ownerId, ...config },
+    false,
+    undefined,
+    signal,
   );
   if (!accepted) throw new ChannelError("model");
   ready((input) =>

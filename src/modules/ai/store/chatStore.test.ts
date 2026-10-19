@@ -82,7 +82,10 @@ vi.mock("@/modules/ai/lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
 import { parseCommand } from "@/modules/ai/commands/registry";
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
-import { useCommandStore } from "@/modules/ai/commands/store";
+import {
+  useCommandStore,
+  cancelSessionCommand,
+} from "@/modules/ai/commands/store";
 import { MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
 import type { SessionFile, SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
@@ -98,6 +101,7 @@ import {
   seedMessages,
   seedSession,
   sessionMetadata,
+  stopSession,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
@@ -610,16 +614,16 @@ describe("chat store multi-process lifecycle", () => {
     let finish!: () => void;
     const startCompaction = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
+        new Promise<boolean>((resolve) => {
+          finish = () => resolve(true);
         }),
     );
-    const request = commandRequest("/compact preserve tests");
+    const request = commandRequest("/compact");
     const receipt = await submitSessionCommand({ ...request, startCompaction });
     expect(startCompaction).not.toHaveBeenCalled();
     useChatStore.setState({ runLockSessionIds: {} });
     await vi.waitFor(() =>
-      expect(startCompaction).toHaveBeenCalledWith("preserve tests"),
+      expect(startCompaction).toHaveBeenCalledWith(expect.any(AbortSignal)),
     );
     expect(
       useCommandStore.getState().sessions[first.id][0].result,
@@ -632,6 +636,55 @@ describe("chat store multi-process lifecycle", () => {
         .flatMap(([file]) => file.messages)
         .every((record) => record.role === "command"),
     ).toBe(true);
+  });
+
+  it("非法压缩参数立即回复，不等待正在运行的 Agent", async () => {
+    openCommandSession(true);
+    const startCompaction = vi.fn(async () => true);
+    const receipt = await submitSessionCommand({
+      ...commandRequest("/compact extra"),
+      startCompaction,
+    });
+    const completed = vi.fn();
+    void receipt.completed.then(completed);
+    try {
+      await vi.waitFor(() =>
+        expect(completed).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: "error",
+            text: "commands.invalidArguments",
+          }),
+        ),
+      );
+      expect(startCompaction).not.toHaveBeenCalled();
+      expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+    } finally {
+      cancelSessionCommand(first.id);
+      await receipt.completed;
+    }
+  });
+
+  it("压缩保存失败后停止命令等待展示，保留未确认结果和运行锁", async () => {
+    openCommandSession();
+    const receipt = await submitSessionCommand({
+      ...commandRequest("/compact"),
+      startCompaction: async () => {
+        useChatStore.setState({ runLockSessionIds: { [first.id]: true } });
+        useChatStore
+          .getState()
+          .patchAgentMeta(first.id, { commitError: "save failed" });
+        throw new Error("save failed");
+      },
+    });
+    await expect(receipt.completed).rejects.toThrow("save failed");
+    expect(
+      useCommandStore.getState().sessions[first.id][0].pending,
+    ).toBeUndefined();
+    expect(
+      useCommandStore.getState().sessions[first.id][0].result,
+    ).toBeUndefined();
+    expect(useCommandStore.getState().active[first.id]).toBeUndefined();
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
   });
 
   it.each(["commit", "release"] as const)(
@@ -670,37 +723,73 @@ describe("chat store multi-process lifecycle", () => {
     },
   );
 
-  it("多个初始化按接收顺序执行，中止当前任务同时取消剩余等待", async () => {
+  it("自动压缩期间拒绝普通发送与引导，不清除运行状态或等待后续新轮", async () => {
     openCommandSession(true);
-    const started: number[] = [];
-    const requests = [];
-    for (let index = 0; index < 3; index++) {
-      requests.push(
-        await submitSessionCommand(
-          commandRequest(
-            "/init",
-            vi.fn(async () => {
-              started.push(index);
-              useChatStore.setState({
-                runLockSessionIds: { [first.id]: true },
-              });
-              return true;
-            }),
-          ),
-        ),
-      );
-    }
-    expect(started).toEqual([]);
-    useChatStore.setState({ runLockSessionIds: {} });
-    await requests[0].completed;
-    expect(started).toEqual([0]);
-    useChatStore.setState({ runLockSessionIds: {} });
-    await requests[1].completed;
-    expect(started).toEqual([0, 1]);
-    useChatStore.getState().patchAgentMeta(first.id, { cancelled: true });
-    useChatStore.setState({ runLockSessionIds: {} });
-    expect((await requests[2].completed).status).toBe("error");
-    expect(started).toEqual([0, 1]);
+    const coordinator = getAgentTurnCoordinator(first.id);
+    coordinator.inbox.open();
+    useChatStore.getState().patchAgentMeta(first.id, { compacting: true });
+    const input = {
+      id: "blocked",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "next" }],
+    };
+    expect(await sendChatMessage(first.id, input)).toBe(false);
+    expect(steerChatMessage(first.id, input)).toBeNull();
+    expect(
+      useChatStore.getState().agentMetaBySession[first.id].compacting,
+    ).toBe(true);
+    expect(chats.get(first.id)?.messages).toEqual([]);
+    await clearAgentTurnCoordinator(first.id);
+  });
+
+  it("命令准备阶段禁止改写或删除历史，停止后不再启动任务", async () => {
+    openCommandSession();
+    expect(canReviseHistory(first.id)).toBe(true);
+    let acquire!: (value: boolean) => void;
+    io.acquire.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acquire = resolve;
+        }),
+    );
+    const request = commandRequest("/init");
+    const submitting = submitSessionCommand(request);
+    await vi.waitFor(() => expect(acquire).toBeTypeOf("function"));
+    expect(canReviseHistory(first.id)).toBe(false);
+    useChatStore.getState().deleteSession(first.id);
+    expect(io.remove).not.toHaveBeenCalled();
+    await stopSession(first.id);
+    acquire(true);
+    const receipt = await submitting;
+    expect(await receipt.completed).toMatchObject({
+      status: "error",
+      text: "commands.cancelled",
+    });
+    expect(request.startTask).not.toHaveBeenCalled();
+    expect(useCommandStore.getState().active[first.id]).toBeUndefined();
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it("等待中的命令拒绝重复提交，并可在获取运行锁前取消", async () => {
+    openCommandSession(true);
+    const request = commandRequest("/init");
+    const receipt = await submitSessionCommand(request);
+    expect(
+      await sendChatMessage(first.id, {
+        role: "user",
+        parts: [{ type: "text", text: "next" }],
+      }),
+    ).toBe(false);
+    await expect(
+      submitSessionCommand(commandRequest("/compact")),
+    ).rejects.toThrow();
+    cancelSessionCommand(first.id);
+    expect(await receipt.completed).toMatchObject({
+      status: "error",
+      text: "commands.cancelled",
+    });
+    expect(request.startTask).not.toHaveBeenCalled();
+    expect(useCommandStore.getState().active[first.id]).toBeUndefined();
   });
 
   it("isolates parameter selections by session and model and restores their scalar choices", async () => {

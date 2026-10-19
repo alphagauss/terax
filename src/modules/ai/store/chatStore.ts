@@ -3,6 +3,10 @@
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
+import {
+  cancelSessionCommand,
+  isCommandActive,
+} from "@/modules/ai/commands/store";
 import i18n from "@/i18n";
 import { readSharedStore } from "@/lib/sharedStore";
 import {
@@ -470,6 +474,7 @@ export function releaseUnusedChats() {
       (state.chatViewVisible && id === state.activeSessionId) ||
       sessionViews.has(id) ||
       state.runLockSessionIds[id] ||
+      isCommandActive(id) ||
       startingSessionIds.has(id) ||
       acquiringSessionRuns.has(id) ||
       sessionCommits.has(id) ||
@@ -1156,7 +1161,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   /** 删除一条历史会话；活动项被删除时统一回退到空白草稿。 */
   deleteSession: (id) => {
-    if (get().runLockSessionIds[id]) return;
+    if (get().runLockSessionIds[id] || isCommandActive(id)) return;
     sessionSwitchSequence++;
     void (async () => {
       try {
@@ -1488,6 +1493,7 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
 
 /** 停止指定会话并标记本轮为用户取消，后台会话不会误停当前活动会话。 */
 export async function stopSession(sessionId: string): Promise<void> {
+  cancelSessionCommand(sessionId);
   const chat = chats.get(sessionId);
   if (!chat || !useChatStore.getState().runLockSessionIds[sessionId]) return;
   const committing = sessionCommits.get(sessionId);

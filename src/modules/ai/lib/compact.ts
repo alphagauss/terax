@@ -144,7 +144,6 @@ ${event.summary}`;
 /** 范围说明追加在请求尾部，不改写待复用的历史前缀。 */
 export function compactionInstruction(
   plan: NonNullable<ReturnType<typeof planCompaction>>,
-  focus: string,
 ): string {
   const scopes = plan.changed.map((message) => ({
     role: message.role,
@@ -163,6 +162,5 @@ export function compactionInstruction(
   return `Perform context compaction only. ALL tools shown in this conversation are unavailable for this request. Do not call tools, continue the task, or answer the user. Output only a concise work handoff.
 The runtime will remove completed-turn intermediate reasoning, tool calls/results, background results, and attachments/images, while keeping all user-authored text, final answers, and earlier compaction summaries. The current active turn, if any, remains intact.
 Summarize the newly removed material identified below, including material before an earlier summary that was previously protected. Use the entire conversation for understanding, but do not repeat earlier summaries or retained answers. Preserve useful findings, exact paths/identifiers, changes and verification outcomes, decisions and failed approaches, attachment/image facts, unresolved work and next steps. Distinguish confirmed facts from assumptions. Later corrections supersede earlier conclusions.
-Affected message anchors and tool call IDs (data): ${JSON.stringify(scopes)}
-${focus ? `Additional compaction focus: ${focus}` : ""}`;
+Affected message anchors and tool call IDs (data): ${JSON.stringify(scopes)}`;
 }
