@@ -554,6 +554,15 @@ export async function startChatMessage(
     if (!externalAgent && !compaction)
       getAgentTurnCoordinator(sessionId).inbox.open();
     startDesktopRunLifecycle(sessionId, chat);
+    if (message && !compaction) {
+      message = {
+        ...message,
+        metadata: {
+          ...(message.metadata as Record<string, unknown> | undefined),
+          turnId: pendingTurn(sessionId).id,
+        },
+      };
+    }
     const sending = compaction
       ? sendCompaction(chat)
       : chat.sendMessage(message);

@@ -1212,3 +1212,18 @@ it("历史截取后 SDK 请求保持原始协议前缀", async () => {
     display.filter((m) => messageMetadata(m).turnStatus === "completed"),
   ).toHaveLength(2);
 });
+
+
+it("用户轮次标识恢复后可关联配置提示且不进入模型输入", async () => {
+  const original: UIMessage[] = [
+    user("question"),
+    { id: "answer", role: "assistant", parts: [{ type: "text", text: "Answer" }] },
+  ];
+  const restored = projectSessionMessages("session", jsonlRoundTrip(
+    serializeSessionMessages(original, { turnId: "turn-config", timestamp }),
+  ));
+  expect(messageMetadata(restored[0]).turnId).toBe("turn-config");
+  expect(await convertToAgentModelMessages(restored)).toEqual(
+    await convertToAgentModelMessages(original),
+  );
+});

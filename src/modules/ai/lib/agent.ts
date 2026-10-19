@@ -32,7 +32,10 @@ import {
   compactionConfiguration,
   generateCompaction,
 } from "@/modules/ai/lib/compactionRequest";
-import { createContextUsage } from "@/modules/ai/lib/contextUsage";
+import {
+  createContextUsage,
+  prepareContextOverhead,
+} from "@/modules/ai/lib/contextUsage";
 import {
   ACTIVITY_DURATION_PART_TYPE,
   approvalModelHistoryDelta,
@@ -391,8 +394,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
             const reachedStepCap = () =>
               maxAgentSteps !== null && stepsSeen >= maxAgentSteps;
+            const instructions = prepareAgentPrompt(
+              opts.systemPrompt,
+              [],
+              provider,
+            ).instructions;
+            const overhead = await prepareContextOverhead({
+              instructions,
+              tools: rootTools,
+            });
             while (!reachedStepCap()) {
               contextUsage = await createContextUsage({
+                overhead,
                 sessionId: opts.toolContext.getSessionId(),
                 turnId: opts.turnId,
                 model: modelRef,
@@ -400,11 +413,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   modelRef,
                   opts.providerModels ?? {},
                 ),
-                instructions: prepareAgentPrompt(
-                  opts.systemPrompt,
-                  [],
-                  provider,
-                ).instructions,
+                instructions,
                 tools: rootTools,
                 compactionId: expandConversationMessages(liveMessages())
                   .map((message) => messageMetadata(message).compaction?.id)

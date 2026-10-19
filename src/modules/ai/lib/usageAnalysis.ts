@@ -198,3 +198,27 @@ export function analyzeSessionCacheUsage(
   }
   return [...groups].map(([taskId, calls]) => analyzeCacheUsage(calls, taskId));
 }
+
+/** 仅比较同供应商的跨轮主请求；切换供应商的缓存标记差异不视为指令变化。 */
+export function changedPromptTurns(
+  records: readonly UsageRecord[],
+): Set<string> {
+  const changed = new Set<string>();
+  const seen = new Set<string>();
+  let previous: UsageRecord | undefined;
+  for (const current of records) {
+    if (current.taskId || current.purpose) continue;
+    if (!seen.has(current.turnId)) {
+      if (
+        previous?.context?.overheadHash &&
+        previous.model.providerId === current.model.providerId &&
+        current.context?.overheadHash &&
+        previous.context.overheadHash !== current.context.overheadHash
+      )
+        changed.add(current.turnId);
+      seen.add(current.turnId);
+    }
+    previous = current;
+  }
+  return changed;
+}

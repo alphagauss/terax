@@ -837,9 +837,10 @@ export function projectSessionMessages(
         id: record.message_id ?? `${sessionId}:${record.role}:${index}`,
         role: record.role,
         parts,
-        ...(timestamp === undefined
-          ? {}
-          : { metadata: { createdAt: timestamp } }),
+        metadata: {
+          ...(timestamp === undefined ? {} : { createdAt: timestamp }),
+          turnId: record.turn_id,
+        },
       };
       if (record.command_id)
         projected.metadata = {
@@ -979,10 +980,12 @@ export function projectSessionMessages(
   const materialized = materializeSubagentDisplayParts(messages, projectSubagentDisplays(records));
   const finalByTurn = new Map<string, UIMessage>();
   for (const message of materialized) {
+    if (message.role === "user") continue;
     const turnId = messageMetadata(message).turnId;
     if (turnId) finalByTurn.set(turnId, message);
   }
   for (const message of materialized) {
+    if (message.role === "user") continue;
     const metadata = messageMetadata(message);
     if (metadata.turnId && finalByTurn.get(metadata.turnId) !== message)
       delete metadata.turnId;

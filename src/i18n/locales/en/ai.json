@@ -139,6 +139,7 @@
     "steer": "Guide the current task"
   },
   "chat": {
+    "promptChanged": "System instructions or tool definitions changed; cache reuse may be affected.",
     "edit": "Edit message",
     "fork": "Fork conversation",
     "forkCompaction": "Fork from this compaction",

@@ -32,6 +32,8 @@ import {
 
 import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
 import { messageRawText } from "@/modules/ai/lib/messageAttachments";
+import { useUsageRecords } from "@/modules/ai/components/UsageDetails";
+import { changedPromptTurns } from "@/modules/ai/lib/usageAnalysis";
 import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
 import { Shimmer } from "@/components/controls/shimmer";
 import {
@@ -407,6 +409,8 @@ export function AiChatView({
 }: Props) {
   const { t } = useTranslation("ai");
   const scrollMemory = useConversationScrollMemory(sessionId);
+  const usage = useUsageRecords(sessionId);
+  const changedTurns = useMemo(() => changedPromptTurns(usage), [usage]);
   const isBusy = status === "submitted" || status === "streaming";
   const messages = useMemo(
     () => projectConversationDisplay(sourceMessages),
@@ -565,6 +569,9 @@ export function AiChatView({
                   <RenderedMessage
                     sessionId={sessionId}
                     message={m}
+                    promptChanged={changedTurns.has(
+                      messageMetadata(m).turnId ?? "",
+                    )}
                     editable={
                       historyAvailable &&
                       !editing &&
@@ -714,6 +721,7 @@ const RenderedMessage = memo(function RenderedMessage({
   message,
   streaming,
   appearing,
+  promptChanged,
   editable,
   forkable,
 }: {
@@ -721,6 +729,7 @@ const RenderedMessage = memo(function RenderedMessage({
   message: UIMessage;
   streaming: boolean;
   appearing: boolean;
+  promptChanged: boolean;
   editable: boolean;
   forkable: boolean;
 }) {
@@ -816,6 +825,11 @@ const RenderedMessage = memo(function RenderedMessage({
             "animate-in fade-in-0 slide-in-from-bottom-1 duration-control ease-emphasized",
         )}
       >
+        {promptChanged && !messageMetadata(message).guided && (
+          <p className="text-xs text-muted-foreground">
+            {t("chat.promptChanged")}
+          </p>
+        )}
         <MessageAttachments message={message} />
         {editing ||
         context.text ||

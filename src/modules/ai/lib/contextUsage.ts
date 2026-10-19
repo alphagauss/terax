@@ -15,17 +15,10 @@ import {
   type ToolSet,
 } from "ai";
 
-export async function createContextUsage(options: {
-  sessionId: string;
-  turnId: string;
-  taskId?: string;
-  runId?: string;
-  model: ModelRef;
-  contextWindow: number;
+/** 同轮系统指令和工具固定，只准备一次统计基线。 */
+export async function prepareContextOverhead(options: {
   instructions: unknown;
   tools?: ToolSet;
-  purpose?: "compaction";
-  compactionId?: string;
 }) {
   const definitions = await Promise.all(
     Object.entries(options.tools ?? {}).map(async ([name, tool]) => ({
@@ -38,8 +31,27 @@ export async function createContextUsage(options: {
     instructions: options.instructions,
     tools: definitions,
   });
-  const overhead = estimateTokens(overheadText);
-  const overheadHash = await fingerprint(overheadText);
+  return {
+    overhead: estimateTokens(overheadText),
+    overheadHash: await fingerprint(overheadText),
+  };
+}
+
+export async function createContextUsage(options: {
+  sessionId: string;
+  turnId: string;
+  taskId?: string;
+  runId?: string;
+  model: ModelRef;
+  contextWindow: number;
+  instructions: unknown;
+  tools?: ToolSet;
+  overhead?: Awaited<ReturnType<typeof prepareContextOverhead>>;
+  purpose?: "compaction";
+  compactionId?: string;
+}) {
+  const { overhead, overheadHash } =
+    options.overhead ?? (await prepareContextOverhead(options));
   const previous = [...usageRecords(options.sessionId)]
     .reverse()
     .find(

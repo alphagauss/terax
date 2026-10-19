@@ -139,6 +139,7 @@
     "steer": "引导当前任务"
   },
   "chat": {
+    "promptChanged": "系统提示词或工具定义已变化，可能影响缓存复用。",
     "edit": "编辑消息",
     "fork": "分叉会话",
     "forkCompaction": "从此压缩结果分叉",

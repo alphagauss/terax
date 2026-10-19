@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import type { UsageRecord } from "./usage";
-import { analyzeCacheUsage, analyzeSessionCacheUsage } from "./usageAnalysis";
+import {
+  analyzeCacheUsage,
+  analyzeSessionCacheUsage,
+  changedPromptTurns,
+} from "./usageAnalysis";
 
 function record(
   callId: string,
@@ -198,4 +202,60 @@ it("does not compare new tasks or treat missing subagent cache usage as a miss",
       record("a-missing", 12000, undefined, { taskId: "a" }),
     ]).flatMap((item) => item.incidents),
   ).toEqual([]);
+});
+
+it("跨轮缓存下降仍提示，不把下降当作系统指令变化", () => {
+  const context = {
+    overheadHash: "same",
+    prefixHash: "prefix",
+    messageCount: 2,
+  };
+  const records = [
+    record("before", 10000, 9000, {
+      turnId: "a",
+      context,
+    }),
+    record("after", 12000, 0, {
+      turnId: "b",
+      context,
+    }),
+  ];
+  expect(analyzeCacheUsage(records).status).toBe("suspected");
+  expect(analyzeCacheUsage(records).incidents).toHaveLength(1);
+  expect(changedPromptTurns(records)).toEqual(new Set());
+});
+
+it("提示只比较跨轮主请求，恢复后同轮不重复，缺失指纹不猜测", () => {
+  const call = (
+    id: string,
+    turnId: string,
+    overheadHash: string,
+    patch: Partial<UsageRecord> = {},
+  ) =>
+    record(id, 10000, 0, {
+      turnId,
+      context: { overheadHash, prefixHash: "prefix", messageCount: 2 },
+      ...patch,
+    });
+  const records = [
+    call("first", "a", "original"),
+    call("child", "child", "child", { taskId: "child" }),
+    call("compact", "a", "compact", { purpose: "compaction" }),
+    call("changed", "b", "updated"),
+    call("step", "b", "updated"),
+    call("same", "c", "updated"),
+    call("reverted", "d", "original"),
+    record("unknown", 10000, 0, { turnId: "e" }),
+    call("after-unknown", "f", "updated"),
+    call("provider-switch", "g", "provider-cache-marker", {
+      model: { providerId: "another", modelId: "model" },
+    }),
+    call("new-provider-change", "h", "new-instructions", {
+      model: { providerId: "another", modelId: "model" },
+    }),
+  ];
+  expect(changedPromptTurns(JSON.parse(JSON.stringify(records)))).toEqual(
+    new Set(["b", "d", "h"]),
+  );
+  expect(analyzeCacheUsage(records.slice(0, 4)).incidents).toEqual([]);
 });
