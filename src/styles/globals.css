@@ -441,8 +441,8 @@ html *::-webkit-scrollbar {
 /* Semantic motion tokens. Continuous resize never opts into a transition. */
 :root {
   --scrollbar-size: 12px;
-  --scrollbar-thumb: #64646466;
-  --scrollbar-thumb-hover: #646464b3;
+  --scrollbar-thumb: #64646499;
+  --scrollbar-thumb-hover: #646464cc;
   --scrollbar-track: transparent;
   --scrollbar-show-duration: 100ms;
   --scrollbar-hide-duration: 800ms;
@@ -460,8 +460,8 @@ html *::-webkit-scrollbar {
 }
 
 .dark {
-  --scrollbar-thumb: #79797966;
-  --scrollbar-thumb-hover: #646464b3;
+  --scrollbar-thumb: #79797999;
+  --scrollbar-thumb-hover: #646464cc;
 }
 
 @property --scrollbar-current-thumb {
@@ -556,14 +556,20 @@ html *::-webkit-scrollbar {
   background-color: var(--scrollbar-thumb-hover);
 }
 
+/* 将概览限制在所属视图内，绘制在原生滚动条下方。 */
+:is(.cm-editor, .split-diff-view):has(> .cm-changeOverview) {
+  isolation: isolate;
+}
+
 .cm-changeOverview {
   position: absolute;
   top: 2px;
   right: 0;
   bottom: 2px;
-  z-index: 1;
+  z-index: -1;
   width: var(--scrollbar-size);
   pointer-events: none;
+  opacity: 0.65;
 }
 
 .cm-changeOverview-added,
