@@ -101,6 +101,14 @@ export function AgentNotificationsBridge({
   ctxRef.current = { tabs, activeId, focused, onActivate };
 
   useEffect(() => {
+    if (!focused || !findTerminalTab(tabs, activeId)) return;
+    useAgentStore.getState().dismissNotificationsForTarget({
+      source: "terminal",
+      tabId: activeId,
+    });
+  }, [activeId, focused, tabs]);
+
+  useEffect(() => {
     let alive = true;
     let unlisten: (() => void) | undefined;
     listen<AgentSignal>("terax:agent-signal", (e) =>

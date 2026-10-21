@@ -4,6 +4,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AuxiliaryWindowOpenRequest } from "@/auxiliary/openAuxiliaryWindow";
 
 export type MainNotificationTarget =
@@ -54,14 +55,24 @@ export async function sendOsNotification(
   }
 }
 
-/** 为业务通知串联权限检查和原生投递。 */
+/** 业务通知仅在后台投递；权限等待后再次检查，避免切回前台仍弹系统通知。 */
 export async function osNotify(
   title: string,
   body: string,
   target: NotificationTarget,
-): Promise<OsNotificationResult> {
+): Promise<OsNotificationResult | { status: "suppressed" }> {
+  try {
+    if (await getCurrentWindow().isFocused()) return { status: "suppressed" };
+  } catch (error) {
+    return failed(error);
+  }
   const permission = await prepareOsNotification();
   if (permission.status === "failed") return permission;
   if (permission.status === "denied") return { status: "denied" };
+  try {
+    if (await getCurrentWindow().isFocused()) return { status: "suppressed" };
+  } catch (error) {
+    return failed(error);
+  }
   return sendOsNotification(title, body, target);
 }

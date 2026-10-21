@@ -18,6 +18,7 @@ type SignalHandler = (event: {
 const mocks = vi.hoisted(() => ({
   handler: null as SignalHandler | null,
   route: vi.fn(),
+  focused: true,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -40,7 +41,7 @@ vi.mock("../lib/route", () => ({
 }));
 
 vi.mock("../lib/useWindowFocus", () => ({
-  useWindowFocus: () => true,
+  useWindowFocus: () => mocks.focused,
 }));
 
 import { AgentNotificationsBridge } from "./AgentNotificationsBridge";
@@ -51,6 +52,7 @@ describe("AgentNotificationsBridge", () => {
 
   beforeEach(async () => {
     mocks.handler = null;
+    mocks.focused = true;
     mocks.route.mockReset();
     useAgentStore.setState({
       sessions: {},
@@ -74,6 +76,37 @@ describe("AgentNotificationsBridge", () => {
 
   afterEach(() => {
     act(() => root.unmount());
+  });
+
+  it("普通切换和恢复焦点只消费当前终端的通知", async () => {
+    for (const tabId of [7, 8]) {
+      useAgentStore.getState().pushNotification({
+        source: "terminal",
+        agent: "claude",
+        kind: "finished",
+        tabId,
+      });
+    }
+    const render = (activeId: number) =>
+      root.render(
+        <AgentNotificationsBridge
+          tabs={[7, 8].map(
+            (id) => ({ id, kind: "terminal", title: "Claude" }) as Tab,
+          )}
+          activeId={activeId}
+          onActivate={() => {}}
+        />,
+      );
+    mocks.focused = false;
+    await act(async () => render(7));
+    expect(useAgentStore.getState().notifications).toHaveLength(2);
+    mocks.focused = true;
+    await act(async () => render(7));
+    expect(useAgentStore.getState().notifications.map((n) => n.tabId)).toEqual([
+      8,
+    ]);
+    await act(async () => render(8));
+    expect(useAgentStore.getState().notifications).toHaveLength(0);
   });
 
   it("独立处理终端 Agent 的启动、完成和退出信号", () => {
