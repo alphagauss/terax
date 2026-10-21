@@ -1,18 +1,22 @@
 /**
  * 本文件测试工作区 Git diff 的可见性与仓库 revision 加载策略。
- * 锁定相同 revision 不重复读取、隐藏期间延迟刷新，以及后台刷新不卸载现有 diff。
+ * 锁定 revision 刷新策略，以及整文件删除时的原始行号和删除标记。
  */
 
 // @vitest-environment happy-dom
 
 import { RepositoryProvider } from "@/modules/source-control/RepositoryContext";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
+import { EditorView } from "@codemirror/view";
+import type { ReactCodeMirrorProps } from "@uiw/react-codemirror";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   gitDiffContent: vi.fn(),
+  realEditor: false,
+  diffViewMode: "split" as "split" | "inline",
 }));
 
 vi.mock("@/modules/ai/lib/native", () => ({
@@ -25,10 +29,10 @@ vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: Object.assign(
     (
       select: (state: {
-        diffViewMode: "split";
+        diffViewMode: "split" | "inline";
         editorWordWrap: false;
       }) => unknown,
-    ) => select({ diffViewMode: "split", editorWordWrap: false }),
+    ) => select({ diffViewMode: mocks.diffViewMode, editorWordWrap: false }),
     {
       getState: () => ({
         diffViewMode: "split",
@@ -54,13 +58,20 @@ vi.mock("./lib/extensions", () => ({
   wrapCompartment: { of: () => [], reconfigure: () => [] },
 }));
 vi.mock("./lib/useEditorThemeExt", () => ({ useEditorThemeExt: () => [] }));
-vi.mock("@uiw/react-codemirror", () => ({
-  default: ({ value }: { value: string }) => (
-    <div data-testid="inline-diff" data-value={value}>
-      {value}
-    </div>
-  ),
-}));
+vi.mock("@uiw/react-codemirror", async (importOriginal) => {
+  const { default: CodeMirror } =
+    await importOriginal<typeof import("@uiw/react-codemirror")>();
+  return {
+    default: (props: ReactCodeMirrorProps) =>
+      mocks.realEditor ? (
+        <CodeMirror {...props} />
+      ) : (
+        <div data-testid="inline-diff" data-value={props.value}>
+          {props.value}
+        </div>
+      ),
+  };
+});
 vi.mock("./SplitDiffView", () => ({
   SplitDiffView: ({
     original,
@@ -148,6 +159,9 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
   vi.clearAllMocks();
+  mocks.realEditor = false;
+  mocks.diffViewMode = "split";
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
@@ -251,7 +265,7 @@ describe("WorkingGitDiffPane", () => {
         container
           .querySelector('[data-testid="inline-diff"]')
           ?.getAttribute("data-value"),
-      ).toBe(""),
+      ).toBe("before deleted"),
     );
     expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
   });
@@ -285,4 +299,90 @@ describe("WorkingGitDiffPane", () => {
 
     expect(diff?.getAttribute("data-word-wrap")).toBe("true");
   });
+
+  it.each(["split", "inline"] as const)(
+    "shows original line numbers and deletion markers for a deleted file in %s mode",
+    async (mode) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      mocks.realEditor = true;
+      mocks.diffViewMode = mode;
+      const original = "first\n\nthird\n";
+      mocks.gitDiffContent.mockResolvedValue({
+        ...diffResult("deleted"),
+        originalContent: original,
+        modifiedContent: "",
+      });
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+
+      await act(async () => renderPane(1, true));
+      await vi.waitFor(() => {
+        const editor = container.querySelector<HTMLElement>(".cm-editor");
+        if (!editor) throw new Error("missing editor");
+        expect(EditorView.findFromDOM(editor)?.state.doc.toString()).toBe(
+          original,
+        );
+      });
+      const editor = container.querySelector<HTMLElement>(".cm-editor");
+      expect(editor?.classList.contains("cm-merge-a")).toBe(true);
+      expect(
+        [
+          ...container.querySelectorAll<HTMLElement>(
+            ".cm-lineNumbers .cm-gutterElement",
+          ),
+        ]
+          .filter((element) => element.style.visibility !== "hidden")
+          .map((element) => element.textContent),
+      ).toEqual(["1", "2", "3", "4"]);
+      expect(container.querySelectorAll(".cm-changedLine")).toHaveLength(4);
+      expect(container.querySelectorAll(".cm-changedLineGutter")).toHaveLength(
+        4,
+      );
+      expect(container.querySelectorAll(".cm-changedText")).toHaveLength(2);
+      expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
+
+      if (!editor) throw new Error("missing editor");
+      const view = EditorView.findFromDOM(editor);
+      if (!view) throw new Error("missing editor view");
+      Object.defineProperties(view.scrollDOM, {
+        scrollHeight: { value: 200 },
+        clientHeight: { value: 100 },
+      });
+      mocks.gitDiffContent.mockResolvedValue({
+        ...diffResult("deleted"),
+        originalContent: "updated\ncontent",
+        modifiedContent: "",
+      });
+      await act(async () => renderPane(2, true));
+      await vi.waitFor(() =>
+        expect(view.state.doc.toString()).toBe("updated\ncontent"),
+      );
+      expect(container.querySelector(".cm-editor")).toBe(editor);
+      expect(container.querySelectorAll(".cm-changedLineGutter")).toHaveLength(
+        2,
+      );
+      expect(
+        container.querySelector(".cm-changeOverview-deleted"),
+      ).not.toBeNull();
+      expect(container.querySelector(".cm-changeOverview-added")).toBeNull();
+
+      mocks.gitDiffContent.mockResolvedValue({
+        ...diffResult("restored"),
+        originalContent: "",
+        modifiedContent: "restored\nfile",
+      });
+      await act(async () => renderPane(3, true));
+      await vi.waitFor(() =>
+        expect(view.state.doc.toString()).toBe("restored\nfile"),
+      );
+      expect(editor.classList.contains("cm-merge-a")).toBe(false);
+      expect(editor.classList.contains("cm-merge-b")).toBe(true);
+      expect(container.querySelectorAll(".cm-changeOverview")).toHaveLength(1);
+      expect(container.querySelector(".cm-changeOverview-deleted")).toBeNull();
+      expect(
+        container.querySelector(".cm-changeOverview-added"),
+      ).not.toBeNull();
+    },
+  );
 });

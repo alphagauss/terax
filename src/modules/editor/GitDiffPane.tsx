@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { deletedFileDiff } from "./lib/deletedFileDiff";
 import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
@@ -220,6 +221,8 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
       (loaded?.isBinary ?? false) ||
       originalContent.length > LARGE_FILE_THRESHOLD ||
       modifiedContent.length > LARGE_FILE_THRESHOLD;
+    const isDeletion =
+      originalContent.length > 0 && modifiedContent.length === 0;
     const effectiveDiffViewMode =
       loaded &&
       diffViewMode === "split" &&
@@ -236,17 +239,21 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               languageCompartment.of(loaded?.langExt ?? []),
               ...FOCUSABLE_READONLY_EXTENSIONS,
               wrapCompartment.of([]),
-              unifiedMergeView({
-                original: originalContent,
-                mergeControls: false,
-                highlightChanges: true,
-                gutter: true,
-                syntaxHighlightDeletions: true,
-              }),
-              gitChangeOverview,
-              UNIFIED_DIFF_THEME,
+              ...(isDeletion
+                ? [deletedFileDiff]
+                : [
+                    unifiedMergeView({
+                      original: originalContent,
+                      mergeControls: false,
+                      highlightChanges: true,
+                      gutter: true,
+                      syntaxHighlightDeletions: true,
+                    }),
+                    gitChangeOverview,
+                    UNIFIED_DIFF_THEME,
+                  ]),
             ],
-      [effectiveDiffViewMode, loaded?.langExt, originalContent],
+      [effectiveDiffViewMode, isDeletion, loaded?.langExt, originalContent],
     );
     const fallbackExtensions = useMemo(
       () => [
@@ -329,7 +336,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
             />
           ) : (
             <CodeMirror
-              value={modifiedContent}
+              value={isDeletion ? originalContent : modifiedContent}
               theme={themeExt}
               extensions={extensions}
               editable={false}
