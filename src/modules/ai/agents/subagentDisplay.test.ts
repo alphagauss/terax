@@ -103,7 +103,7 @@ describe("Subagent display data", () => {
             toolCallId: "parent-call-1",
             state: "output-available",
             input: { task: "Inspect persistence" },
-            output: { taskId: "task-1", status: "running" },
+            output: { task_id: "task-1", status: "running" },
           },
         ],
       },

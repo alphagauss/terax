@@ -1030,7 +1030,7 @@ describe("AI session message conversion", () => {
             toolCallId: "spawn",
             state: "output-available",
             input: {},
-            output: { taskId: "child", status: "running" },
+            output: { task_id: "child", status: "running" },
           },
           {
             type: "data-user-steering",

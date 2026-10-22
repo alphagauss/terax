@@ -1521,13 +1521,13 @@ function externalAgentActivityLabel(
   }
 }
 
-function subagentResultForPart(
+export function subagentResultForPart(
   part: AnyPart,
   resultsByTaskId: ReadonlyMap<string, SubagentResultView> | undefined,
 ): SubagentResultView | undefined {
   const taskId = objectStringValue(
     "output" in part ? part.output : undefined,
-    "taskId",
+    "task_id",
   );
   return resultsByTaskId?.get(toolCallIdFromPart(part)) ?? (taskId ? resultsByTaskId?.get(taskId) : undefined);
 }

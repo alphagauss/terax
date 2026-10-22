@@ -10,6 +10,7 @@ import {
   activityHeadline,
   buildMessageGroups,
   resolveToolDisplay,
+  subagentResultForPart,
 } from "./AiChat";
 
 describe("activity headline summaries", () => {
@@ -208,8 +209,8 @@ describe("AI chat activity grouping", () => {
       type: "tool-subagent_task",
       toolCallId: id,
       state: "output-available",
-      input: { action, taskId: "task" },
-      output: { taskId: "task", status },
+      input: { action, task_id: "task" },
+      output: { task_id: "task", status },
     });
     const groups = buildMessageGroups([
       tool("queued", "send", "queued"),
@@ -241,13 +242,13 @@ describe("AI chat activity grouping", () => {
         type: "tool-subagent_task",
         toolCallId: "queued",
         state: "input-available",
-        input: { action: "send", taskId: "old" },
+        input: { action: "send", task_id: "old" },
       },
       {
         type: "tool-subagent_task",
         toolCallId: "resumed",
         state: "input-available",
-        input: { action: "send", taskId: "old" },
+        input: { action: "send", task_id: "old" },
       },
     ];
     expect(
@@ -309,4 +310,21 @@ describe("AI chat activity grouping", () => {
       groups: [{ kind: "single", part: { toolCallId: "external-3" } }],
     });
   });
+});
+
+it("按工具返回的 task_id 关联结果，并优先使用本次调用的结果", () => {
+  const part = {
+    type: "dynamic-tool",
+    toolName: "subagent_task",
+    toolCallId: "resume-call",
+    state: "output-available",
+    input: { action: "send", task_id: "task", message: "continue" },
+    output: { task_id: "task", status: "completed" },
+  } as Parameters<typeof subagentResultForPart>[0];
+  const previous = { status: "completed" as const, result: "previous" };
+  const current = { status: "completed" as const, result: "current" };
+  const results = new Map([["task", previous]]);
+  expect(subagentResultForPart(part, results)).toBe(previous);
+  results.set("resume-call", current);
+  expect(subagentResultForPart(part, results)).toBe(current);
 });

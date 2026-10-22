@@ -1156,7 +1156,7 @@ describe("chat store multi-process lifecycle", () => {
             toolCallId: "parent-call",
             state: "output-available" as const,
             input: { task: "inspect", wait: false },
-            output: { taskId: "task-1", status: "running" },
+            output: { task_id: "task-1", status: "running" },
           },
         ],
       },
