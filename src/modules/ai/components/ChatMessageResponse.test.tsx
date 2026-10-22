@@ -3,6 +3,7 @@ import {
   ChatFileReferenceBaseProvider,
   ChatMessageResponse,
 } from "@/modules/ai/components/ChatMessageResponse";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { act } from "react";
 import { decodeFileReference } from "@/modules/file-actions/references";
 import { createRoot } from "react-dom/client";
@@ -56,6 +57,46 @@ beforeEach(() => {
 });
 
 describe("chat file references", () => {
+  it.each([
+    { name: "chat", Response: ChatMessageResponse, streaming: false },
+    { name: "chat", Response: ChatMessageResponse, streaming: true },
+    { name: "message", Response: MessageResponse, streaming: false },
+    { name: "message", Response: MessageResponse, streaming: true },
+  ])(
+    "renders compact line breaks separately from paragraphs ($name, streaming=$streaming)",
+    async ({ Response, streaming }) => {
+      const container = document.createElement("div");
+      const root = createRoot(container);
+      try {
+        await act(async () =>
+          root.render(
+            <Response streaming={streaming}>
+              {
+                "First line\nSecond line  \nThird line\n\nNext paragraph.\n\n```text\nfirst code line\nsecond code line\n```"
+              }
+            </Response>,
+          ),
+        );
+        const paragraphs = container.querySelectorAll("p");
+        expect(paragraphs).toHaveLength(2);
+        expect(paragraphs[0].querySelectorAll("br")).toHaveLength(2);
+        expect(paragraphs[0].textContent).toBe(
+          "First line\nSecond line\nThird line",
+        );
+        expect(paragraphs[1].textContent).toBe("Next paragraph.");
+        expect(paragraphs[1].querySelector("br")).toBeNull();
+        if (!streaming) {
+          expect(container.querySelector("pre")?.textContent).toBe(
+            "first code line\nsecond code line",
+          );
+          expect(container.querySelector("pre br")).toBeNull();
+        }
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
   it.each([false, true])(
     "preserves prices alongside TeX math (streaming=%s)",
     async (streaming) => {

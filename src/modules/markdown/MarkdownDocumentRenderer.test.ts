@@ -12,6 +12,55 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Window } from "happy-dom";
 
 it.each([false, true])(
+  "renders line breaks within paragraphs and keeps blank lines as paragraphs (large=%s)",
+  (large) => {
+    const source = [
+      "First line",
+      "Second line  ",
+      "Third line",
+      "",
+      "Next paragraph.",
+      "",
+      "```text",
+      "first code line",
+      "second code line",
+      "```",
+      ...(large ? ["", "Padding text. ".repeat(42_000)] : []),
+    ].join(large ? "\r\n" : "\n");
+    const model = prepareMarkdownDocument(source);
+    const document = new Window().document;
+    document.body.innerHTML = renderToStaticMarkup(
+      createElement(MarkdownDocumentRenderer, {
+        document: model,
+        documentPath: "D:/line-breaks.md",
+        mode: "dark",
+        visible: false,
+        scrollContainer: document.createElement(
+          "div",
+        ) as unknown as HTMLElement,
+        onFragmentNavigate: () => {},
+        onFileReferenceOpen: () => {},
+        onFileReferenceOpenDirectory: () => {},
+      }),
+    );
+
+    expect(model.progressive).toBe(large);
+    const paragraphs = document.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(large ? 3 : 2);
+    expect(paragraphs[0].querySelectorAll("br")).toHaveLength(2);
+    expect(paragraphs[0].textContent).toBe(
+      "First line\nSecond line\nThird line",
+    );
+    expect(paragraphs[1].textContent).toBe("Next paragraph.");
+    expect(paragraphs[1].querySelector("br")).toBeNull();
+    expect(document.querySelector("pre, code")?.textContent?.trim()).toBe(
+      "first code line\nsecond code line",
+    );
+    expect(document.querySelector("pre br, code br")).toBeNull();
+  },
+);
+
+it.each([false, true])(
   "renders TeX math without changing code or source lines (large=%s)",
   (large) => {
     const source = [

@@ -8,7 +8,10 @@ import { Hint } from "@/components/controls/tooltip";
 import { FileReferenceLink } from "@/modules/file-actions/FileReferenceLink";
 import { decodeFileReference } from "@/modules/file-actions/references";
 import { MarkdownCode } from "@/modules/markdown/markdown-code";
-import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
+import {
+  streamdownPlugins,
+  streamdownRemarkPlugins,
+} from "@/modules/markdown/streamdown-plugins";
 import { cn } from "@/lib/utils";
 import { MARKDOWN_CONTENT_CHANGE_EVENT } from "@/modules/markdown/lib/anchor";
 import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
@@ -49,12 +52,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import {
-  Block,
-  type BlockProps,
-  defaultRemarkPlugins,
-  Streamdown,
-} from "streamdown";
+import { Block, type BlockProps, Streamdown } from "streamdown";
 
 const INITIAL_RENDER_MIN_HEIGHT = 1_200;
 const INITIAL_RENDER_VIEWPORTS = 2;
@@ -67,7 +65,7 @@ const IDLE_TIMEOUT = 500;
 
 const progressiveRemarkPlugins = [
   remarkMarkdownBlockSourcePosition,
-  ...Object.values(defaultRemarkPlugins),
+  ...streamdownRemarkPlugins,
 ];
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
@@ -581,6 +579,7 @@ export const MarkdownDocumentRenderer = forwardRef<
                 components={markdownComponents}
                 plugins={streamdownPlugins}
                 rehypePlugins={rehypePlugins}
+                remarkPlugins={streamdownRemarkPlugins}
                 mode="static"
                 parseIncompleteMarkdown={false}
                 isAnimating={false}

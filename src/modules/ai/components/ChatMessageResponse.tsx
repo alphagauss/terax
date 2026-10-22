@@ -1,7 +1,10 @@
 /** 会话正文的业务渲染入口，连接文件引用菜单与宿主导航。 */
 import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
 import { MarkdownCode } from "@/modules/markdown/markdown-code";
-import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
+import {
+  streamdownPlugins,
+  streamdownRemarkPlugins,
+} from "@/modules/markdown/streamdown-plugins";
 import { cn } from "@/lib/utils";
 import { IS_WINDOWS } from "@/lib/platform";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
@@ -142,6 +145,7 @@ export const ChatMessageResponse = memo(function ChatMessageResponse({
         tableMaxHeight={420}
         components={components}
         rehypePlugins={rehypePlugins}
+        remarkPlugins={streamdownRemarkPlugins}
         plugins={streamdownPlugins}
       >
         {text}

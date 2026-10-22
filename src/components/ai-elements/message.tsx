@@ -7,7 +7,10 @@
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
-import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
+import {
+  streamdownPlugins,
+  streamdownRemarkPlugins,
+} from "@/modules/markdown/streamdown-plugins";
 import {
   Tooltip,
   TooltipContent,
@@ -354,6 +357,7 @@ export const MessageResponse = memo(
             "markdown-content size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
             className,
           )}
+          remarkPlugins={streamdownRemarkPlugins}
           {...props}
           animated={streaming}
           components={streamdownComponents}
