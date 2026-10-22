@@ -45,7 +45,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { IS_MAC } from "@/lib/platform";
 import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
-import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
+import {
+  type CommitFileDiffOpenInput,
+  type GitBranchEntry,
+  native,
+} from "@/modules/ai/lib/native";
 import {
   copyToClipboard,
   revealInFinder,
@@ -96,14 +100,7 @@ import { RepositoryDiffStats } from "./RepositoryDiffStats";
 type Props = {
   open: boolean;
   sourceControl: RepositoryController;
-  onOpenCommitFile?: (input: {
-    repoRoot: string;
-    sha: string;
-    shortSha: string;
-    subject: string;
-    path: string;
-    originalPath: string | null;
-  }) => void;
+  onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
   onOpenDiff: (input: {
     path: string;
     repoRoot: string;

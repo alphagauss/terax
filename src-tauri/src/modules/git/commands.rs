@@ -7,8 +7,8 @@ use tauri::{AppHandle, Manager};
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitDiffSide, GitLogEntry, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline,
-    GitRepoInfo, GitStatusSnapshot,
+    GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitLogEntry, GitPanelSnapshot, GitPushResult,
+    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -255,6 +255,32 @@ pub async fn git_log(
             r,
             &repo_root,
             limit.unwrap_or(30),
+            skip.unwrap_or(0),
+            &workspace,
+        )
+        .map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_file_history(
+    repo_root: String,
+    path: String,
+    head_sha: String,
+    limit: Option<u32>,
+    skip: Option<u32>,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Vec<GitFileHistoryEntry>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::file_history(
+            r,
+            &repo_root,
+            &path,
+            &head_sha,
+            limit.unwrap_or(40),
             skip.unwrap_or(0),
             &workspace,
         )

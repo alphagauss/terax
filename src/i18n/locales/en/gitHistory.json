@@ -30,5 +30,12 @@
     "author": "Author",
     "authorEmail": "Email",
     "sha": "SHA"
+  },
+  "timeline": {
+    "title": "Timeline",
+    "refresh": "Refresh timeline",
+    "noRepository": "No Git repository.",
+    "selectFile": "Select a file to view its history.",
+    "noHistory": "No Git history for this file."
   }
 }

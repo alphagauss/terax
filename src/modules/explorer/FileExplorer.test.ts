@@ -125,6 +125,49 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
+vi.mock("@/modules/source-control/RepositoryContext", () => ({
+  useRepositorySnapshot: () => ({
+    repo: { repoRoot: "/home/remote" },
+    status: { headSha: "head" },
+    revision: 1,
+  }),
+}));
+vi.mock("@/modules/git-history/FileTimeline", () => ({
+  FileTimeline: ({
+    path,
+    enabled,
+  }: {
+    path: string | null;
+    enabled: boolean;
+  }) =>
+    createElement("div", {
+      "data-timeline-path": path ?? "",
+      "data-timeline-enabled": enabled,
+    }),
+}));
+vi.mock("@/modules/sidebar", () => ({
+  SidebarSectionGroup: ({
+    sections,
+  }: {
+    sections: {
+      id: string;
+      fixedHeader?: React.ReactNode;
+      render: (state: {
+        expanded: boolean;
+        present: boolean;
+      }) => React.ReactNode;
+    }[];
+  }) =>
+    sections.map((section) =>
+      createElement(
+        "section",
+        { key: section.id },
+        section.fixedHeader,
+        section.render({ expanded: true, present: true }),
+      ),
+    ),
+  SidebarSectionAction: () => null,
+}));
 vi.mock("./ExplorerSearch", () => ({
   ExplorerSearch: forwardRef(() => null),
 }));
@@ -268,6 +311,11 @@ it("keeps every file row mounted across sidebar switches and locates the active 
     await act(async () => {
       for (const callback of frames.splice(0)) callback(0);
     });
+    expect(
+      container
+        .querySelector("[data-timeline-path]")
+        ?.getAttribute("data-timeline-path"),
+    ).toBe("/home/remote/file-79.txt");
     expect(tree.scrollTop).toBe(1680);
     expect(tree.getAttribute("aria-activedescendant")).toBe(rows[79].id);
     await act(async () => {
@@ -282,6 +330,30 @@ it("keeps every file row mounted across sidebar switches and locates the active 
       );
     });
     expect(props.onOpenFile).toHaveBeenCalledWith("/home/remote/file-78.txt");
+    expect(
+      container
+        .querySelector("[data-timeline-path]")
+        ?.getAttribute("data-timeline-path"),
+    ).toBe("/home/remote/file-78.txt");
+    await act(async () =>
+      root.render(
+        createElement(FileExplorer, {
+          ...props,
+          activeFilePath: null,
+          active: false,
+        }),
+      ),
+    );
+    expect(
+      container
+        .querySelector("[data-timeline-path]")
+        ?.getAttribute("data-timeline-path"),
+    ).toBe("/home/remote/file-78.txt");
+    expect(
+      container
+        .querySelector("[data-timeline-enabled]")
+        ?.getAttribute("data-timeline-enabled"),
+    ).toBe("false");
   } finally {
     await act(async () => root.unmount());
   }

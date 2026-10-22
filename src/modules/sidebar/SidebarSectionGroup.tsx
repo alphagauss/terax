@@ -44,6 +44,8 @@ export type SidebarSectionRenderState = {
 export type SidebarSectionDefinition = {
   id: string;
   title: ReactNode;
+  /** 不可折叠分区可保留宿主工具栏，容器统一约束标题高度。 */
+  fixedHeader?: ReactNode;
   badge?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode | ((state: SidebarSectionRenderState) => ReactNode);
@@ -213,7 +215,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
                   : `${saved?.size ?? section.defaultSize}px`
               }
               minSize={`${section.minSize}px`}
-              collapsible
+              collapsible={!section.fixedHeader}
               collapsedSize={`${SIDEBAR_SECTION_HEADER_HEIGHT}px`}
               groupResizeBehavior={
                 section.preservePixelSize
@@ -228,18 +230,27 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
                 className="pointer-events-none h-full overflow-hidden"
               >
                 <div className="pointer-events-auto flex h-full min-h-0 flex-col bg-sidebar">
-                  <SidebarSectionHeader
-                    title={section.title}
-                    badge={section.badge}
-                    description={section.description}
-                    expanded={!collapsed}
-                    onToggle={state.toggle}
-                    actions={
-                      typeof section.actions === "function"
-                        ? section.actions(state)
-                        : section.actions
-                    }
-                  />
+                  {section.fixedHeader ? (
+                    <div
+                      className="shrink-0"
+                      style={{ height: SIDEBAR_SECTION_HEADER_HEIGHT }}
+                    >
+                      {section.fixedHeader}
+                    </div>
+                  ) : (
+                    <SidebarSectionHeader
+                      title={section.title}
+                      badge={section.badge}
+                      description={section.description}
+                      expanded={!collapsed}
+                      onToggle={state.toggle}
+                      actions={
+                        typeof section.actions === "function"
+                          ? section.actions(state)
+                          : section.actions
+                      }
+                    />
+                  )}
                   <div
                     aria-hidden={collapsed}
                     inert={collapsed}

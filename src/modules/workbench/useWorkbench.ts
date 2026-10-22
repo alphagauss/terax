@@ -3,6 +3,7 @@
  * 页面打开函数负责复用既有标签，后台预热只解除冷状态而不改变页面所有权。
  */
 
+import type { CommitFileDiffOpenInput } from "@/modules/ai/lib/native";
 import i18n from "@/i18n";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
@@ -663,14 +664,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   );
 
   const openCommitFileDiffTab = useCallback(
-    (input: {
-      repoRoot: string;
-      sha: string;
-      shortSha: string;
-      subject: string;
-      path: string;
-      originalPath: string | null;
-    }) => {
+    (input: CommitFileDiffOpenInput) => {
       const spaceId = activeSpaceIdRef.current;
       const target = targetGroup(spaceId);
       if (target === null) return null;

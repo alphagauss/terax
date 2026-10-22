@@ -23,27 +23,28 @@ import {
 } from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { type GitLogEntry, native } from "@/modules/ai/lib/native";
+import {
+  type CommitFileDiffOpenInput,
+  type GitLogEntry,
+  native,
+} from "@/modules/ai/lib/native";
 import {
   FindControlButton,
   FindPatternField,
   type FindPatternFieldHandle,
 } from "@/modules/find";
-import { CommitDetail } from "@/modules/git-history/CommitDetail";
+import { CommitHistoryHoverCard } from "@/modules/git-history/CommitHistoryHoverCard";
 import {
-  CommitHoverCard,
   commitRowInteraction,
   ExpandedCommitRow,
 } from "@/modules/git-history/CommitGraphInteraction";
+import {
+  normalizeGitHistoryError,
+  useCommitHistory,
+} from "@/modules/git-history/useCommitHistory";
 import { useCommitRowReveal } from "@/modules/git-history/useCommitRowReveal";
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
-import {
-  commitWebUrl,
-  hostLabel,
-  parseRemoteWebUrl,
-  type RemoteWebInfo,
-} from "@/modules/git-history/lib/remoteWebUrl";
 import {
   flattenCommitRows,
   useCommitGraph,
@@ -56,7 +57,6 @@ import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
 import Tag01Icon from "@hugeicons/core-free-icons/Tag01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   memo,
   type ReactNode,
@@ -70,7 +70,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { reportError } from "@/lib/errors";
 
-const PAGE_SIZE = 40;
 // 与原生 git-log 的单页上限一致，搜索按页继续扫描历史。
 const SEARCH_PAGE_SIZE = 200;
 const ROW_HEIGHT = 24;
@@ -100,15 +99,6 @@ function highlightSubject(subject: string, query: string): ReactNode {
   return parts;
 }
 
-type CommitFileDiffOpenInput = {
-  repoRoot: string;
-  sha: string;
-  shortSha: string;
-  subject: string;
-  path: string;
-  originalPath: string | null;
-};
-
 type Props = {
   repoRoot: string | null;
   headBranch: string | null;
@@ -125,16 +115,6 @@ type Props = {
   searchOpen?: boolean;
   onCloseSearch?: () => void;
 };
-
-type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
-function normalizeError(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return "Unknown Git error";
-}
 
 /**
  * Source Control 提交图谱区域。
@@ -161,11 +141,6 @@ export const GraphSection = memo(function GraphSection({
   const [searchField, setSearchField] = useState<SearchField>("subject");
   const searchFieldRef = useRef<FindPatternFieldHandle>(null);
   const activeSearch = searchOpen ? searchInput.trim() : "";
-  const [remoteWeb, setRemoteWeb] = useState<RemoteWebInfo | null>(null);
-  const [commits, setCommits] = useState<GitLogEntry[]>([]);
-  const [loadStatus, setLoadStatus] = useState<LoadStatus>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [endReached, setEndReached] = useState(false);
   const graph = useCommitGraph(repoRoot, expanded);
   const {
     anchor: openAnchor,
@@ -186,108 +161,46 @@ export const GraphSection = memo(function GraphSection({
     scrollRef.current = element;
     if (element) element.scrollTop = scrollTop.current;
   }, []);
-  const requestRef = useRef(0);
-  const loadingMoreRef = useRef(false);
-  const loadedKeyRef = useRef<string | null>(null);
   const refreshKey = repoRoot
-    ? `${repoRoot}:${headBranch ?? ""}:${headSha ?? ""}:${graphRevision}:${refreshToken}`
+    ? JSON.stringify([
+        repoRoot,
+        headBranch,
+        headSha,
+        graphRevision,
+        refreshToken,
+      ])
     : null;
+  const fetchPage = useCallback(
+    (options: { limit: number; skip?: number }) =>
+      repoRoot ? native.gitLog(repoRoot, options) : Promise.resolve([]),
+    [repoRoot],
+  );
+  const onInitialLoaded = useCallback(() => {
+    scrollTop.current = 0;
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
+  }, []);
+  const { commits, loadStatus, error, endReached, loadInitial, loadMore } =
+    useCommitHistory({
+      queryKey: refreshKey,
+      enabled: expanded && !!repoRoot,
+      fetchPage,
+      morePageSize: activeSearch ? SEARCH_PAGE_SIZE : 40,
+      onInitialLoaded,
+    });
 
   useEffect(() => {
     if (!searchOpen) setSearchInput("");
   }, [searchOpen]);
 
   useEffect(() => {
-    let cancelled = false;
-    setRemoteWeb(null);
-    if (repoRoot)
-      void native
-        .gitRemoteUrl(repoRoot)
-        .then((url) => {
-          if (!cancelled) setRemoteWeb(parseRemoteWebUrl(url));
-        })
-        .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [repoRoot]);
-
-  const loadInitial = useCallback(async () => {
-    if (!repoRoot || !expanded) return;
-    const request = ++requestRef.current;
-    loadingMoreRef.current = false;
-    setLoadStatus("initial");
-    setError(null);
-    setEndReached(false);
-    try {
-      const next = await native.gitLog(repoRoot, { limit: PAGE_SIZE });
-      if (request !== requestRef.current) return;
-      loadedKeyRef.current = refreshKey;
-      setCommits(next);
-      setEndReached(next.length < PAGE_SIZE);
-      setLoadStatus("idle");
-      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
-    } catch (loadError) {
-      if (request !== requestRef.current) return;
-      setError(normalizeError(loadError));
-      setLoadStatus("initial-error");
-    }
-  }, [expanded, repoRoot, refreshKey]);
-
-  useEffect(() => {
-    if (!expanded || !refreshKey) return;
-    if (loadedKeyRef.current === refreshKey) return;
+    void refreshKey;
     setSelectedFile(null);
     reset();
-    void loadInitial();
-  }, [expanded, loadInitial, refreshKey, reset]);
+  }, [refreshKey, reset]);
 
   useEffect(() => {
     setPendingUndo((current) => (current?.sha === headSha ? current : null));
   }, [headSha]);
-
-  useEffect(() => {
-    return () => {
-      requestRef.current += 1;
-    };
-  }, []);
-
-  const loadMore = useCallback(async () => {
-    if (
-      !expanded ||
-      !repoRoot ||
-      endReached ||
-      loadingMoreRef.current ||
-      commits.length === 0 ||
-      (loadStatus !== "idle" && loadStatus !== "more-error")
-    ) {
-      return;
-    }
-    const request = requestRef.current;
-    loadingMoreRef.current = true;
-    setLoadStatus("more");
-    setError(null);
-    const limit = activeSearch ? SEARCH_PAGE_SIZE : PAGE_SIZE;
-    try {
-      const next = await native.gitLog(repoRoot, {
-        limit,
-        skip: commits.length,
-      });
-      if (request !== requestRef.current) return;
-      setCommits((current) => {
-        const known = new Set(current.map((commit) => commit.sha));
-        return current.concat(next.filter((commit) => !known.has(commit.sha)));
-      });
-      setEndReached(next.length < limit);
-      setLoadStatus("idle");
-    } catch (loadError) {
-      if (request !== requestRef.current) return;
-      setError(normalizeError(loadError));
-      setLoadStatus("more-error");
-    } finally {
-      if (request === requestRef.current) loadingMoreRef.current = false;
-    }
-  }, [activeSearch, commits, endReached, expanded, loadStatus, repoRoot]);
 
   // 每行仅为自身轨道留白，追加历史中的复杂分支不能推移已有提交。
   const { rows: graphRows } = useMemo(() => layoutGraph(commits), [commits]);
@@ -382,7 +295,7 @@ export const GraphSection = memo(function GraphSection({
       onDidUndo();
     } catch (undoError) {
       reportError(t("common:errors.undoCommitFailed"), {
-        description: normalizeError(undoError),
+        description: normalizeGitHistoryError(undoError),
       });
     } finally {
       setUndoing(false);
@@ -392,10 +305,6 @@ export const GraphSection = memo(function GraphSection({
   const selectedCommit = openAnchor
     ? (commits.find((commit) => commit.sha === openAnchor.sha) ?? null)
     : null;
-  const selectedFiles = selectedCommit
-    ? (filesBySha.get(selectedCommit.sha) ?? null)
-    : null;
-
   if (!present) return null;
 
   if (!repoRoot) {
@@ -671,47 +580,30 @@ export const GraphSection = memo(function GraphSection({
         </div>
       )}
 
-      <CommitHoverCard graph={graph} side="right">
-        {selectedCommit ? (
-          <CommitDetail
-            key={selectedCommit.sha}
-            commit={selectedCommit}
-            filesEntry={selectedFiles}
-            remoteAction={
-              remoteWeb
-                ? {
-                    label: t("viewOn", { host: hostLabel(remoteWeb) }),
-                    onClick: () =>
-                      void openUrl(
-                        commitWebUrl(remoteWeb, selectedCommit.sha),
-                      ).catch(console.error),
-                  }
-                : undefined
-            }
-            onUndo={
-              showUndoCommit &&
-              selectedCommit.sha === headSha &&
-              selectedCommit.parents.length > 0
-                ? () => setPendingUndo(selectedCommit)
-                : undefined
-            }
-            onRetry={() => void fetchFiles(selectedCommit.sha, true)}
-            onOpenFile={(file) => {
-              if (!onOpenCommitFile) return;
-              setSelectedFile({ sha: selectedCommit.sha, path: file.path });
-              onOpenCommitFile({
-                repoRoot,
-                sha: selectedCommit.sha,
-                shortSha: selectedCommit.shortSha,
-                subject: selectedCommit.subject,
-                path: file.path,
-                originalPath: file.originalPath,
-              });
-              closePopover();
-            }}
-          />
-        ) : null}
-      </CommitHoverCard>
+      <CommitHistoryHoverCard
+        repoRoot={repoRoot}
+        commit={selectedCommit}
+        graph={graph}
+        onUndo={
+          showUndoCommit &&
+          selectedCommit?.sha === headSha &&
+          selectedCommit.parents.length > 0
+            ? () => setPendingUndo(selectedCommit)
+            : undefined
+        }
+        onOpenFile={(file) => {
+          if (!selectedCommit || !onOpenCommitFile) return;
+          setSelectedFile({ sha: selectedCommit.sha, path: file.path });
+          onOpenCommitFile({
+            repoRoot,
+            sha: selectedCommit.sha,
+            shortSha: selectedCommit.shortSha,
+            subject: selectedCommit.subject,
+            path: file.path,
+            originalPath: file.originalPath,
+          });
+        }}
+      />
 
       <AlertDialog
         open={!!pendingUndo}

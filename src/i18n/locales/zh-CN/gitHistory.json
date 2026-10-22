@@ -30,5 +30,12 @@
     "author": "作者",
     "authorEmail": "邮箱",
     "sha": "SHA"
+  },
+  "timeline": {
+    "title": "时间线",
+    "refresh": "刷新时间线",
+    "noRepository": "当前目录不属于 Git 仓库。",
+    "selectFile": "选择文件以查看历史记录。",
+    "noHistory": "此文件暂无 Git 历史记录。"
   }
 }

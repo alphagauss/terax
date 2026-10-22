@@ -16,10 +16,10 @@ use crate::modules::git::process::{
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileLineStats, GitLineStats, GitLogEntry,
-    GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats, GitPanelSnapshot, GitPushResult,
-    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
-    MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
+    GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitFileLineStats,
+    GitLineStats, GitLogEntry, GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats,
+    GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
+    TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
@@ -923,40 +923,16 @@ pub fn log(
             continue;
         }
         if line.contains('\x1f') {
-            let mut fields = line.splitn(7, '\x1f');
-            let sha = fields.next().unwrap_or("").to_string();
-            if !sha_is_safe(&sha) {
-                continue;
+            if let Some(entry) = parse_log_header(line, |refs| {
+                parse_log_refs(
+                    refs,
+                    &remote_names,
+                    current_branch.as_deref(),
+                    upstream_label.as_deref(),
+                )
+            }) {
+                entries.push(entry);
             }
-            let author = fields.next().unwrap_or("").to_string();
-            let author_email = fields.next().unwrap_or("").to_string();
-            let timestamp = fields.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
-            let parents_raw = fields.next().unwrap_or("");
-            let parents: Vec<String> = parents_raw
-                .split_ascii_whitespace()
-                .map(|s| s.to_string())
-                .collect();
-            let refs = parse_log_refs(
-                fields.next().unwrap_or(""),
-                &remote_names,
-                current_branch.as_deref(),
-                upstream_label.as_deref(),
-            );
-            let subject = fields.next().unwrap_or("").to_string();
-            let short_sha = sha.chars().take(7).collect::<String>();
-            entries.push(GitLogEntry {
-                sha,
-                short_sha,
-                author,
-                author_email,
-                timestamp_secs: timestamp,
-                parents,
-                refs,
-                subject,
-                files_changed: 0,
-                insertions: 0,
-                deletions: 0,
-            });
             continue;
         }
         if let Some(current) = entries.last_mut() {
@@ -969,6 +945,115 @@ pub fn log(
         }
     }
     Ok(entries)
+}
+
+/// 仓库日志与文件时间线共用提交头解析，文件路径独立使用 NUL 分隔。
+fn parse_log_header(line: &str, refs: impl FnOnce(&str) -> Vec<GitLogRef>) -> Option<GitLogEntry> {
+    let mut fields = line.splitn(7, '\x1f');
+    let sha = fields.next()?;
+    if !sha_is_safe(sha) {
+        return None;
+    }
+    Some(GitLogEntry {
+        sha: sha.to_string(),
+        short_sha: sha.chars().take(7).collect(),
+        author: fields.next()?.to_string(),
+        author_email: fields.next()?.to_string(),
+        timestamp_secs: fields.next()?.parse().unwrap_or(0),
+        parents: fields
+            .next()?
+            .split_ascii_whitespace()
+            .map(str::to_string)
+            .collect(),
+        refs: refs(fields.next()?),
+        subject: fields.next()?.to_string(),
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+    })
+}
+
+/// 从固定提交分页追溯单文件历史，并返回重命名前后真实路径。
+pub fn file_history(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    path: &str,
+    head_sha: &str,
+    limit: u32,
+    skip: u32,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitFileHistoryEntry>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !full_sha_is_safe(head_sha) {
+        return Err(GitError::command("git log", "invalid commit sha"));
+    }
+    // 与 Quick Diff 一样先规范父目录，兼容工作根通过符号链接进入仓库的情况。
+    let (parent, name) = split_file_path(path)?;
+    let directory = canonical_dir(registry, parent, workspace)?;
+    let absolute = format!("{}/{}", directory.git_path.trim_end_matches('/'), name);
+    let relative = relative_git_path(&repo_root.git_path, &absolute, repo_root.remote)?;
+    let relative = pathspec_from_input(&repo_root.local_path, &relative, repo_root.remote)?;
+    // --follow 与 --skip 混用会跳过重命名追踪；从固定起点读取有限前缀后截取本页。
+    let limit = limit.clamp(1, MAX_LOG_LIMIT);
+    let count = format!("--max-count={}", skip.saturating_add(limit));
+    let format = format!("--format=%x1e{LOG_FORMAT}");
+    let literal_path = format!(":(literal){relative}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "log",
+            "--no-color",
+            "--no-ext-diff",
+            "--follow",
+            "--find-renames=50%",
+            "--diff-merges=first-parent",
+            "--name-status",
+            "-z",
+            &count,
+            &format,
+            head_sha,
+            "--",
+            &literal_path,
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git log failed")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut tokens = stdout.split('\0').filter(|token| !token.is_empty());
+    let mut commit = None;
+    let mut entries = Vec::new();
+    while let Some(token) = tokens.next() {
+        if let Some(header) = token.strip_prefix('\x1e') {
+            commit = parse_log_header(header, |_| Vec::new());
+            continue;
+        }
+        let status = token.trim_start_matches('\n');
+        let Some(path) = tokens.next() else {
+            break;
+        };
+        let (path, original_path) = if status.starts_with(['R', 'C']) {
+            let Some(next) = tokens.next() else {
+                break;
+            };
+            (next, Some(path.to_string()))
+        } else {
+            (path, None)
+        };
+        if let Some(commit) = commit.take() {
+            entries.push(GitFileHistoryEntry {
+                commit,
+                path: path.to_string(),
+                original_path,
+            });
+        }
+    }
+    Ok(entries
+        .into_iter()
+        .skip(skip as usize)
+        .take(limit as usize)
+        .collect())
 }
 
 /// 将提交装饰转换为稳定类别；已检出分支只保留当前分支、upstream 与标签。

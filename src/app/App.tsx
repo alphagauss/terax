@@ -1829,6 +1829,11 @@ export default function App() {
               handleOpenFile(path, pin),
             )
           }
+          onOpenCommitFile={(input) =>
+            openWorkspaceFromSidebar("explorer", () =>
+              openCommitFileDiffTab(input),
+            )
+          }
           onPathRenamed={handlePathRenamed}
           onPathDeleted={handlePathDeleted}
           onRevealInTerminal={(path) =>

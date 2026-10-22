@@ -167,6 +167,16 @@ pub struct GitLogEntry {
     pub deletions: u32,
 }
 
+/// 单文件历史保留每次提交中的路径，重命名前的记录不能使用当前文件名打开。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileHistoryEntry {
+    #[serde(flatten)]
+    pub commit: GitLogEntry,
+    pub path: String,
+    pub original_path: Option<String>,
+}
+
 /// 提交装饰引用，保留本地、远端和标签的类别供界面区分展示。
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

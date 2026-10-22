@@ -239,6 +239,21 @@ export type GitLogEntry = {
   deletions: number;
 };
 
+export type GitFileHistoryEntry = GitLogEntry & {
+  path: string;
+  originalPath: string | null;
+};
+
+/** 打开提交文件 Diff 的公共输入，路径属于对应历史提交。 */
+export type CommitFileDiffOpenInput = {
+  repoRoot: string;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  path: string;
+  originalPath: string | null;
+};
+
 export type GitLogRefKind = "local" | "remote" | "tag";
 
 export type GitLogRef = {
@@ -528,6 +543,19 @@ export const native = {
   gitLog: (repoRoot: string, options?: { limit?: number; skip?: number }) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
+      limit: options?.limit ?? null,
+      skip: options?.skip ?? null,
+    }),
+  gitFileHistory: (
+    repoRoot: string,
+    path: string,
+    headSha: string,
+    options?: { limit?: number; skip?: number },
+  ) =>
+    invoke<GitFileHistoryEntry[]>("git_file_history", {
+      repoRoot,
+      path,
+      headSha,
       limit: options?.limit ?? null,
       skip: options?.skip ?? null,
     }),

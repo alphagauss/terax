@@ -34,7 +34,13 @@ import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
-import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { FileTimeline } from "@/modules/git-history/FileTimeline";
+import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
+import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContext";
+import type {
+  CommitFileDiffOpenInput,
+  GitStatusSnapshot,
+} from "@/modules/ai/lib/native";
 import { openFileProperties } from "@/modules/file-properties/openFileProperties";
 import { isPythonFile } from "@/modules/python/path";
 import {
@@ -141,6 +147,7 @@ type Props = {
   onReconnect?: () => void;
   activeFilePath?: string | null;
   onOpenFile: (path: string, pin?: boolean) => void;
+  onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;
@@ -415,6 +422,7 @@ export const FileExplorer = memo(
       onReconnect,
       activeFilePath,
       onOpenFile,
+      onOpenCommitFile,
       onPathRenamed,
       onPathDeleted,
       onRevealInTerminal,
@@ -426,6 +434,8 @@ export const FileExplorer = memo(
     ref,
   ) {
     const { t } = useTranslation(["explorer", "statusbar"]);
+    const repository = useRepositorySnapshot();
+    const [timelineRefreshToken, setTimelineRefreshToken] = useState(0);
     const tree = useFileTree(rootPath, {
       onPathRenamed,
       onPathDeleted,
@@ -1050,192 +1060,259 @@ export const FileExplorer = memo(
               className="flex min-h-0 flex-1 flex-col"
               onContextMenuCapture={prepareContextMenu}
             >
-              <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2">
-                <Hint content={rootPath}>
-                  <button
-                    aria-label={rootPath}
-                    type="button"
-                    data-explorer-context="root"
-                    className="flex h-6 min-w-0 flex-1 cursor-pointer items-center truncate rounded-sm text-left text-xs font-medium text-foreground transition-colors duration-control hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    onClick={scrollTreeToTop}
-                    onKeyDown={(event) => {
-                      if (event.key === "Home") {
-                        event.preventDefault();
-                        scrollTreeToTop();
-                      }
-                    }}
-                  >
-                    <img
-                      src={folderIconUrl(basename(rootPath), false)}
-                      alt=""
-                      height={15}
-                      width={15}
-                      className="mx-1.5"
-                    />
-                    <span className="truncate">{basename(rootPath)}</span>
-                  </button>
-                </Hint>
+              <SidebarSectionGroup
+                id="explorer"
+                sections={[
+                  {
+                    id: "files",
+                    title: t("files"),
+                    defaultSize: 430,
+                    minSize: 120,
+                    fixedHeader: (
+                      <div className="flex h-full shrink-0 items-center border-b border-border/60 px-2">
+                        <Hint content={rootPath}>
+                          <button
+                            aria-label={rootPath}
+                            type="button"
+                            data-explorer-context="root"
+                            className="flex h-6 min-w-0 flex-1 cursor-pointer items-center truncate rounded-sm text-left text-xs font-medium text-foreground transition-colors duration-control hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            onClick={scrollTreeToTop}
+                            onKeyDown={(event) => {
+                              if (event.key === "Home") {
+                                event.preventDefault();
+                                scrollTreeToTop();
+                              }
+                            }}
+                          >
+                            <img
+                              src={folderIconUrl(basename(rootPath), false)}
+                              alt=""
+                              height={15}
+                              width={15}
+                              className="mx-1.5"
+                            />
+                            <span className="truncate">
+                              {basename(rootPath)}
+                            </span>
+                          </button>
+                        </Hint>
 
-                <div className="ml-0.5 flex shrink-0 items-center gap-0 [&>button]:w-5">
-                  {onOpenFolder ? (
-                    <Hint content={openFolderLabel ?? t("openFolder")}>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={onOpenFolder}
-                        aria-label={openFolderLabel ?? t("openFolder")}
+                        <div className="ml-0.5 flex shrink-0 items-center gap-0 [&>button]:w-5">
+                          {onOpenFolder ? (
+                            <Hint content={openFolderLabel ?? t("openFolder")}>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={onOpenFolder}
+                                aria-label={openFolderLabel ?? t("openFolder")}
+                              >
+                                <HugeiconsIcon
+                                  icon={FolderOpenIcon}
+                                  className="size-3.75"
+                                  strokeWidth={2}
+                                />
+                              </Button>
+                            </Hint>
+                          ) : null}
+
+                          <Hint content={t("searchFiles")}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => setIsSearchOpen((v) => !v)}
+                              aria-label={t("searchFiles")}
+                            >
+                              <HugeiconsIcon
+                                icon={Search01Icon}
+                                className="size-3.75"
+                                strokeWidth={2}
+                              />
+                            </Button>
+                          </Hint>
+
+                          <Hint content={t("newFile")}>
+                            <Button
+                              aria-label={t("newFile")}
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() =>
+                                tree.beginCreate(toolbarCreateParent, "file")
+                              }
+                            >
+                              <HugeiconsIcon
+                                icon={FileAddIcon}
+                                className="size-3.75"
+                                strokeWidth={2}
+                              />
+                            </Button>
+                          </Hint>
+                          <Hint content={t("newFolder")}>
+                            <Button
+                              aria-label={t("newFolder")}
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() =>
+                                tree.beginCreate(toolbarCreateParent, "dir")
+                              }
+                            >
+                              <HugeiconsIcon
+                                icon={FolderAddIcon}
+                                className="size-3.75"
+                                strokeWidth={2}
+                              />
+                            </Button>
+                          </Hint>
+                          <Hint content={t("menu.refresh")}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => tree.refresh(rootPath)}
+                              aria-label={t("menu.refresh")}
+                            >
+                              <HugeiconsIcon
+                                icon={Refresh01Icon}
+                                className="size-3.75"
+                                strokeWidth={2}
+                              />
+                            </Button>
+                          </Hint>
+                          <Hint content={t("workspaceSearch:collapseAll")}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={tree.collapseAll}
+                              aria-label={t("workspaceSearch:collapseAll")}
+                            >
+                              <HugeiconsIcon
+                                icon={ListChevronsDownUpIcon}
+                                className="size-3.75"
+                                strokeWidth={2}
+                              />
+                            </Button>
+                          </Hint>
+                        </div>
+                      </div>
+                    ),
+                    render: () => (
+                      <div className="flex h-full min-h-0 flex-col">
+                        <ExplorerSearch
+                          ref={searchRef}
+                          rootPath={rootPath}
+                          onOpenFile={onOpenFile}
+                          open={isSearchOpen}
+                          onRequestClose={() => setIsSearchOpen(false)}
+                          onActiveChange={setIsSearchActive}
+                          onRevealInTerminal={onRevealInTerminal}
+                          onAttachToAgent={onAttachToAgent}
+                        />
+
+                        {!isSearchActive ? (
+                          <div
+                            ref={(node) => {
+                              scrollRef.current = node;
+                              treeRef.current = node;
+                            }}
+                            data-explorer-drop=""
+                            data-explorer-context="tree"
+                            role="tree"
+                            aria-label={t("files")}
+                            aria-activedescendant={
+                              selectedPath
+                                ? `file-tree-item-${encodeURIComponent(selectedPath)}`
+                                : undefined
+                            }
+                            tabIndex={0}
+                            className={cn(
+                              "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
+                              rootIsDropTarget && FILE_DROP_TARGET_CLASS,
+                            )}
+                            onPointerDown={dnd.onPointerDown}
+                            onClickCapture={dnd.onClickCapture}
+                            onKeyDown={handleKeyDown}
+                          >
+                            {root?.status === "loading" && (
+                              <div
+                                role="treeitem"
+                                aria-level={1}
+                                aria-disabled
+                                tabIndex={-1}
+                                className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
+                              >
+                                <Spinner
+                                  className="size-3 motion-reduce:animate-none"
+                                  aria-hidden="true"
+                                />
+                                <span>{t("loading")}</span>
+                              </div>
+                            )}
+                            {root?.status === "error" && (
+                              <div
+                                role="treeitem"
+                                aria-level={1}
+                                aria-disabled
+                                tabIndex={-1}
+                                className="px-3 py-2 text-[11px] text-destructive"
+                              >
+                                {root.message}
+                              </div>
+                            )}
+                            {root?.status === "loaded"
+                              ? rows.map(renderRow)
+                              : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ),
+                  },
+                  {
+                    id: "timeline",
+                    title: t("gitHistory:timeline.title"),
+                    defaultSize: 220,
+                    minSize: 100,
+                    preservePixelSize: true,
+                    description:
+                      selectedPath && isDirAt(selectedPath) === false ? (
+                        <Hint content={selectedPath}>
+                          <span>{basename(selectedPath)}</span>
+                        </Hint>
+                      ) : undefined,
+                    actions: (
+                      <SidebarSectionAction
+                        label={t("gitHistory:timeline.refresh")}
+                        disabled={
+                          !repository.repo ||
+                          !selectedPath ||
+                          isDirAt(selectedPath) !== false
+                        }
+                        onClick={() =>
+                          setTimelineRefreshToken((value) => value + 1)
+                        }
                       >
                         <HugeiconsIcon
-                          icon={FolderOpenIcon}
-                          className="size-3.75"
-                          strokeWidth={2}
+                          icon={Refresh01Icon}
+                          size={13}
+                          strokeWidth={1.9}
                         />
-                      </Button>
-                    </Hint>
-                  ) : null}
-
-                  <Hint content={t("searchFiles")}>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setIsSearchOpen((v) => !v)}
-                      aria-label={t("searchFiles")}
-                    >
-                      <HugeiconsIcon
-                        icon={Search01Icon}
-                        className="size-3.75"
-                        strokeWidth={2}
+                      </SidebarSectionAction>
+                    ),
+                    render: ({ expanded, present }) => (
+                      <FileTimeline
+                        repoRoot={repository.repo?.repoRoot ?? null}
+                        headSha={repository.status?.headSha ?? null}
+                        path={
+                          selectedPath && isDirAt(selectedPath) === false
+                            ? selectedPath
+                            : null
+                        }
+                        enabled={active !== false && expanded}
+                        present={active !== false && present}
+                        refreshToken={timelineRefreshToken}
+                        onOpenCommitFile={onOpenCommitFile}
                       />
-                    </Button>
-                  </Hint>
-
-                  <Hint content={t("newFile")}>
-                    <Button
-                      aria-label={t("newFile")}
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() =>
-                        tree.beginCreate(toolbarCreateParent, "file")
-                      }
-                    >
-                      <HugeiconsIcon
-                        icon={FileAddIcon}
-                        className="size-3.75"
-                        strokeWidth={2}
-                      />
-                    </Button>
-                  </Hint>
-                  <Hint content={t("newFolder")}>
-                    <Button
-                      aria-label={t("newFolder")}
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() =>
-                        tree.beginCreate(toolbarCreateParent, "dir")
-                      }
-                    >
-                      <HugeiconsIcon
-                        icon={FolderAddIcon}
-                        className="size-3.75"
-                        strokeWidth={2}
-                      />
-                    </Button>
-                  </Hint>
-                  <Hint content={t("menu.refresh")}>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => tree.refresh(rootPath)}
-                      aria-label={t("menu.refresh")}
-                    >
-                      <HugeiconsIcon
-                        icon={Refresh01Icon}
-                        className="size-3.75"
-                        strokeWidth={2}
-                      />
-                    </Button>
-                  </Hint>
-                  <Hint content={t("workspaceSearch:collapseAll")}>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={tree.collapseAll}
-                      aria-label={t("workspaceSearch:collapseAll")}
-                    >
-                      <HugeiconsIcon
-                        icon={ListChevronsDownUpIcon}
-                        className="size-3.75"
-                        strokeWidth={2}
-                      />
-                    </Button>
-                  </Hint>
-                </div>
-              </div>
-
-              <ExplorerSearch
-                ref={searchRef}
-                rootPath={rootPath}
-                onOpenFile={onOpenFile}
-                open={isSearchOpen}
-                onRequestClose={() => setIsSearchOpen(false)}
-                onActiveChange={setIsSearchActive}
-                onRevealInTerminal={onRevealInTerminal}
-                onAttachToAgent={onAttachToAgent}
+                    ),
+                  },
+                ]}
               />
-
-              {!isSearchActive ? (
-                <div
-                  ref={(node) => {
-                    scrollRef.current = node;
-                    treeRef.current = node;
-                  }}
-                  data-explorer-drop=""
-                  data-explorer-context="tree"
-                  role="tree"
-                  aria-label={t("files")}
-                  aria-activedescendant={
-                    selectedPath
-                      ? `file-tree-item-${encodeURIComponent(selectedPath)}`
-                      : undefined
-                  }
-                  tabIndex={0}
-                  className={cn(
-                    "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
-                    rootIsDropTarget && FILE_DROP_TARGET_CLASS,
-                  )}
-                  onPointerDown={dnd.onPointerDown}
-                  onClickCapture={dnd.onClickCapture}
-                  onKeyDown={handleKeyDown}
-                >
-                  {root?.status === "loading" && (
-                    <div
-                      role="treeitem"
-                      aria-level={1}
-                      aria-disabled
-                      tabIndex={-1}
-                      className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
-                    >
-                      <Spinner
-                        className="size-3 motion-reduce:animate-none"
-                        aria-hidden="true"
-                      />
-                      <span>{t("loading")}</span>
-                    </div>
-                  )}
-                  {root?.status === "error" && (
-                    <div
-                      role="treeitem"
-                      aria-level={1}
-                      aria-disabled
-                      tabIndex={-1}
-                      className="px-3 py-2 text-[11px] text-destructive"
-                    >
-                      {root.message}
-                    </div>
-                  )}
-                  {root?.status === "loaded" ? rows.map(renderRow) : null}
-                </div>
-              ) : null}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent

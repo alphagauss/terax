@@ -18,10 +18,9 @@ import { useTranslation } from "react-i18next";
 
 type Controller = ReturnType<typeof useCommitGraph>;
 
-/** 提交行统一使用悬停与展开规则；F2 可将键盘焦点移入详情。 */
-export function commitRowInteraction(graph: Controller, sha: string) {
+/** 提交历史共用悬停与键盘详情入口；F2 可将焦点移入详情。 */
+export function commitHoverInteraction(graph: Controller, sha: string) {
   return {
-    "aria-expanded": graph.expanded.has(sha),
     onPointerEnter: (event: React.PointerEvent<HTMLElement>) => {
       if (event.pointerType !== "touch") graph.enter(sha, event.currentTarget);
     },
@@ -35,6 +34,18 @@ export function commitRowInteraction(graph: Controller, sha: string) {
         event.preventDefault();
         graph.enter(sha, event.currentTarget, true);
       }
+    },
+  };
+}
+
+/** 图谱提交行在共用详情入口之外保留文件展开规则。 */
+export function commitRowInteraction(graph: Controller, sha: string) {
+  const hover = commitHoverInteraction(graph, sha);
+  return {
+    ...hover,
+    "aria-expanded": graph.expanded.has(sha),
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+      hover.onKeyDown(event);
       if (
         (event.key === "ArrowRight" && !graph.expanded.has(sha)) ||
         (event.key === "ArrowLeft" && graph.expanded.has(sha))

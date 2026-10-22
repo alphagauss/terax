@@ -1380,3 +1380,126 @@ fn panel_line_stats_marks_merge_conflicts_incomplete() {
     assert!(stats.index.unwrap().files["conflict.txt"].incomplete);
     assert!(stats.worktree.unwrap().files["conflict.txt"].incomplete);
 }
+
+#[test]
+fn file_history_pages_follow_renames_and_open_historical_diffs_from_a_fixed_head() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("old name.txt", "first\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "create"]);
+    fx.write_file("old name.txt", "second\n");
+    fx.run_git(&["commit", "-q", "-am", "old edit"]);
+    fx.run_git(&["mv", "old name.txt", "new [1].txt"]);
+    fx.run_git(&["commit", "-q", "-m", "rename"]);
+    fx.write_file("new 1.txt", "unrelated\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "unrelated"]);
+    fx.write_file("new [1].txt", "third\n");
+    fx.run_git(&["commit", "-q", "-am", "new edit"]);
+    let head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.write_file("new [1].txt", "future\n");
+    fx.run_git(&["commit", "-q", "-am", "future"]);
+    fx.run_git(&["config", "diff.renames", "false"]);
+    let path = to_canon(fx.repo_path.join("new [1].txt"));
+    let mut history = Vec::new();
+    for skip in 0..5 {
+        let page = operations::file_history(
+            &fx.registry,
+            &fx.repo_str(),
+            &path,
+            &head,
+            1,
+            skip,
+            &fx.workspace,
+        )
+        .unwrap();
+        assert!(page.len() <= 1);
+        history.extend(page);
+    }
+    assert_eq!(
+        history
+            .iter()
+            .map(|entry| entry.commit.subject.as_str())
+            .collect::<Vec<_>>(),
+        ["new edit", "rename", "old edit", "create"]
+    );
+    assert_eq!(history[1].original_path.as_deref(), Some("old name.txt"));
+    assert_eq!(history[2].path, "old name.txt");
+    for (entry, expected) in history
+        .iter()
+        .zip(["third\n", "second\n", "second\n", "first\n"])
+    {
+        let diff = operations::commit_file_diff(
+            &fx.registry,
+            &fx.repo_str(),
+            &entry.commit.sha,
+            &entry.path,
+            entry.original_path.as_deref(),
+            &fx.workspace,
+        )
+        .unwrap();
+        assert_eq!(diff.modified_content, expected);
+    }
+    fx.write_file("untracked.txt", "untracked\n");
+    assert!(operations::file_history(
+        &fx.registry,
+        &fx.repo_str(),
+        &to_canon(fx.repo_path.join("untracked.txt")),
+        &head,
+        40,
+        0,
+        &fx.workspace
+    )
+    .unwrap()
+    .is_empty());
+}
+
+#[test]
+fn file_history_rejects_unauthorized_repositories_outside_paths_and_unsafe_revisions() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("file.txt", "text\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    let head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    let path = to_canon(fx.repo_path.join("file.txt"));
+    assert!(matches!(
+        operations::file_history(
+            &WorkspaceRegistry::default(),
+            &fx.repo_str(),
+            &path,
+            &head,
+            40,
+            0,
+            &fx.workspace
+        ),
+        Err(GitError::PathOutsideWorkspace(_))
+    ));
+    let outside = TempDir::new().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+    assert!(operations::file_history(
+        &fx.registry,
+        &fx.repo_str(),
+        &to_canon(outside.path().join("secret.txt")),
+        &head,
+        40,
+        0,
+        &fx.workspace
+    )
+    .is_err());
+    assert!(operations::file_history(
+        &fx.registry,
+        &fx.repo_str(),
+        &path,
+        "--all",
+        40,
+        0,
+        &fx.workspace
+    )
+    .is_err());
+}
