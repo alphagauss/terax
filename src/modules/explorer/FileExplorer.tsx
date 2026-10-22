@@ -1267,6 +1267,7 @@ export const FileExplorer = memo(
                   {
                     id: "timeline",
                     title: t("gitHistory:timeline.title"),
+                    defaultCollapsed: true,
                     defaultSize: 220,
                     minSize: 100,
                     preservePixelSize: true,
