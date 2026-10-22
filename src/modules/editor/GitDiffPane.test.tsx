@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   gitDiffContent: vi.fn(),
+  gitCommitFileDiff: vi.fn(),
   realEditor: false,
   diffViewMode: "split" as "split" | "inline",
 }));
@@ -22,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/modules/ai/lib/native", () => ({
   native: {
     gitDiffContent: mocks.gitDiffContent,
-    gitCommitFileDiff: vi.fn(),
+    gitCommitFileDiff: mocks.gitCommitFileDiff,
   },
 }));
 vi.mock("@/modules/settings/preferences", () => ({
@@ -47,6 +48,7 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("./lib/languageResolver", () => ({
   resolveLanguage: () => Promise.resolve(null),
+  resolveLanguageSync: () => null,
 }));
 vi.mock("./lib/extensions", () => ({
   buildSharedExtensions: () => [],
@@ -92,7 +94,8 @@ vi.mock("./SplitDiffView", () => ({
   ),
 }));
 
-import { WorkingGitDiffPane } from "./GitDiffPane";
+import { CommitGitDiffPane, WorkingGitDiffPane } from "./GitDiffPane";
+import { ReadonlyDiff } from "./ReadonlyDiff";
 
 const source = {
   repoRoot: "C:/work",
@@ -301,7 +304,7 @@ describe("WorkingGitDiffPane", () => {
   });
 
   it.each(["split", "inline"] as const)(
-    "shows original line numbers and deletion markers for a deleted file in %s mode",
+    "shows original line numbers and body highlighting without change gutters in %s mode",
     async (mode) => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       mocks.realEditor = true;
@@ -336,9 +339,7 @@ describe("WorkingGitDiffPane", () => {
           .map((element) => element.textContent),
       ).toEqual(["1", "2", "3", "4"]);
       expect(container.querySelectorAll(".cm-changedLine")).toHaveLength(4);
-      expect(container.querySelectorAll(".cm-changedLineGutter")).toHaveLength(
-        4,
-      );
+      expect(container.querySelector(".cm-changeGutter")).toBeNull();
       expect(container.querySelectorAll(".cm-changedText")).toHaveLength(2);
       expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
 
@@ -359,9 +360,7 @@ describe("WorkingGitDiffPane", () => {
         expect(view.state.doc.toString()).toBe("updated\ncontent"),
       );
       expect(container.querySelector(".cm-editor")).toBe(editor);
-      expect(container.querySelectorAll(".cm-changedLineGutter")).toHaveLength(
-        2,
-      );
+      expect(container.querySelector(".cm-changeGutter")).toBeNull();
       expect(
         container.querySelector(".cm-changeOverview-deleted"),
       ).not.toBeNull();
@@ -386,3 +385,58 @@ describe("WorkingGitDiffPane", () => {
     },
   );
 });
+
+it.each(["commit", "readonly"] as const)(
+  "%s 统一 Diff 的删除内容显示原始行号",
+  async (kind) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    mocks.realEditor = true;
+    mocks.diffViewMode = "inline";
+    const originalContent = "old first\nold second\nold third";
+    const modifiedContent = "replacement";
+    const result = {
+      ...diffResult("history"),
+      originalContent,
+      modifiedContent,
+    };
+    mocks.gitDiffContent.mockResolvedValue(result);
+    mocks.gitCommitFileDiff.mockResolvedValue(result);
+    const container = document.body.appendChild(document.createElement("div"));
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        kind === "commit" ? (
+          <CommitGitDiffPane
+            source={{
+              repoRoot: source.repoRoot,
+              sha: "commit",
+              path: source.path,
+              originalPath: null,
+            }}
+          />
+        ) : (
+          <ReadonlyDiff
+            path={source.path}
+            before={originalContent}
+            after={modifiedContent}
+          />
+        ),
+      );
+    });
+    await vi.waitFor(() =>
+      expect(container.querySelectorAll(".cm-deletedLineNumber")).toHaveLength(
+        3,
+      ),
+    );
+    expect(
+      [...container.querySelectorAll(".cm-deletedLineNumber")].map(
+        (line) => line.textContent,
+      ),
+    ).toEqual(["1", "2", "3"]);
+    expect(container.querySelector(".cm-changeGutter")).toBeNull();
+    const editor = container.querySelector<HTMLElement>(".cm-editor");
+    expect(editor && EditorView.findFromDOM(editor)?.state.doc.toString()).toBe(
+      modifiedContent,
+    );
+  },
+);

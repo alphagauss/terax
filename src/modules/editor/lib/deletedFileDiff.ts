@@ -4,19 +4,9 @@
  */
 
 import type { Extension, Range } from "@codemirror/state";
-import {
-  Decoration,
-  EditorView,
-  GutterMarker,
-  gutter,
-  ViewPlugin,
-} from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
 import { SPLIT_DIFF_THEME } from "./diffTheme";
 import { renderGitChangeOverview } from "./gitGutter";
-
-const deletedLineMarker = new (class extends GutterMarker {
-  elementClass = "cm-changedLineGutter";
-})();
 
 export const deletedFileDiff: Extension = [
   EditorView.editorAttributes.of({ class: "cm-merge-a" }),
@@ -37,10 +27,6 @@ export const deletedFileDiff: Extension = [
       }
     }
     return Decoration.set(decorations, true);
-  }),
-  gutter({
-    class: "cm-changeGutter",
-    lineMarker: () => deletedLineMarker,
   }),
   ViewPlugin.define((view) => {
     const rail = document.createElement("div");

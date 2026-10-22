@@ -25,6 +25,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { deletedFileDiff } from "./lib/deletedFileDiff";
+import { unifiedDiffLineNumbers } from "./lib/unifiedDiffLineNumbers";
 import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
@@ -246,10 +247,11 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
                       original: originalContent,
                       mergeControls: false,
                       highlightChanges: true,
-                      gutter: true,
+                      gutter: false,
                       syntaxHighlightDeletions: true,
                     }),
                     gitChangeOverview,
+                    unifiedDiffLineNumbers,
                     UNIFIED_DIFF_THEME,
                   ]),
             ],

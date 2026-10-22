@@ -77,6 +77,7 @@ it("横向同步不把延迟回声写回新的输入，尺寸未变时不覆盖�
       />,
     ),
   );
+  expect(container.querySelector(".cm-changeGutter")).toBeNull();
   const editor = container.querySelector<HTMLElement>(".cm-scroller");
   const scrollbar = container.querySelector<HTMLElement>(
     ".split-diff-horizontal-scrollbar",

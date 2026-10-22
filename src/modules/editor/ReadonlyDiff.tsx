@@ -1,5 +1,6 @@
 /** 审批、轮末预览与整轮页面共用的只读 Diff，内容只来自不可变快照。 */
 
+import { unifiedDiffLineNumbers } from "@/modules/editor/lib/unifiedDiffLineNumbers";
 import { UNIFIED_DIFF_THEME } from "@/modules/editor/lib/diffTheme";
 import {
   buildSharedExtensions,
@@ -74,10 +75,11 @@ export const ReadonlyDiff = forwardRef<
         original: before,
         mergeControls: false,
         highlightChanges: true,
-        gutter: true,
+        gutter: false,
         syntaxHighlightDeletions: true,
         collapseUnchanged: { margin: 3, minSize: 6 },
       }),
+      unifiedDiffLineNumbers,
       UNIFIED_DIFF_THEME,
       ...(preview
         ? [

@@ -7,19 +7,10 @@ const ADDED_TEXT = `color-mix(in srgb, ${ADDED} 20%, transparent) !important`;
 const REMOVED_TEXT = `color-mix(in srgb, ${REMOVED} 22%, transparent) !important`;
 const ADDED_LINE = `color-mix(in srgb, ${ADDED} 5%, transparent) !important`;
 const REMOVED_LINE = `color-mix(in srgb, ${REMOVED} 5%, transparent) !important`;
-const ADDED_GUTTER = `color-mix(in srgb, ${ADDED} 55%, transparent) !important`;
-const REMOVED_GUTTER = `color-mix(in srgb, ${REMOVED} 50%, transparent) !important`;
 
 const CHANGED_TEXT_SHAPE = {
   borderRadius: "3px",
   padding: "0 1px",
-};
-
-const SHARED_RULES = {
-  ".cm-changeGutter": {
-    width: "2px !important",
-    paddingLeft: "0 !important",
-  },
 };
 
 const UNIFIED_CHANGE_RULES = {
@@ -39,18 +30,11 @@ const UNIFIED_CHANGE_RULES = {
     paddingTop: "1px",
     paddingBottom: "1px",
   },
-  // 纯新增也会生成空删除占位块，清除内边距以免撑出红色 gutter 标记。
+  // 纯新增也会生成空删除占位块，清除内边距以免产生额外空白。
   ".cm-deletedChunk:empty": {
     paddingTop: "0",
     paddingBottom: "0",
   },
-  "&.cm-merge-b .cm-changedLineGutter, .cm-changedLineGutter": {
-    background: ADDED_GUTTER,
-  },
-  ".cm-deletedLineGutter, &.cm-merge-a .cm-changedLineGutter": {
-    background: REMOVED_GUTTER,
-  },
-  ...SHARED_RULES,
 };
 
 const SPLIT_CHANGE_RULES = {
@@ -61,9 +45,6 @@ const SPLIT_CHANGE_RULES = {
   "&.cm-merge-a .cm-changedLine": {
     backgroundColor: REMOVED_LINE,
   },
-  "&.cm-merge-a .cm-changedLineGutter": {
-    background: REMOVED_GUTTER,
-  },
   "&.cm-merge-b .cm-changedText": {
     background: ADDED_TEXT,
     ...CHANGED_TEXT_SHAPE,
@@ -71,10 +52,6 @@ const SPLIT_CHANGE_RULES = {
   "&.cm-merge-b .cm-changedLine": {
     backgroundColor: ADDED_LINE,
   },
-  "&.cm-merge-b .cm-changedLineGutter": {
-    background: ADDED_GUTTER,
-  },
-  ...SHARED_RULES,
 };
 
 export const UNIFIED_DIFF_THEME = EditorView.theme(UNIFIED_CHANGE_RULES);

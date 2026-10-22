@@ -202,7 +202,7 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
           extensions: sideExtensions,
         },
         parent,
-        gutter: true,
+        gutter: false,
         highlightChanges: true,
       });
 
