@@ -75,6 +75,25 @@ it("从真实用户正文生成标题，不读取结构化片段", () => {
   ).toBe("Review this");
 });
 
+it.each([
+  ["  请看\n  这里的具体问题  ", "请看 这里的具体问题"],
+  ["\t\r\nReview\r\n\r\n\tthis issue\rplease\n", "Review this issue please"],
+  [`  ${"a".repeat(20)}\n${"b".repeat(19)}  `, `${"a".repeat(20)} ${"b".repeat(19)}`],
+  [`\n${"a".repeat(20)}\n${"b".repeat(20)}`, `${"a".repeat(20)} ${"b".repeat(19)}…`],
+])("清理标题空白后沿用 40 字符截断规则：%j", (text, title) => {
+  const messages = [
+    {
+      id: "user",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text }],
+    },
+  ];
+  const original = structuredClone(messages);
+
+  expect(deriveTitle(messages)).toBe(title);
+  expect(messages).toEqual(original);
+});
+
 const meta = (
   id: string,
   updatedAt: number,

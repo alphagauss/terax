@@ -163,16 +163,15 @@ export function newSessionId(): string {
   return crypto.randomUUID();
 }
 
-/** 从第一条有效用户文本推导简短会话标题。 */
+/** 从第一条有效用户文本推导简短会话标题，合并空白后截断。 */
 export function deriveTitle(messages: UIMessage[]): string {
   for (const m of messages) {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
-      const text = (p as { text: string }).text.trim();
+      const text = (p as { text: string }).text.replace(/\s+/g, " ").trim();
       if (!text) continue;
-      const first = text.split("\n")[0].trim();
-      return first.length > 40 ? `${first.slice(0, 40)}…` : first;
+      return text.length > 40 ? `${text.slice(0, 40)}…` : text;
     }
   }
   return "New chat";
