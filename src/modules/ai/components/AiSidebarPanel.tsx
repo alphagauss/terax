@@ -4,11 +4,7 @@
  */
 import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   Popover,
   PopoverContent,
@@ -64,15 +60,18 @@ import {
   useChatDisplayActive,
   useChatDisplayStore,
 } from "@/modules/ai/hooks/chatDisplay";
+import AiChat01Icon from "@hugeicons/core-free-icons/AiChat01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import CleanIcon from "@hugeicons/core-free-icons/CleanIcon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
-import FilterIcon from "@hugeicons/core-free-icons/FilterIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import MessageSearch01Icon from "@hugeicons/core-free-icons/MessageSearch01Icon";
 import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import ServerStack03Icon from "@hugeicons/core-free-icons/ServerStack03Icon";
 import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const SESSION_SEARCH_DEBOUNCE_MS = 220;
@@ -292,11 +291,15 @@ function Header({
 
 function SessionPicker() {
   const { t } = useTranslation("ai");
+  const filterPanelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<FindPatternFieldHandle>(null);
   const searchRequestRef = useRef(0);
   const [open, setOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [filterKind, setFilterKind] = useState<
+    "agent" | "directory" | "environment"
+  >("agent");
   const [query, setQuery] = useState("");
   const [includeContent, setIncludeContent] = useState(false);
   const [contentMatches, setContentMatches] = useState<Record<string, string>>(
@@ -313,6 +316,16 @@ function SessionPicker() {
   const deleteSession = useChatStore((s) => s.deleteSession);
   const agentFilter = useChatStore((state) => state.sessionAgentFilter);
   const setAgentFilter = useChatStore((state) => state.setSessionAgentFilter);
+  const directoryFilter = useChatStore((state) => state.sessionDirectoryFilter);
+  const setDirectoryFilter = useChatStore(
+    (state) => state.setSessionDirectoryFilter,
+  );
+  const environmentFilter = useChatStore(
+    (state) => state.sessionEnvironmentFilter,
+  );
+  const setEnvironmentFilter = useChatStore(
+    (state) => state.setSessionEnvironmentFilter,
+  );
   const agents = useAgentsStore((state) => state.agents);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
@@ -340,13 +353,19 @@ function SessionPicker() {
       setAgentFilter(null);
     }
   }, [agentFilter, agents, setAgentFilter]);
-  const agentSessions = sessions
+  const filteredSessions = sessions
     .filter(
-      (session) => agentFilter === null || session.agentId === agentFilter,
+      (session) =>
+        (agentFilter === null || session.agentId === agentFilter) &&
+        (directoryFilter === null ||
+          (session.environmentKey === directoryFilter.environmentKey &&
+            session.cwd === directoryFilter.cwd)) &&
+        (environmentFilter === null ||
+          session.environmentKey === environmentFilter),
     )
     .sort((a, b) => b.updatedAt - a.updatedAt);
   const normalizedQuery = query.trim().replace(/\s+/g, " ").toLowerCase();
-  const contentSearchScope = agentSessions
+  const contentSearchScope = filteredSessions
     .map((session) => `${session.id}:${session.fingerprint ?? ""}`)
     .join("|");
   // biome-ignore lint/correctness/useExhaustiveDependencies: 轮询会重建列表，仅在搜索范围或会话指纹变化时重跑。
@@ -362,12 +381,7 @@ function SessionPicker() {
     setContentSearchLoading(true);
     setContentSearchError(false);
     const timer = window.setTimeout(() => {
-      const sessionIds = useChatStore
-        .getState()
-        .sessions.filter(
-          (session) => agentFilter === null || session.agentId === agentFilter,
-        )
-        .map((session) => session.id);
+      const sessionIds = filteredSessions.map((session) => session.id);
       void searchSessionContents(normalizedQuery, sessionIds)
         .then((matches) => {
           if (requestId !== searchRequestRef.current) return;
@@ -387,30 +401,144 @@ function SessionPicker() {
         });
     }, SESSION_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [agentFilter, contentSearchScope, includeContent, normalizedQuery, open]);
+  }, [contentSearchScope, includeContent, normalizedQuery, open]);
   const titleMatchIds = new Set(
     normalizedQuery
-      ? agentSessions
+      ? filteredSessions
           .filter((session) =>
             session.title.toLowerCase().includes(normalizedQuery),
           )
           .map((session) => session.id)
-      : agentSessions.map((session) => session.id),
+      : filteredSessions.map((session) => session.id),
   );
   const sorted = normalizedQuery
-    ? agentSessions.filter(
+    ? filteredSessions.filter(
         (session) =>
           titleMatchIds.has(session.id) ||
           (includeContent && contentMatches[session.id] !== undefined),
       )
-    : agentSessions;
+    : filteredSessions;
   const sessionCountByAgent = new Map<string, number>();
+  const directories = new Map<
+    string,
+    { environmentKey: string; cwd: string; count: number }
+  >();
+  const sessionCountByEnvironment = new Map<string, number>();
+  const environmentsByCwd = new Map<string, Set<string>>();
   for (const session of sessions) {
     sessionCountByAgent.set(
       session.agentId,
       (sessionCountByAgent.get(session.agentId) ?? 0) + 1,
     );
+    // 相同路径在不同环境中属于不同工作目录。
+    const directoryKey = JSON.stringify([session.environmentKey, session.cwd]);
+    const directory = directories.get(directoryKey);
+    directories.set(directoryKey, {
+      environmentKey: session.environmentKey,
+      cwd: session.cwd,
+      count: (directory?.count ?? 0) + 1,
+    });
+    sessionCountByEnvironment.set(
+      session.environmentKey,
+      (sessionCountByEnvironment.get(session.environmentKey) ?? 0) + 1,
+    );
+    const environments =
+      environmentsByCwd.get(session.cwd) ?? new Set<string>();
+    environments.add(session.environmentKey);
+    environmentsByCwd.set(session.cwd, environments);
   }
+  const environmentLabel = (key: string) =>
+    key === "local"
+      ? t("miniWindow.environmentFilter.local")
+      : key.startsWith("wsl:")
+        ? `WSL: ${key.slice(4)}`
+        : key.startsWith("ssh:")
+          ? `SSH: ${key.slice(4)}`
+          : key;
+  const directorySuffix = (directory: {
+    environmentKey: string;
+    cwd: string;
+  }) =>
+    environmentFilter === null &&
+    (environmentsByCwd.get(directory.cwd)?.size ?? 0) > 1
+      ? ` (${environmentLabel(directory.environmentKey)})`
+      : "";
+  const filters = [
+    {
+      id: "agent" as const,
+      icon: AiChat01Icon,
+      label: t("miniWindow.agentFilter.label"),
+      all: t("miniWindow.agentFilter.all"),
+      total: sessions.length,
+      selected:
+        agentFilter === null
+          ? null
+          : selectedAgent
+            ? agentDisplayName(selectedAgent)
+            : agentFilter,
+      clear: () => setAgentFilter(null),
+      options: agents.map((agent) => ({
+        key: agent.id,
+        label: agentDisplayName(agent),
+        count: sessionCountByAgent.get(agent.id) ?? 0,
+        selected: agentFilter === agent.id,
+        onSelect: () => setAgentFilter(agent.id),
+      })),
+    },
+    {
+      id: "directory" as const,
+      icon: Folder01Icon,
+      label: t("miniWindow.directoryFilter.label"),
+      all: t("miniWindow.directoryFilter.all"),
+      total:
+        environmentFilter === null
+          ? sessions.length
+          : (sessionCountByEnvironment.get(environmentFilter) ?? 0),
+      selected:
+        directoryFilter === null
+          ? null
+          : `${directoryFilter.cwd}${directorySuffix(directoryFilter)}`,
+      clear: () => setDirectoryFilter(null),
+      options: Array.from(directories)
+        .filter(
+          ([, directory]) =>
+            environmentFilter === null ||
+            directory.environmentKey === environmentFilter,
+        )
+        .map(([key, directory]) => ({
+          key,
+          label: directory.cwd,
+          suffix: directorySuffix(directory),
+          count: directory.count,
+          selected:
+            directoryFilter?.environmentKey === directory.environmentKey &&
+            directoryFilter.cwd === directory.cwd,
+          onSelect: () =>
+            setDirectoryFilter({
+              environmentKey: directory.environmentKey,
+              cwd: directory.cwd,
+            }),
+        })),
+    },
+    {
+      id: "environment" as const,
+      icon: ServerStack03Icon,
+      label: t("miniWindow.environmentFilter.label"),
+      all: t("miniWindow.environmentFilter.all"),
+      total: sessions.length,
+      selected:
+        environmentFilter === null ? null : environmentLabel(environmentFilter),
+      clear: () => setEnvironmentFilter(null),
+      options: Array.from(sessionCountByEnvironment, ([key, count]) => ({
+        key,
+        label: environmentLabel(key),
+        count,
+        selected: environmentFilter === key,
+        onSelect: () => setEnvironmentFilter(key),
+      })),
+    },
+  ];
+  const expandedFilter = filters.find((filter) => filter.id === filterKind);
   if (!active && !isDraft) return null;
 
   const popoverWidth = Math.min(
@@ -467,7 +595,7 @@ function SessionPicker() {
           maxHeight: `min(${popoverMaxHeight}px, var(--radix-popover-content-available-height))`,
         }}
       >
-        <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
+        <Collapsible open={filterOpen}>
           <div className="flex items-center gap-1 pb-1">
             <FindPatternField
               ref={searchRef}
@@ -495,56 +623,90 @@ function SessionPicker() {
                 </FindControlButton>
               }
             />
-            <CollapsibleTrigger asChild>
+            {filters.map((filter) => (
+              <Hint
+                key={filter.id}
+                content={
+                  filter.selected === null
+                    ? filter.label
+                    : `${filter.label}: ${filter.selected}`
+                }
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className={cn(
+                    "shrink-0",
+                    filter.selected !== null &&
+                      "bg-interactive-active text-foreground",
+                  )}
+                  aria-label={filter.label}
+                  aria-expanded={filterOpen && filterKind === filter.id}
+                  aria-controls={filterPanelId}
+                  onClick={() => {
+                    setFilterKind(filter.id);
+                    setFilterOpen((current) =>
+                      filterKind === filter.id ? !current : true,
+                    );
+                  }}
+                >
+                  <HugeiconsIcon
+                    icon={filter.icon}
+                    size={18}
+                    className="size-4.5"
+                    strokeWidth={1.75}
+                  />
+                </Button>
+              </Hint>
+            ))}
+            <Hint content={t("miniWindow.clearFilters")}>
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="max-w-32 shrink-0 px-1.5"
-                aria-label={t("miniWindow.agentFilter.label")}
+                size="icon-xs"
+                className="shrink-0"
+                aria-label={t("miniWindow.clearFilters")}
+                disabled={filters.every((filter) => filter.selected === null)}
+                onClick={() => {
+                  for (const filter of filters) filter.clear();
+                }}
               >
-                <HugeiconsIcon icon={FilterIcon} size={12} strokeWidth={1.75} />
-                <span className="min-w-0 truncate">
-                  {agentFilter === null
-                    ? t("miniWindow.agentFilter.all")
-                    : selectedAgent
-                      ? agentDisplayName(selectedAgent)
-                      : t("miniWindow.agentFilter.all")}
-                </span>
                 <HugeiconsIcon
-                  icon={ArrowDown01Icon}
-                  size={10}
-                  strokeWidth={2}
-                  className={cn(
-                    "shrink-0 transition-transform duration-control",
-                    filterOpen && "rotate-180",
-                  )}
+                  icon={CleanIcon}
+                  size={18}
+                  className="size-4.5"
+                  strokeWidth={1.75}
                 />
               </Button>
-            </CollapsibleTrigger>
+            </Hint>
           </div>
-          <CollapsibleContent className="terax-collapsible-content">
-            <div
-              role="radiogroup"
-              aria-label={t("miniWindow.agentFilter.label")}
-              className="pb-1"
-            >
-              <AgentFilterRow
-                label={t("miniWindow.agentFilter.all")}
-                count={sessions.length}
-                selected={agentFilter === null}
-                onSelect={() => setAgentFilter(null)}
-              />
-              {agents.map((agent) => (
-                <AgentFilterRow
-                  key={agent.id}
-                  label={agentDisplayName(agent)}
-                  count={sessionCountByAgent.get(agent.id) ?? 0}
-                  selected={agentFilter === agent.id}
-                  onSelect={() => setAgentFilter(agent.id)}
+          <CollapsibleContent
+            id={filterPanelId}
+            className="terax-collapsible-content"
+          >
+            {expandedFilter && (
+              <div
+                role="radiogroup"
+                aria-label={expandedFilter.label}
+                className="max-h-48 overflow-y-auto pb-1"
+              >
+                <SessionFilterRow
+                  name={`session-${expandedFilter.id}-filter`}
+                  label={expandedFilter.all}
+                  count={expandedFilter.total}
+                  selected={expandedFilter.selected === null}
+                  onSelect={expandedFilter.clear}
                 />
-              ))}
-            </div>
+                {expandedFilter.options.map(({ key, ...option }) => (
+                  <SessionFilterRow
+                    key={key}
+                    name={`session-${expandedFilter.id}-filter`}
+                    {...option}
+                  />
+                ))}
+              </div>
+            )}
           </CollapsibleContent>
         </Collapsible>
         <div className="mx-1 h-px shrink-0 bg-border" />
@@ -580,9 +742,7 @@ function SessionPicker() {
             </div>
           ) : sorted.length === 0 && !contentSearchLoading ? (
             <div className="px-2.5 py-1.5 text-xs text-muted-foreground">
-              {normalizedQuery
-                ? t("miniWindow.sessionSearch.empty")
-                : t("miniWindow.agentFilter.empty")}
+              {t("miniWindow.sessionSearch.empty")}
             </div>
           ) : null}
         </div>
@@ -591,13 +751,17 @@ function SessionPicker() {
   );
 }
 
-function AgentFilterRow({
+function SessionFilterRow({
+  name,
   label,
+  suffix,
   count,
   selected,
   onSelect,
 }: {
+  name: string;
   label: string;
+  suffix?: string;
   count: number;
   selected: boolean;
   onSelect: () => void;
@@ -612,7 +776,7 @@ function AgentFilterRow({
     >
       <input
         type="radio"
-        name="session-agent-filter"
+        name={name}
         checked={selected}
         onChange={onSelect}
         className="peer sr-only"
@@ -623,7 +787,12 @@ function AgentFilterRow({
         strokeWidth={2}
         className="absolute left-2.5 opacity-0 peer-checked:opacity-100"
       />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">
+        {label}
+        {suffix && (
+          <span className="text-[10px] text-muted-foreground">{suffix}</span>
+        )}
+      </span>
       <span className="shrink-0 text-muted-foreground">{count}</span>
     </label>
   );

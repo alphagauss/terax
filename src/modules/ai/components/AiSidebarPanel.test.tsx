@@ -88,7 +88,11 @@ afterEach(() => {
   sessionSearch.mockReset();
   useCommandStore.setState({ sessions: {} });
   useAgentsStore.setState({ agents: [] });
-  useChatStore.setState({ sessionAgentFilter: null });
+  useChatStore.setState({
+    sessionAgentFilter: null,
+    sessionDirectoryFilter: null,
+    sessionEnvironmentFilter: null,
+  });
   document.body.replaceChildren();
 });
 
@@ -206,6 +210,190 @@ describe("AI sidebar chat subscription", () => {
 });
 
 describe("AI session picker", () => {
+  it("组合三个维度筛选，按环境区分同路径，并保持正文搜索范围一致", async () => {
+    await preloadEn();
+    const main = {
+      ...session(sessionId, "Main conversation"),
+      cwd: "/project",
+    };
+    const localReview = {
+      ...session("local-review", "Local review", reviewAgent),
+      cwd: "/project",
+    };
+    const remoteReview = {
+      ...session("remote-review", "Remote review", reviewAgent),
+      environmentKey: "ssh:example.com:22:dev",
+      cwd: "/project",
+    };
+    const remoteOther = {
+      ...remoteReview,
+      id: "remote-other",
+      title: "Other remote review",
+      cwd: "/other",
+    };
+    const wslReview = {
+      ...session("wsl-review", "WSL review", reviewAgent),
+      environmentKey: "wsl:Ubuntu",
+      cwd: "/project",
+    };
+    const sessions = [main, localReview, remoteReview, remoteOther, wslReview];
+    useAgentsStore.setState({ agents: [MAIN_AGENT, reviewAgent] });
+    useChatStore.setState({
+      activeSessionId: main.id,
+      sessions,
+      runLockSessionIds: {},
+    });
+    sessionSearch.mockImplementation(async (_query, ids: string[]) =>
+      ids.map((id) => ({ id, preview: "Matching conversation content" })),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
+    const picker = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Switch session"]',
+    );
+    await act(async () => picker?.click());
+    let popover = document.querySelector<HTMLElement>(
+      '[data-slot="popover-content"]',
+    );
+    const clickButton = async (label: string) => {
+      const button = popover?.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`,
+      );
+      expect(button).not.toBeNull();
+      await act(async () => button?.click());
+      return button;
+    };
+    const choose = async (text: string) => {
+      const option = Array.from(
+        popover?.querySelectorAll<HTMLLabelElement>("label") ?? [],
+      ).find(
+        (label) => label.querySelector("span")?.textContent === text,
+      );
+      expect(option).toBeDefined();
+      await act(async () => option?.click());
+    };
+    const expectSessions = (expected: SessionMeta[]) => {
+      for (const item of sessions) {
+        expect(popover?.textContent?.includes(item.title)).toBe(
+          expected.includes(item),
+        );
+      }
+    };
+
+    const clearFilters = popover?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Clear all filters"]',
+    );
+    expect(clearFilters?.disabled).toBe(true);
+    const directoryButton = await clickButton("Filter by working directory");
+    expect(directoryButton?.textContent).toBe("");
+    expect(popover?.querySelectorAll("label")).toHaveLength(5);
+    await choose("/project (Local)");
+    expect(clearFilters?.disabled).toBe(false);
+    expectSessions([main, localReview]);
+    await clickButton("Filter by working directory");
+    expect(directoryButton?.getAttribute("aria-expanded")).toBe("false");
+    expect(directoryButton?.className).toContain("bg-interactive-active");
+    expectSessions([main, localReview]);
+
+    await clickButton("Filter by agent");
+    await choose("Reviewer");
+    expectSessions([localReview]);
+    await clickButton("Filter by working environment");
+    expect(popover?.querySelectorAll('[role="radiogroup"]')).toHaveLength(1);
+    await choose("SSH: example.com:22:dev");
+    expectSessions([remoteReview, remoteOther]);
+    expect(useChatStore.getState().sessionDirectoryFilter).toBeNull();
+    await clickButton("Filter by working directory");
+    expect(popover?.querySelectorAll("label")).toHaveLength(3);
+    expect(popover?.textContent).not.toContain("/project (Local)");
+    expect(popover?.textContent).not.toContain("/project (WSL: Ubuntu)");
+    expect(popover?.textContent).not.toContain("/project (SSH:");
+    expect(popover?.querySelector("label")?.textContent).toBe(
+      "All directories2",
+    );
+    await choose("All directories");
+    expectSessions([remoteReview, remoteOther]);
+    await choose("/project");
+    expectSessions([remoteReview]);
+
+    await act(async () => picker?.click());
+    await act(async () => picker?.click());
+    popover = document.querySelector<HTMLElement>(
+      '[data-slot="popover-content"]',
+    );
+    expectSessions([remoteReview]);
+    expect(popover?.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(useChatStore.getState().sessionDirectoryFilter).toEqual({
+      environmentKey: remoteReview.environmentKey,
+      cwd: "/project",
+    });
+    await clickButton("Also search conversation content");
+    const input = popover?.querySelector<HTMLInputElement>(
+      'input[placeholder="Search sessions…"]',
+    );
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set?.call(input, "matching");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const waitForSearch = async () => {
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      });
+    };
+    await waitForSearch();
+    expect(sessionSearch).toHaveBeenLastCalledWith("matching", [
+      remoteReview.id,
+    ]);
+    expectSessions([remoteReview]);
+
+    await clickButton("Filter by working environment");
+    await choose("All environments");
+    expectSessions([remoteReview]);
+    await clickButton("Filter by working directory");
+    expect(popover?.querySelectorAll("label")).toHaveLength(5);
+    expect(popover?.textContent).toContain(
+      "/project (SSH: example.com:22:dev)",
+    );
+    await choose("/project (WSL: Ubuntu)");
+    await waitForSearch();
+    expect(sessionSearch).toHaveBeenLastCalledWith("matching", [wslReview.id]);
+    expectSessions([wslReview]);
+    await clickButton("Filter by working environment");
+    await choose("Local");
+    await waitForSearch();
+    expect(sessionSearch).toHaveBeenLastCalledWith("matching", [
+      localReview.id,
+    ]);
+    expectSessions([localReview]);
+    expect(useChatStore.getState().sessionDirectoryFilter).toBeNull();
+    await clickButton("Filter by working directory");
+    expect(popover?.querySelectorAll("label")).toHaveLength(2);
+    expect(popover?.textContent).not.toContain("/project (Local)");
+    await choose("/project");
+    expect(useChatStore.getState().sessionAgentFilter).toBe(reviewAgent.id);
+    expect(useChatStore.getState().sessionEnvironmentFilter).toBe("local");
+    expect(useChatStore.getState().sessionDirectoryFilter).not.toBeNull();
+    const cleared = await clickButton("Clear all filters");
+    await waitForSearch();
+    expectSessions(sessions);
+    expect(cleared?.disabled).toBe(true);
+    expect(input?.value).toBe("matching");
+    expect(
+      popover
+        ?.querySelector('button[aria-label="Also search conversation content"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(useChatStore.getState().sessionAgentFilter).toBeNull();
+    expect(useChatStore.getState().sessionDirectoryFilter).toBeNull();
+    expect(useChatStore.getState().sessionEnvironmentFilter).toBeNull();
+    await act(async () => root.unmount());
+  });
+
   it("filters sessions by a case-insensitive title substring", async () => {
     await preloadEn();
     const mainSession = session(sessionId, "Main conversation", MAIN_AGENT, 1);

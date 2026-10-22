@@ -211,6 +211,12 @@ type StoreState = {
 
   sessionAgentFilter: string | null;
   setSessionAgentFilter: (agentId: string | null) => void;
+  sessionDirectoryFilter: Pick<SessionMeta, "environmentKey" | "cwd"> | null;
+  setSessionDirectoryFilter: (
+    directory: Pick<SessionMeta, "environmentKey" | "cwd"> | null,
+  ) => void;
+  sessionEnvironmentFilter: string | null;
+  setSessionEnvironmentFilter: (environmentKey: string | null) => void;
 
   agentMetaBySession: Record<string, AgentMeta>;
   patchAgentMeta: (sessionId: string, patch: Partial<AgentMeta>) => void;
@@ -737,6 +743,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   sessionAgentFilter: null,
   setSessionAgentFilter: (sessionAgentFilter) => set({ sessionAgentFilter }),
+  sessionDirectoryFilter: null,
+  setSessionDirectoryFilter: (sessionDirectoryFilter) =>
+    set({ sessionDirectoryFilter }),
+  sessionEnvironmentFilter: null,
+  setSessionEnvironmentFilter: (sessionEnvironmentFilter) =>
+    set((state) => ({
+      sessionEnvironmentFilter,
+      sessionDirectoryFilter:
+        sessionEnvironmentFilter !== null &&
+        state.sessionDirectoryFilter?.environmentKey !== sessionEnvironmentFilter
+          ? null
+          : state.sessionDirectoryFilter,
+    })),
 
   agentMetaBySession: {},
   patchAgentMeta: (sessionId, patch) =>

@@ -38,10 +38,19 @@
     "newSession": "新建会话",
     "closeAiSidebar": "关闭 AI 侧栏",
     "deleteSession": "删除会话",
+    "clearFilters": "清除所有筛选",
     "agentFilter": {
       "label": "按智能体筛选",
-      "all": "全部智能体",
-      "empty": "该智能体还没有会话"
+      "all": "全部智能体"
+    },
+    "directoryFilter": {
+      "label": "按工作目录筛选",
+      "all": "全部目录"
+    },
+    "environmentFilter": {
+      "label": "按工作环境筛选",
+      "all": "全部环境",
+      "local": "本机"
     },
     "sessionSearch": {
       "placeholder": "搜索会话…",
