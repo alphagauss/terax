@@ -367,6 +367,7 @@ pub fn run() {
             commands::secrets::secrets_delete,
             commands::secrets::secrets_get_all,
             commands::network::network_validate_proxy,
+            commands::network::network_system_proxy_revision,
             commands::net::http_request,
             commands::net::http_cancel,
             history::history_suggest,

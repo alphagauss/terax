@@ -742,14 +742,20 @@
   },
   "network": {
     "title": "Network and proxy",
-    "description": "Configure one shared proxy, then choose its use for each connection. Built-in requests connect directly by default.",
+    "description": "Choose the default network policy for built-in connections. Connections follow global settings by default; individual choices always take precedence.",
+    "defaultMode": "Default connection mode",
+    "system": "Follow system",
+    "proxy": "Proxy",
+    "inherit": "Follow global settings",
+    "effective": "Current: {{mode}}",
+    "systemHint": "System mode uses only manual system proxies and bypass rules. PAC, automatic discovery and proxy environment variables are not supported yet.",
     "route": "Network route",
     "direct": "Direct",
     "shared": "Use shared proxy",
     "custom": "Custom proxy",
     "missing": "Configure the shared proxy in Settings > General > Network and proxy. Requests will fail until it is configured.",
     "url": "Proxy URL",
-    "urlHint": "Supports HTTP, HTTPS and SOCKS5. Include a username in the URL when authentication is required, for example http://user@127.0.0.1:7890. Enter the password separately.",
+    "urlHint": "Used by global Proxy mode and connections that explicitly select the shared proxy. Supports HTTP, HTTPS and SOCKS5. Include a username in the URL when authentication is required, for example http://user@127.0.0.1:7890. Enter the password separately.",
     "password": "Proxy password",
     "passwordHint": "Leave empty to keep the saved password",
     "save": "Save",
@@ -758,7 +764,7 @@
     "saveError": "Unable to load or save network settings. Check the proxy URL and credentials, then try again.",
     "images": "Markdown network images",
     "scope": "Applies to Terax built-in requests. Terminal commands, external agents, Git processes, web previews and Python data sources manage their own networking. Proxy failures never fall back to a direct connection.",
-    "sshHint": "Controls the connection to this SSH server. Changes apply on the next connection, not to programs running on the server."
+    "sshHint": "Controls the connection to this SSH server. Changes apply on the next connection, not to programs running on the server. System mode prefers SOCKS, then uses a system web proxy with CONNECT."
   },
   "webTools": {
     "title": "Web tools",

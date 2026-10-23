@@ -9,3 +9,9 @@ use crate::modules::network_proxy as service;
 pub fn network_validate_proxy(url: String) -> Result<String, String> {
     service::network_validate_proxy(url)
 }
+
+/// 只返回系统代理快照的修订号。
+#[tauri::command]
+pub async fn network_system_proxy_revision() -> Result<String, String> {
+    service::network_system_proxy_revision().await
+}

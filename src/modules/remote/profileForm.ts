@@ -38,7 +38,7 @@ export type ProfileValidationIssue =
 
 export type LaunchSecretIssue = "secret" | "proxy";
 
-/** 创建默认直连的 SSH 表单。 */
+/** 创建默认跟随全局网络设置的 SSH 表单。 */
 export function emptySshProfileForm(id: string): SshProfileForm {
   return {
     id,
@@ -53,7 +53,7 @@ export function emptySshProfileForm(id: string): SshProfileForm {
     secretDirty: false,
     rememberSecret: true,
     proxyUrl: "",
-    proxyMode: "direct",
+    proxyMode: "inherit",
     proxySecret: "",
     proxySecretDirty: false,
     rememberProxySecret: true,

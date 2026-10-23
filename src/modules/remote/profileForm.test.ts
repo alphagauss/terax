@@ -27,6 +27,7 @@ describe("SSH profile form", () => {
       name: "deploy@prod.example.com",
       port: 22,
       reconnectMaxAttempts: 2,
+      proxyMode: "inherit",
       rootPath: "~",
     });
   });

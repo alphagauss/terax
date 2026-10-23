@@ -35,10 +35,10 @@ type RemoteState = {
 
 /** 归一化当前服务器配置，代理路由必须是明确支持的模式。 */
 function normalizeProfile(
-  { proxyMode = "direct", ...profile }: SshProfile,
+  { proxyMode = "inherit", ...profile }: SshProfile,
   knownGroupIds: ReadonlySet<string>,
 ): SshProfile {
-  if (!["direct", "shared", "custom"].includes(proxyMode))
+  if (!["inherit", "direct", "shared", "custom"].includes(proxyMode))
     throw new Error("invalid SSH proxy mode");
   return {
     ...profile,

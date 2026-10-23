@@ -472,6 +472,10 @@ mod tests {
         latest.proxy_mode = SshProxyMode::Direct;
         request.refresh_proxy(&latest).unwrap();
         assert_eq!(request.profile.proxy_mode, SshProxyMode::Direct);
+        latest.proxy_mode = SshProxyMode::Inherit;
+        request.refresh_proxy(&latest).unwrap();
+        assert_eq!(request.profile.proxy_mode, SshProxyMode::Inherit);
+        assert_eq!(request.profile.host, "original.example");
     }
 
     #[test]

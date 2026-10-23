@@ -44,7 +44,8 @@ vi.mock("@/modules/channels/client", async (original) => ({
   requestChannels: io.request,
   subscribeChannelsView: async () => () => {},
 }));
-vi.mock("@/modules/network/settings", () => ({
+vi.mock("@/modules/network/settings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/network/settings")>()),
   setNetworkRoute: io.route,
   useNetworkSettings: () => io.network,
 }));

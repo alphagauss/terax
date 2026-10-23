@@ -47,6 +47,10 @@ import {
 import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import {
+  globalNetworkMode,
+  useNetworkSettings,
+} from "@/modules/network/settings";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
 import {
   DEFAULT_SSH_GROUP_ID,
@@ -106,6 +110,7 @@ function blurNumberInputOnWheel(event: React.WheelEvent<HTMLInputElement>) {
 /** 管理 SSH 配置、分组、凭据和 Workspace 启动，复用连接设置布局；保存不主动断开现有连接。 */
 export function RemoteSection() {
   const { t } = useTranslation("settings");
+  const network = useNetworkSettings();
   const profiles = useRemoteStore((state) => state.profiles);
   const groups = useRemoteStore((state) => state.groups);
   const load = useRemoteStore((state) => state.load);
@@ -361,7 +366,7 @@ export function RemoteSection() {
             authMethod: host.identityFile ? "private_key" : "agent",
             identityFile: host.identityFile || null,
             proxyUrl: null,
-            proxyMode: "direct",
+            proxyMode: "inherit",
             reconnectEnabled: true,
             reconnectMaxAttempts: 2,
             rootPath: null,
@@ -851,32 +856,58 @@ export function RemoteSection() {
                   label={t("settings:network.route")}
                   className="sm:col-span-2"
                 >
-                  <Select
-                    value={form.proxyMode}
-                    onValueChange={(value) => {
-                      if (
-                        value === "direct" ||
-                        value === "shared" ||
-                        value === "custom"
-                      )
-                        update("proxyMode", value);
-                    }}
-                  >
-                    <SelectTrigger aria-label={t("settings:network.route")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="direct">
-                        {t("settings:network.direct")}
-                      </SelectItem>
-                      <SelectItem value="shared">
-                        {t("settings:network.shared")}
-                      </SelectItem>
-                      <SelectItem value="custom">
-                        {t("settings:network.custom")}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex min-w-0 items-center justify-end gap-3">
+                    {form.proxyMode === "inherit" && (
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {t("network.effective", {
+                          mode: t(
+                            `network.${globalNetworkMode(network.values.mode)}`,
+                          ),
+                        })}
+                      </span>
+                    )}
+                    <Select
+                      value={form.proxyMode}
+                      onValueChange={(value) => {
+                        if (
+                          value === "inherit" ||
+                          value === "direct" ||
+                          value === "shared" ||
+                          value === "custom"
+                        )
+                          update("proxyMode", value);
+                      }}
+                    >
+                      <SelectTrigger
+                        className="w-auto shrink-0"
+                        aria-label={t("settings:network.route")}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="inherit">
+                          {t("settings:network.inherit")}
+                        </SelectItem>
+                        <SelectItem value="direct">
+                          {t("settings:network.direct")}
+                        </SelectItem>
+                        <SelectItem value="shared">
+                          {t("settings:network.shared")}
+                        </SelectItem>
+                        <SelectItem value="custom">
+                          {t("settings:network.custom")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(form.proxyMode === "shared" ||
+                    (form.proxyMode === "inherit" &&
+                      globalNetworkMode(network.values.mode) === "shared")) &&
+                    !network.values.proxyUrl && (
+                      <p className="text-xs text-destructive">
+                        {t("network.missing")}
+                      </p>
+                    )}
                   <p className="text-xs text-muted-foreground">
                     {t("settings:network.sshHint")}
                   </p>

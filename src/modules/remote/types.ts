@@ -20,7 +20,7 @@ export type SshProfile = {
   authMethod: SshAuthMethod;
   identityFile?: string | null;
   proxyUrl?: string | null;
-  proxyMode: "direct" | "shared" | "custom";
+  proxyMode: "inherit" | "direct" | "shared" | "custom";
   reconnectEnabled: boolean;
   reconnectMaxAttempts: number;
   rootPath?: string | null;

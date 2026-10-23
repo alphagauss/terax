@@ -24,6 +24,8 @@ import type {
 } from "@/modules/channels/types";
 import {
   setNetworkRoute,
+  networkRoute,
+  globalNetworkMode,
   useNetworkSettings,
   type ProxyMode,
 } from "@/modules/network/settings";
@@ -58,10 +60,7 @@ export function ChannelConnectionEditor({
   const { t } = useTranslation("channels");
   const { connection, login } = snapshot;
   const network = useNetworkSettings();
-  const route: ProxyMode =
-    network.values[`channel:${connection.id}`] === "shared"
-      ? "shared"
-      : "direct";
+  const route = networkRoute(network.values[`channel:${connection.id}`]);
   const draft = {
     name: connection.name,
     mode: connection.busyMessageMode,
@@ -72,6 +71,10 @@ export function ChannelConnectionEditor({
     draft.name.trim() !== connection.name ||
     draft.mode !== connection.busyMessageMode;
   const dirty = configChanged || draft.route !== route;
+  const effective =
+    draft.route === "inherit"
+      ? globalNetworkMode(network.values.mode)
+      : draft.route;
   const invalidName = !draft.name.trim() || draft.name.trim().length > 80;
   const message = snapshot.issue;
 
@@ -204,30 +207,46 @@ export function ChannelConnectionEditor({
             </Select>
           </FormField>
           <FormField label={t("settings:network.route")}>
-            <Select
-              value={draft.route}
-              disabled={disabled || !network.ready || network.error}
-              onValueChange={(value) => {
-                if (value === "direct" || value === "shared")
-                  updateDraft(connection.id, { route: value });
-              }}
-            >
-              <SelectTrigger
-                className="w-full"
-                aria-label={t("settings:network.route")}
+            <div className="flex min-w-0 items-center justify-end gap-3">
+              {draft.route === "inherit" ? (
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                  {t("settings:network.effective", {
+                    mode: t(`settings:network.${effective}`),
+                  })}
+                </span>
+              ) : null}
+              <Select
+                value={draft.route}
+                disabled={disabled || !network.ready || network.error}
+                onValueChange={(value) => {
+                  if (
+                    value === "inherit" ||
+                    value === "direct" ||
+                    value === "shared"
+                  )
+                    updateDraft(connection.id, { route: value });
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="direct">
-                  {t("settings:network.direct")}
-                </SelectItem>
-                <SelectItem value="shared">
-                  {t("settings:network.shared")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {draft.route === "shared" && !network.values.proxyUrl ? (
+                <SelectTrigger
+                  className="w-auto shrink-0"
+                  aria-label={t("settings:network.route")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">
+                    {t("settings:network.inherit")}
+                  </SelectItem>
+                  <SelectItem value="direct">
+                    {t("settings:network.direct")}
+                  </SelectItem>
+                  <SelectItem value="shared">
+                    {t("settings:network.shared")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {effective === "shared" && !network.values.proxyUrl ? (
               <p className="text-[11px] text-destructive">
                 {t("settings:network.missing")}
               </p>

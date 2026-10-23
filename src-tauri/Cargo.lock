@@ -6134,6 +6134,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "system-configuration"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
+dependencies = [
+ "bitflags 2.13.1",
+ "core-foundation 0.9.4",
+ "system-configuration-sys",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "system-deps"
 version = "6.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6691,6 +6712,7 @@ dependencies = [
  "aes",
  "arboard",
  "bytes",
+ "core-foundation 0.9.4",
  "dirs 6.0.0",
  "filetime",
  "flate2",
@@ -6702,6 +6724,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "image",
+ "ipnet",
  "junction",
  "keyring",
  "libc",
@@ -6726,6 +6749,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shared_child",
+ "system-configuration",
  "tar",
  "tauri",
  "tauri-build",

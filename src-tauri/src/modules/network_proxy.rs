@@ -1,17 +1,30 @@
 //! 内置网络连接的显式代理配置与路由解析。
 //!
-//! 路由按稳定连接身份保存，每次请求读取最新配置；不继承环境代理、不在失败时直连。
+//! 路由按稳定连接身份保存，每次请求读取最新配置；系统模式只读取静态代理，不继承环境代理。
 //! 共享代理是用户信任的网络出口，凭据仅在原生层读取，不进入普通配置或请求 IPC。
 
 use serde::{Deserialize, Serialize};
 
 use crate::modules::{secrets, shared_store};
 
-/// 连接显式选择的出口，缺失设置表示新连接默认直连。
+mod system;
+
+/// 全局默认出口，系统模式不执行 PAC 或自动发现。
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum GlobalProxyMode {
+    #[default]
+    System,
+    Shared,
+    Direct,
+}
+
+/// 连接显式选择的出口，缺失设置表示跟随全局设置。
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ProxyMode {
     #[default]
+    Inherit,
     Direct,
     Shared,
 }
@@ -21,6 +34,7 @@ pub enum ProxyMode {
 #[serde(rename_all = "camelCase")]
 pub enum SshProxyMode {
     #[default]
+    Inherit,
     Direct,
     Shared,
     Custom,
@@ -62,6 +76,42 @@ pub struct ProxyConfig {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+/// 单次请求持有出口快照；系统规则在重定向时仍按实际目标选择代理。
+pub enum ResolvedRoute {
+    Direct,
+    Proxy(ProxyConfig),
+    System(system::SystemProxy),
+}
+
+impl ResolvedRoute {
+    pub fn apply(&self, builder: reqwest::ClientBuilder) -> Result<reqwest::ClientBuilder, String> {
+        match self {
+            Self::Direct => Ok(builder.no_proxy()),
+            Self::Proxy(proxy) => proxy.apply(builder),
+            Self::System(proxy) => proxy.apply(builder),
+        }
+    }
+
+    /// SSH 优先使用系统 SOCKS，再通过系统 HTTPS 或 HTTP 代理建立 CONNECT 隧道。
+    pub fn for_ssh(&self, host: &str, port: u16) -> Option<ProxyConfig> {
+        match self {
+            Self::Direct => None,
+            Self::Proxy(proxy) => Some(proxy.clone()),
+            Self::System(proxy) => proxy.for_destination("ssh", host, port).cloned(),
+        }
+    }
+}
+
+impl ProxyMode {
+    fn effective(self, global: GlobalProxyMode) -> GlobalProxyMode {
+        match self {
+            Self::Inherit => global,
+            Self::Direct => GlobalProxyMode::Direct,
+            Self::Shared => GlobalProxyMode::Shared,
+        }
+    }
 }
 
 /// SOCKS5 统一由代理解析目标域名，HTTP 与 HTTPS 使用 CONNECT 或转发。
@@ -172,16 +222,31 @@ pub fn shared_proxy(state: &secrets::SecretsState) -> Result<ProxyConfig, String
 }
 
 /// 按连接身份读取最新出口配置，供桌面和无界面 HTTP 服务共用。
-pub fn resolve(
+pub async fn resolve(
     state: &secrets::SecretsState,
     target: &NetworkTarget,
-) -> Result<Option<ProxyConfig>, String> {
+) -> Result<ResolvedRoute, String> {
     let Some(key) = target.key()? else {
-        return Ok(None);
+        return Ok(ResolvedRoute::Direct);
     };
-    match shared_store::read_value::<ProxyMode>("settings", &key)?.unwrap_or_default() {
-        ProxyMode::Direct => Ok(None),
-        ProxyMode::Shared => shared_proxy(state).map(Some),
+    let mode = shared_store::read_value::<ProxyMode>("settings", &key)?.unwrap_or_default();
+    resolve_mode(state, mode).await
+}
+
+/// SSH 与 HTTP 共用全局解析，显式覆盖不读取无关的全局设置。
+pub async fn resolve_mode(
+    state: &secrets::SecretsState,
+    mode: ProxyMode,
+) -> Result<ResolvedRoute, String> {
+    let global = if mode == ProxyMode::Inherit {
+        shared_store::read_value::<GlobalProxyMode>("settings", "network.mode")?.unwrap_or_default()
+    } else {
+        GlobalProxyMode::Direct
+    };
+    match mode.effective(global) {
+        GlobalProxyMode::Direct => Ok(ResolvedRoute::Direct),
+        GlobalProxyMode::Shared => shared_proxy(state).map(ResolvedRoute::Proxy),
+        GlobalProxyMode::System => system::read().await.map(ResolvedRoute::System),
     }
 }
 
@@ -190,8 +255,18 @@ pub fn network_validate_proxy(url: String) -> Result<String, String> {
     ProxyConfig::parse(&url, None).map(|proxy| proxy.credential_account())
 }
 
+/// 供设置窗口恢复焦点时刷新目录缓存，不返回系统代理地址或凭据。
+pub async fn network_system_proxy_revision() -> Result<String, String> {
+    system::read().await.map(|proxy| proxy.revision())
+}
+
 /// 通用共享存储写入也必须通过校验，防止绕过设置页把秘密写入普通配置。
 pub(crate) fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> {
+    if key == "mode" {
+        serde_json::from_value::<GlobalProxyMode>(value.clone())
+            .map_err(|_| "invalid global network proxy mode".to_string())?;
+        return Ok(());
+    }
     if key == "proxyUrl" {
         let url = value.as_str().ok_or("proxy URL must be a string")?;
         if !url.is_empty() {
@@ -216,6 +291,24 @@ pub(crate) fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_routes_override_every_global_mode_and_missing_routes_inherit() {
+        for global in [
+            GlobalProxyMode::System,
+            GlobalProxyMode::Shared,
+            GlobalProxyMode::Direct,
+        ] {
+            assert_eq!(ProxyMode::default().effective(global), global);
+            assert_eq!(ProxyMode::Direct.effective(global), GlobalProxyMode::Direct);
+            assert_eq!(ProxyMode::Shared.effective(global), GlobalProxyMode::Shared);
+        }
+        assert_eq!(SshProxyMode::default(), SshProxyMode::Inherit);
+        assert!(validate_setting("mode", &serde_json::json!("system")).is_ok());
+        assert!(validate_setting("provider:one", &serde_json::json!("inherit")).is_ok());
+        assert!(validate_setting("mode", &serde_json::json!("inherit")).is_err());
+        assert!(validate_setting("provider:one", &serde_json::json!("system")).is_err());
+    }
 
     #[test]
     fn credentials_are_scoped_to_the_proxy_endpoint_not_the_current_password() {

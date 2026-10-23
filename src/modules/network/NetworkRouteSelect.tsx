@@ -11,6 +11,8 @@ import {
 } from "@/components/controls/select";
 import {
   setNetworkRoute,
+  networkRoute,
+  effectiveNetworkMode,
   type NetworkKey,
   useNetworkSettings,
 } from "@/modules/network/settings";
@@ -32,37 +34,51 @@ export function NetworkRouteSelect({
   const routeLabel = label ?? t("network.route");
   const { values, ready, error: loadError } = useNetworkSettings();
   const [saving, setSaving] = useState(false);
-  const mode = values[target] === "shared" ? "shared" : "direct";
+  const mode = networkRoute(values[target]);
+  const effective = effectiveNetworkMode(values, target);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-muted-foreground">{routeLabel}</span>
-        <Select
-          value={mode}
-          disabled={disabled || !ready || loadError || saving}
-          onValueChange={(value) => {
-            if (value !== "direct" && value !== "shared") return;
-            setSaving(true);
-            void setNetworkRoute(target, value)
-              .catch((error) =>
-                reportError(t("network.saveError"), {
-                  error,
-                  source: routeLabel,
-                }),
+        <div className="flex min-w-0 items-center gap-3">
+          {mode === "inherit" && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {t("network.effective", { mode: t(`network.${effective}`) })}
+            </span>
+          )}
+          <Select
+            value={mode}
+            disabled={disabled || !ready || loadError || saving}
+            onValueChange={(value) => {
+              if (
+                value !== "inherit" &&
+                value !== "direct" &&
+                value !== "shared"
               )
-              .finally(() => setSaving(false));
-          }}
-        >
-          <SelectTrigger className="w-auto" aria-label={routeLabel}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="direct">{t("network.direct")}</SelectItem>
-            <SelectItem value="shared">{t("network.shared")}</SelectItem>
-          </SelectContent>
-        </Select>
+                return;
+              setSaving(true);
+              void setNetworkRoute(target, value)
+                .catch((error) =>
+                  reportError(t("network.saveError"), {
+                    error,
+                    source: routeLabel,
+                  }),
+                )
+                .finally(() => setSaving(false));
+            }}
+          >
+            <SelectTrigger className="w-auto shrink-0" aria-label={routeLabel}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">{t("network.inherit")}</SelectItem>
+              <SelectItem value="direct">{t("network.direct")}</SelectItem>
+              <SelectItem value="shared">{t("network.shared")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      {mode === "shared" && !values.proxyUrl && (
+      {effective === "shared" && !values.proxyUrl && (
         <p className="text-xs text-destructive">{t("network.missing")}</p>
       )}
       {loadError && (

@@ -237,6 +237,12 @@ impl RemoteWorkspace {
         let secret = Zeroizing::new(request.secret.unwrap_or_default());
         let proxy_secret_override = request.proxy_secret_override.map(Zeroizing::new);
         let proxy = match profile.proxy_mode {
+            SshProxyMode::Inherit => network_proxy::resolve_mode(
+                &app.state::<secrets::SecretsState>(),
+                network_proxy::ProxyMode::Inherit,
+            )
+            .await?
+            .for_ssh(&profile.host, profile.port),
             SshProxyMode::Direct => None,
             SshProxyMode::Shared => Some(network_proxy::shared_proxy(
                 &app.state::<secrets::SecretsState>(),

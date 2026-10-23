@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::modules::network_proxy::{self, NetworkTarget, ProxyConfig};
+use crate::modules::network_proxy::{self, NetworkTarget, ResolvedRoute};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::header::{ACCEPT, LOCATION, USER_AGENT};
@@ -233,19 +233,13 @@ fn build_request(
     Ok(req)
 }
 
-/// 构造固定已验证 DNS 结果的客户端，并遵守调用方的重定向和代理策略。
+/// 构造固定已验证 DNS 结果的客户端，重定向由传输层逐跳处理。
 fn build_safe_client(
-    allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
-    proxy: Option<&ProxyConfig>,
-    redirect_mode: HttpRedirectMode,
+    proxy: &ResolvedRoute,
 ) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .no_proxy()
-        .connect_timeout(Duration::from_secs(10));
-    if let Some(proxy) = proxy {
-        builder = proxy.apply(builder)?;
-    }
+    let mut builder =
+        proxy.apply(reqwest::Client::builder().connect_timeout(Duration::from_secs(10)))?;
     // 直连固定已验证的 DNS；显式代理是受信任出口，目标解析由代理端负责。
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
@@ -259,47 +253,111 @@ fn build_safe_client(
         }
     }
     builder
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            match redirect_mode {
-                HttpRedirectMode::Error => return attempt.error("HTTP redirect is not allowed"),
-                HttpRedirectMode::Manual => return attempt.stop(),
-                HttpRedirectMode::Follow => {}
-            }
-            if attempt.previous().len() > 10 {
-                return attempt.error("too many redirects");
-            }
-            let next = attempt.url();
-            match next.scheme() {
-                "http" | "https" => {}
-                _ => return attempt.stop(),
-            }
-            if next.username() != "" || next.password().is_some() {
-                return attempt.stop();
-            }
-            let Some(host) = next.host_str() else {
-                return attempt.stop();
-            };
-            if is_blocked_host_name(host) {
-                return attempt.stop();
-            }
-            if let Some(ip) = parse_ip_literal(host) {
-                let k = ip_kind(ip);
-                if k == IpKind::BlockedMetadata {
-                    return attempt.stop();
-                }
-                if !allow_private && matches!(k, IpKind::Loopback | IpKind::Private) {
-                    return attempt.stop();
-                }
-            } else if let Some(previous) = attempt.previous().last() {
-                // 新 host 无法在同步重定向策略中重新执行 DNS 分类，因此一律停止跨 host 跳转。
-                if previous.host_str() != Some(host) {
-                    return attempt.stop();
-                }
-            }
-            attempt.follow()
-        }))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// 保持既有重定向边界：域名只允许同主机，字面 IP 重新分类，不能跳到元数据地址。
+fn redirect_allowed(previous: &reqwest::Url, next: &reqwest::Url, allow_private: bool) -> bool {
+    if !matches!(next.scheme(), "http" | "https")
+        || !next.username().is_empty()
+        || next.password().is_some()
+    {
+        return false;
+    }
+    let Some(host) = next.host_str() else {
+        return false;
+    };
+    if is_blocked_host_name(host) {
+        return false;
+    }
+    if let Some(ip) = parse_ip_literal(host) {
+        let kind = ip_kind(ip);
+        kind != IpKind::BlockedMetadata
+            && (allow_private || !matches!(kind, IpKind::Loopback | IpKind::Private))
+    } else {
+        previous.host_str() == Some(host)
+    }
+}
+
+/// 每一跳重新注入所选代理的认证，避免自动重定向丢失认证或携带上一出口的请求头。
+async fn send_request(
+    client: &reqwest::Client,
+    mut request: reqwest::Request,
+    allow_private: bool,
+    redirect: HttpRedirectMode,
+) -> Result<reqwest::Response, String> {
+    let mut redirects = 0;
+    loop {
+        let previous = request.url().clone();
+        // 内置请求体均为可重放的字节，不克隆网络流，也不保留客户端注入的代理认证。
+        let mut next_request = request
+            .try_clone()
+            .ok_or("HTTP request body cannot be replayed")?;
+        let response = client
+            .execute(request)
+            .await
+            .map_err(|error| error.to_string())?;
+        let status = response.status().as_u16();
+        if !matches!(status, 301 | 302 | 303 | 307 | 308) {
+            return Ok(response);
+        }
+        let Some(next) = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| previous.join(value).ok())
+        else {
+            return Ok(response);
+        };
+        match redirect {
+            HttpRedirectMode::Error => return Err("HTTP redirect is not allowed".into()),
+            HttpRedirectMode::Manual => return Ok(response),
+            HttpRedirectMode::Follow => {}
+        }
+        if redirects == 10 {
+            return Err("too many redirects".into());
+        }
+        if !redirect_allowed(&previous, &next, allow_private) {
+            return Ok(response);
+        }
+        if previous.host_str() != next.host_str()
+            || previous.port_or_known_default() != next.port_or_known_default()
+        {
+            for header in ["authorization", "cookie", "cookie2", "www-authenticate"] {
+                next_request.headers_mut().remove(header);
+            }
+        }
+        if matches!(status, 301 | 302) && next_request.method() == Method::POST
+            || status == 303 && next_request.method() != Method::HEAD
+        {
+            *next_request.method_mut() = Method::GET;
+            *next_request.body_mut() = None;
+            for header in [
+                "transfer-encoding",
+                "content-encoding",
+                "content-type",
+                "content-length",
+            ] {
+                next_request.headers_mut().remove(header);
+            }
+        }
+        if !(previous.scheme() == "https" && next.scheme() == "http") {
+            let mut referer = previous;
+            referer.set_fragment(None);
+            if let Ok(value) = HeaderValue::from_str(referer.as_str()) {
+                next_request
+                    .headers_mut()
+                    .insert(reqwest::header::REFERER, value);
+            }
+        } else {
+            next_request.headers_mut().remove(reqwest::header::REFERER);
+        }
+        *next_request.url_mut() = next;
+        request = next_request;
+        redirects += 1;
+    }
 }
 
 /// 为单次图片请求创建固定 DNS 结果且禁用自动重定向的客户端。
@@ -307,15 +365,10 @@ fn build_pinned_client(
     host: &str,
     safe_ips: &[IpAddr],
     timeout: Duration,
-    proxy: Option<&ProxyConfig>,
+    proxy: &ResolvedRoute,
 ) -> Result<reqwest::Client, String> {
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
-    let builder = reqwest::Client::builder().no_proxy();
-    let builder = if let Some(proxy) = proxy {
-        proxy.apply(builder)?
-    } else {
-        builder
-    };
+    let builder = proxy.apply(reqwest::Client::builder())?;
     builder
         .connect_timeout(Duration::from_secs(10).min(timeout))
         .timeout(timeout)
@@ -340,7 +393,7 @@ pub async fn download_public_image(
     max_bytes: usize,
     user_agent: &str,
 ) -> Result<DownloadedImage, String> {
-    let proxy = network_proxy::resolve(secrets, &NetworkTarget::Markdown)?;
+    let proxy = network_proxy::resolve(secrets, &NetworkTarget::Markdown).await?;
     let started = Instant::now();
     let mut current = validate_url(url)?;
 
@@ -354,7 +407,7 @@ pub async fn download_public_image(
             .await
             .map_err(|_| "image request timed out".to_string())??;
         let remaining = remaining_image_request_time(started)?;
-        let client = build_pinned_client(&host, &safe_ips, remaining, proxy.as_ref())?;
+        let client = build_pinned_client(&host, &safe_ips, remaining, &proxy)?;
         let mut request = client.get(current.clone()).header(
             ACCEPT,
             "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,image/*;q=0.9,*/*;q=0.5",
@@ -612,17 +665,18 @@ async fn exchange(
     let host = parsed.host_str().ok_or("missing host")?.to_string();
     let allow_private = allow_private_network.unwrap_or(false);
     let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
-    let proxy = network_proxy::resolve(secrets, &network_target)?;
-    let client = build_safe_client(
-        allow_private,
-        &[(host, safe_ips)],
-        proxy.as_ref(),
-        redirect.unwrap_or_default(),
-    )?;
-    let response = build_request(&client, &method, parsed, headers, body)?
-        .send()
-        .await
+    let proxy = network_proxy::resolve(secrets, &network_target).await?;
+    let client = build_safe_client(&[(host, safe_ips)], &proxy)?;
+    let request = build_request(&client, &method, parsed, headers, body)?
+        .build()
         .map_err(|error| error.to_string())?;
+    let response = send_request(
+        &client,
+        request,
+        allow_private,
+        redirect.unwrap_or_default(),
+    )
+    .await?;
     if response
         .content_length()
         .is_some_and(|length| length > max_response_bytes as u64)
@@ -690,6 +744,86 @@ impl<F: Fn(HttpEvent) -> Result<(), String> + Send + Sync> HttpEventSink for F {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn redirects_reapply_proxy_authentication_for_each_destination() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = network_proxy::ProxyConfig::parse(
+            &format!("http://alice@{}", listener.local_addr().unwrap()),
+            Some("secret"),
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            for port in [8000, 8001, 8002] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = Vec::new();
+                loop {
+                    assert!(socket.read_buf(&mut buffer).await.unwrap() > 0);
+                    if buffer.windows(4).any(|bytes| bytes == b"\r\n\r\n")
+                        && (port == 8002 || buffer.ends_with(b"payload"))
+                    {
+                        break;
+                    }
+                }
+                let request = String::from_utf8_lossy(&buffer);
+                let method = if port == 8002 { "GET" } else { "POST" };
+                assert!(request.starts_with(&format!("{method} http://localhost:{port}/")));
+                assert!(request.contains("Basic YWxpY2U6c2VjcmV0"));
+                assert_eq!(request.contains("target-token"), port == 8000);
+                assert_eq!(
+                    request.to_ascii_lowercase().contains("content-type:"),
+                    port != 8002
+                );
+                let response = if port == 8000 {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://localhost:8001/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else if port == 8001 {
+                    "HTTP/1.1 302 Found\r\nLocation: http://localhost:8002/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let client = build_safe_client(&[], &ResolvedRoute::Proxy(proxy)).unwrap();
+        let request = client
+            .post("http://localhost:8000/")
+            .header("Authorization", "target-token")
+            .header("Content-Type", "text/plain")
+            .body("payload")
+            .build()
+            .unwrap();
+        let response = send_request(&client, request, true, HttpRedirectMode::Follow)
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+    }
+
+    #[test]
+    fn redirects_keep_the_original_address_security_boundary() {
+        let previous = reqwest::Url::parse("https://api.example/").unwrap();
+        for (next, allow_private, allowed) in [
+            ("http://api.example:8080/", false, true),
+            ("https://other.example/", true, false),
+            ("http://127.0.0.1/", false, false),
+            ("http://127.0.0.1/", true, true),
+            ("http://169.254.169.254/", true, false),
+            ("https://metadata.google.internal/", true, false),
+            ("https://user:secret@api.example/", true, false),
+            ("file:///etc/passwd", true, false),
+        ] {
+            assert_eq!(
+                redirect_allowed(
+                    &previous,
+                    &reqwest::Url::parse(next).unwrap(),
+                    allow_private
+                ),
+                allowed,
+                "{next}"
+            );
+        }
+    }
+
     /// 环境变量只注入隔离测试子进程，不能污染并发测试或开发进程。
     #[test]
     fn explicit_routes_ignore_environment_and_never_fall_back() {
@@ -736,7 +870,7 @@ mod tests {
                     .unwrap();
                 direct
             });
-            let response = build_safe_client(true, &[], None, HttpRedirectMode::Follow)
+            let response = build_safe_client(&[], &ResolvedRoute::Direct)
                 .unwrap()
                 .get(&url)
                 .send()
@@ -745,11 +879,12 @@ mod tests {
             assert_eq!(response.text().await.unwrap(), "direct");
             let direct = server.await.unwrap();
             let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let proxy = ProxyConfig::parse(
+            let proxy = network_proxy::ProxyConfig::parse(
                 &format!("http://{}", proxy_listener.local_addr().unwrap()),
                 None,
             )
             .unwrap();
+            let proxy = ResolvedRoute::Proxy(proxy);
             let proxy_server = tokio::spawn(async move {
                 let (mut stream, _) = proxy_listener.accept().await.unwrap();
                 let mut bytes = [0; 4096];
@@ -762,7 +897,7 @@ mod tests {
                     .await
                     .unwrap();
             });
-            let response = build_safe_client(true, &[], Some(&proxy), HttpRedirectMode::Follow)
+            let response = build_safe_client(&[], &proxy)
                 .unwrap()
                 .get(&url)
                 .send()
@@ -770,7 +905,7 @@ mod tests {
                 .unwrap();
             assert_eq!(response.text().await.unwrap(), "proxy");
             proxy_server.await.unwrap();
-            let failed = build_safe_client(true, &[], Some(&proxy), HttpRedirectMode::Follow)
+            let failed = build_safe_client(&[], &proxy)
                 .unwrap()
                 .get(&url)
                 .send()
@@ -924,18 +1059,23 @@ mod tests {
             }
         });
         let url = format!("http://{address}/redirect");
-        let rejected = build_safe_client(true, &[], None, HttpRedirectMode::Error)
-            .unwrap()
-            .get(&url)
-            .send()
-            .await;
-        assert!(rejected.unwrap_err().is_redirect());
-        let manual = build_safe_client(true, &[], None, HttpRedirectMode::Manual)
-            .unwrap()
-            .get(&url)
-            .send()
-            .await
-            .unwrap();
+        let client = build_safe_client(&[], &ResolvedRoute::Direct).unwrap();
+        let rejected = send_request(
+            &client,
+            client.get(&url).build().unwrap(),
+            true,
+            HttpRedirectMode::Error,
+        )
+        .await;
+        assert_eq!(rejected.unwrap_err(), "HTTP redirect is not allowed");
+        let manual = send_request(
+            &client,
+            client.get(&url).build().unwrap(),
+            true,
+            HttpRedirectMode::Manual,
+        )
+        .await
+        .unwrap();
         assert_eq!(manual.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
         server.abort();
     }

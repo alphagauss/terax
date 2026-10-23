@@ -1,15 +1,21 @@
 /**
  * 本文件实现常规设置中的共享代理设置组。
- * 地址通过原生校验后保存，密码单独写入秘密存储，配置不会全局启用代理。
+ * 全局策略只影响继承它的连接；共享地址通过原生校验后保存，密码单独写入秘密存储。
  */
 import { reportError } from "@/lib/errors";
 import { Button } from "@/components/controls/button";
 import { Input } from "@/components/controls/input";
 import { FormField } from "@/components/layout/FormField";
+import { SegmentedControl } from "@/components/controls/segmented-control";
 import { SettingGroup } from "@/components/settings/SettingGroup";
 import { setSharedStoreKey } from "@/lib/sharedStore";
 import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
-import { useNetworkSettings } from "@/modules/network/settings";
+import {
+  globalNetworkMode,
+  setGlobalNetworkMode,
+  type GlobalProxyMode,
+  useNetworkSettings,
+} from "@/modules/network/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,6 +25,8 @@ export function NetworkSettings() {
   const { t } = useTranslation("settings");
   const { values, ready, error: loadError } = useNetworkSettings();
   const currentUrl = typeof values.proxyUrl === "string" ? values.proxyUrl : "";
+  const mode = globalNetworkMode(values.mode);
+  const [pendingMode, setPendingMode] = useState<GlobalProxyMode | null>(null);
   const [url, setUrl] = useState(currentUrl);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,6 +68,21 @@ export function NetworkSettings() {
       setBusy(false);
     }
   };
+  const changeMode = async (value: string) => {
+    if (value !== "system" && value !== "shared" && value !== "direct") return;
+    if (busy || value === mode) return;
+    setPendingMode(value);
+    setBusy(true);
+    setMessage(null);
+    try {
+      await setGlobalNetworkMode(value);
+    } catch (error) {
+      reportError(t("network.saveError"), { error });
+    } finally {
+      setPendingMode(null);
+      setBusy(false);
+    }
+  };
   return (
     <SettingGroup title={t("network.title")}>
       <form
@@ -72,6 +95,26 @@ export function NetworkSettings() {
         <p className="text-[11px] leading-4 text-muted-foreground">
           {t("network.description")}
         </p>
+        <FormField label={t("network.defaultMode")}>
+          <SegmentedControl
+            value={pendingMode ?? mode}
+            options={[
+              ["system", t("network.system")],
+              ["shared", t("network.proxy")],
+              ["direct", t("network.direct")],
+            ]}
+            disabled={busy || !ready || loadError}
+            pending={pendingMode !== null}
+            label={t("network.defaultMode")}
+            onValueChange={(value) => void changeMode(value)}
+          />
+          <p className="text-[11px] leading-4 text-muted-foreground">
+            {t("network.systemHint")}
+          </p>
+          {mode === "shared" && !currentUrl && (
+            <p className="text-xs text-destructive">{t("network.missing")}</p>
+          )}
+        </FormField>
         <FormField
           htmlFor="network-proxy-url"
           label={t("network.url")}
