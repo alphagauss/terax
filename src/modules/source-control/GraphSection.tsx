@@ -50,6 +50,8 @@ import {
   useCommitGraph,
 } from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
+import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
+import { SourceControlRefreshProgress } from "@/modules/source-control/SourceControlRefreshProgress";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import CloudIcon from "@hugeicons/core-free-icons/CloudIcon";
@@ -62,6 +64,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -147,7 +150,7 @@ export const GraphSection = memo(function GraphSection({
     files: filesBySha,
     fetchFiles,
     close: closePopover,
-    reset,
+    retainCommits,
   } = graph;
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
@@ -157,46 +160,73 @@ export const GraphSection = memo(function GraphSection({
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTop = useRef(0);
+  const latestItems = useRef<ReturnType<typeof flattenCommitRows>>([]);
+  const restoreScroll = useRef<{
+    key?: string;
+    offset: number;
+    top: number;
+  } | null>(null);
   const attachScroll = useCallback((element: HTMLDivElement | null) => {
     scrollRef.current = element;
     if (element) element.scrollTop = scrollTop.current;
   }, []);
-  const refreshKey = repoRoot
-    ? JSON.stringify([
-        repoRoot,
-        headBranch,
-        headSha,
-        graphRevision,
-        refreshToken,
-      ])
-    : null;
+  const refreshKey = JSON.stringify([
+    headBranch,
+    headSha,
+    graphRevision,
+    refreshToken,
+  ]);
   const fetchPage = useCallback(
     (options: { limit: number; skip?: number }) =>
       repoRoot ? native.gitLog(repoRoot, options) : Promise.resolve([]),
     [repoRoot],
   );
-  const onInitialLoaded = useCallback(() => {
-    scrollTop.current = 0;
-    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
-  }, []);
-  const { commits, loadStatus, error, endReached, loadInitial, loadMore } =
-    useCommitHistory({
-      queryKey: refreshKey,
-      enabled: expanded && !!repoRoot,
-      fetchPage,
-      morePageSize: activeSearch ? SEARCH_PAGE_SIZE : 40,
-      onInitialLoaded,
-    });
+  const onInitialLoaded = useCallback(
+    (next: GitLogEntry[]) => {
+      // 在替换列表前捕获当前阅读行，用户刷新期间的滚动和展开也应被保留。
+      const top = scrollRef.current?.scrollTop ?? scrollTop.current;
+      const index = Math.floor(top / ROW_HEIGHT);
+      restoreScroll.current = {
+        key: top > 0 ? latestItems.current[index]?.key : undefined,
+        offset: top % ROW_HEIGHT,
+        top,
+      };
+      retainCommits(next);
+      setSelectedFile((selected) =>
+        selected && next.some((commit) => commit.sha === selected.sha)
+          ? selected
+          : null,
+      );
+    },
+    [retainCommits],
+  );
+  const {
+    commits,
+    loadStatus,
+    refreshing,
+    error,
+    endReached,
+    loadInitial,
+    loadMore,
+  } = useCommitHistory({
+    queryKey: repoRoot,
+    refreshKey,
+    enabled: expanded && !!repoRoot,
+    fetchPage,
+    morePageSize: activeSearch ? SEARCH_PAGE_SIZE : 40,
+    onInitialLoaded,
+  });
 
   useEffect(() => {
     if (!searchOpen) setSearchInput("");
   }, [searchOpen]);
 
   useEffect(() => {
-    void refreshKey;
+    void repoRoot;
+    scrollTop.current = 0;
+    restoreScroll.current = null;
     setSelectedFile(null);
-    reset();
-  }, [refreshKey, reset]);
+  }, [repoRoot]);
 
   useEffect(() => {
     setPendingUndo((current) => (current?.sha === headSha ? current : null));
@@ -220,6 +250,7 @@ export const GraphSection = memo(function GraphSection({
     () => flattenCommitRows(filtered, graph.expanded, filesBySha),
     [filtered, graph.expanded, filesBySha],
   );
+  latestItems.current = items;
   const virtualizer = useVirtualizer({
     enabled: present,
     initialOffset: () => scrollTop.current,
@@ -229,6 +260,23 @@ export const GraphSection = memo(function GraphSection({
     overscan: 12,
     getItemKey: (index) => items[index]?.key ?? index,
   });
+
+  useLayoutEffect(() => {
+    const snapshot = restoreScroll.current;
+    if (!snapshot) return;
+    restoreScroll.current = null;
+    const index = snapshot.key
+      ? items.findIndex((item) => item.key === snapshot.key)
+      : -1;
+    const top =
+      index >= 0 ? index * ROW_HEIGHT + snapshot.offset : snapshot.top;
+    const maximum = Math.max(
+      0,
+      items.length * ROW_HEIGHT - (scrollRef.current?.clientHeight ?? 0),
+    );
+    scrollTop.current = Math.min(top, maximum);
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollTop.current;
+  }, [items]);
 
   const reveal = useCommitRowReveal(
     items,
@@ -305,6 +353,23 @@ export const GraphSection = memo(function GraphSection({
   const selectedCommit = openAnchor
     ? (commits.find((commit) => commit.sha === openAnchor.sha) ?? null)
     : null;
+  const errorContent =
+    error !== null ? (
+      <div className="flex shrink-0 items-center justify-center gap-1.5 px-3 py-2 text-[10.5px] text-destructive">
+        <span className="min-w-0 truncate" role="alert">
+          {error}
+        </span>
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() =>
+            void (loadStatus === "more-error" ? loadMore() : loadInitial())
+          }
+        >
+          {t("retry")}
+        </Button>
+      </div>
+    ) : null;
   if (!present) return null;
 
   if (!repoRoot) {
@@ -312,7 +377,11 @@ export const GraphSection = memo(function GraphSection({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-sidebar [contain:layout_style]">
+    <div className="relative flex h-full min-h-0 flex-col bg-sidebar [contain:layout_style]">
+      <SourceControlRefreshProgress
+        active={refreshing && expanded && present}
+        label={t("refreshingCommits")}
+      />
       {searchOpen && expanded ? (
         <form
           aria-label={t("searchHistory")}
@@ -395,28 +464,20 @@ export const GraphSection = memo(function GraphSection({
               className="px-1 text-[10.5px] text-muted-foreground"
             >
               {t("searchResults", { count: filtered.length })}
-              {!endReached &&
-              loadStatus !== "more-error" &&
-              loadStatus !== "initial-error"
+              {!endReached && error === null
                 ? ` · ${t("searchingHistory")}`
                 : ""}
             </div>
           ) : null}
         </form>
       ) : null}
-      {loadStatus === "initial" && commits.length === 0 ? (
-        <GraphPlaceholder>
-          <Spinner className="size-3.5" /> Loading commits…
-        </GraphPlaceholder>
-      ) : loadStatus === "initial-error" && commits.length === 0 ? (
-        <GraphPlaceholder>
-          <span className="text-destructive">{error}</span>
-          <Button size="xs" variant="ghost" onClick={() => void loadInitial()}>
-            Retry
-          </Button>
-        </GraphPlaceholder>
+      {commits.length > 0 && loadStatus === "initial-error"
+        ? errorContent
+        : null}
+      {loadStatus === "initial" && !refreshing ? (
+        <SourceControlLoading label={t("loadingCommits")} active={expanded} />
       ) : commits.length === 0 ? (
-        <GraphPlaceholder>No commits yet.</GraphPlaceholder>
+        <GraphPlaceholder>{errorContent ?? t("noCommitsYet")}</GraphPlaceholder>
       ) : (
         /* biome-ignore lint/a11y/noStaticElementInteractions: 容器只观察滚动和后代交互以释放虚拟列表预留空间，不是独立控件。 */
         <div
@@ -560,23 +621,7 @@ export const GraphSection = memo(function GraphSection({
               <Spinner className="size-3" /> Loading more…
             </div>
           ) : null}
-          {(loadStatus === "initial-error" || loadStatus === "more-error") &&
-          commits.length > 0 ? (
-            <div className="flex items-center justify-center gap-1.5 py-2 text-[10.5px] text-destructive">
-              <span className="max-w-40 truncate">{error}</span>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={
-                  loadStatus === "initial-error"
-                    ? () => void loadInitial()
-                    : () => void loadMore()
-                }
-              >
-                Retry
-              </Button>
-            </div>
-          ) : null}
+          {loadStatus === "more-error" ? errorContent : null}
         </div>
       )}
 

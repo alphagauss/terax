@@ -623,6 +623,25 @@ html *::-webkit-scrollbar {
   }
 }
 
+@keyframes terax-source-control-refresh {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+.terax-source-control-refresh {
+  animation: terax-source-control-refresh 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terax-source-control-refresh {
+    animation: none;
+  }
+}
+
 .terax-collapsible-content {
   overflow: hidden;
 }

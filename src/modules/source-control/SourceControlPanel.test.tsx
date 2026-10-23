@@ -39,7 +39,8 @@ vi.mock("react-i18next", async (original) => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
 }));
 vi.mock("@/modules/source-control/GraphSection", () => ({
-  GraphSection: () => null,
+  GraphSection: ({ repoRoot }: { repoRoot: string | null }) =>
+    repoRoot ? <div data-scm-graph={repoRoot} /> : null,
 }));
 vi.mock("@/modules/explorer/lib/iconResolver", () => ({
   fileIconUrl: () => null,
@@ -85,6 +86,7 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
     behind: 0,
     hasRepo: true,
     isLoading: false,
+    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,
@@ -194,7 +196,7 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
     );
   try {
     await act(async () => root.render(<View />));
-    expect(container.textContent).toContain("Loading repository");
+    expect(container.textContent).toContain("panel.loadingChanges");
     expect(container.textContent).not.toContain("No repository");
     await act(async () => vi.advanceTimersByTimeAsync(600));
     await act(async () => complete(empty));
@@ -213,7 +215,7 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
       expect(emptyTitle()).toBe(title);
       expect(button?.firstElementChild).toBe(icon);
       expect(button?.disabled).toBe(false);
-      expect(container.textContent).not.toContain("Loading repository");
+      expect(container.textContent).not.toContain("panel.loadingChanges");
       await act(async () => complete(empty));
       expect(controller).toBe(settled);
       expect(emptyTitle()).toBe(title);
@@ -269,6 +271,127 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
   }
 });
 
+it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载，普通刷新保留实例", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.useFakeTimers();
+  const snapshot: GitPanelSnapshot = {
+    repo: {
+      repoRoot: "/repo",
+      branch: "main",
+      upstream: null,
+      isDetached: false,
+    },
+    status: {
+      repoRoot: "/repo",
+      branch: "main",
+      headSha: "head",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      isDetached: false,
+      truncated: false,
+      changedFiles: [],
+    },
+    diffStats: null,
+  };
+  io.snapshot.mockResolvedValue(snapshot);
+  io.graphRevision.mockResolvedValue("refs-1");
+  let controller!: RepositoryController;
+  function View({ path }: { path: string | null }) {
+    controller = useRepositoryController(path);
+    return (
+      <SourceControlViewContainer
+        open
+        sourceControl={controller}
+        onOpenDiff={vi.fn()}
+      />
+    );
+  }
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const graph = () => container.querySelector("[data-scm-graph]");
+  try {
+    await act(async () => root.render(<View path="/repo/first" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    const original = graph();
+    expect(original).not.toBeNull();
+    const input = container.querySelector("textarea");
+    const progress = () =>
+      container.querySelector(
+        '[role="progressbar"][aria-label="panel.refreshingChanges"]',
+      );
+    let finish!: (snapshot: GitPanelSnapshot) => void;
+    io.snapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    let refresh!: Promise<void>;
+    await act(async () => {
+      refresh = controller.refresh();
+    });
+    expect(controller.isRefreshing).toBe(true);
+    expect(graph()).toBe(original);
+    expect(container.querySelector("textarea")).toBe(input);
+    expect(progress()).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(299));
+    expect(progress()).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(progress()).not.toBeNull();
+    expect(container.querySelector("textarea")).toBe(input);
+    await act(async () => root.render(<View path="/repo/second" />));
+    expect(graph()).toBeNull();
+    expect(original?.isConnected).toBe(false);
+    expect(progress()).toBeNull();
+    expect(container.textContent).toContain("gitHistory:loadingCommits");
+    let load!: (snapshot: GitPanelSnapshot) => void;
+    io.snapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        load = resolve;
+      }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () => {
+      finish(snapshot);
+    });
+    expect(graph()).toBeNull();
+    expect(io.snapshot).toHaveBeenLastCalledWith("/repo/second");
+    await act(async () => {
+      load(snapshot);
+      await refresh;
+    });
+    expect(graph()).not.toBeNull();
+    expect(graph()).not.toBe(original);
+    const current = graph();
+    const currentInput = container.querySelector("textarea");
+    io.snapshot.mockRejectedValueOnce(new Error("changes refresh failed"));
+    await act(async () => controller.refresh());
+    expect(graph()).toBe(current);
+    expect(container.querySelector("textarea")).toBe(currentInput);
+    expect(container.textContent).toContain("changes refresh failed");
+    const retry = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "panel.retry",
+    );
+    await act(async () => retry?.click());
+    expect(container.textContent).not.toContain("changes refresh failed");
+    await act(async () => controller.refresh());
+    expect(graph()).toBe(current);
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(progress()).toBeNull();
+    await act(async () => root.render(<View path={null} />));
+    expect(graph()).toBeNull();
+    expect(current?.isConnected).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    io.snapshot.mockReset();
+    io.graphRevision.mockReset();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("keeps partial staging actions, diffs and tooltips scoped to each group and removes empty groups", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
@@ -310,6 +433,7 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     behind: 0,
     hasRepo: true,
     isLoading: false,
+    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,

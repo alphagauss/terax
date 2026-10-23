@@ -49,6 +49,8 @@ export type RepositoryController = {
   hasRepo: boolean;
   /** 当前上下文尚未完成首次检测；已有结果的后台复查不进入加载态。 */
   isLoading: boolean;
+  /** 同一上下文已有仓库内容的刷新，不替换为首次加载占位。 */
+  isRefreshing: boolean;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
@@ -115,6 +117,7 @@ export function useRepositoryController(
 ): RepositoryController {
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceKey = workspaceScopeKey(workspaceEnv);
+  const [refreshing, setRefreshing] = useState(false);
   const [state, setState] = useState<RepositoryControllerState>({
     contextPath: null,
     repo: null,
@@ -199,6 +202,10 @@ export function useRepositoryController(
     }
 
     try {
+      setRefreshing(
+        stateRef.current.repo !== null &&
+          stateRef.current.contextPath === requestedContext,
+      );
       const snapshot = await native.gitPanelSnapshot(requestedContext);
       if (!isCurrentRequest()) return;
       if (!snapshot.repo || !snapshot.status) {
@@ -237,20 +244,22 @@ export function useRepositoryController(
     } catch (error) {
       if (!isCurrentRequest()) return;
       const localError = normalizeError(error);
-      updateState((current) =>
-        current.contextPath === requestedContext &&
-        current.localError === localError
-          ? current
-          : {
-              ...current,
-              contextPath: requestedContext,
-              repo: null,
-              status: null,
-              diffStats: null,
-              localError,
-            },
-      );
+      updateState((current) => {
+        if (current.contextPath === requestedContext)
+          return current.localError === localError
+            ? current
+            : { ...current, localError };
+        return {
+          ...current,
+          contextPath: requestedContext,
+          repo: null,
+          status: null,
+          diffStats: null,
+          localError,
+        };
+      });
     } finally {
+      setRefreshing(false);
       if (isCurrentRequest()) lastRefreshAtRef.current = Date.now();
     }
   }, [updateState]);
@@ -478,25 +487,29 @@ export function useRepositoryController(
     };
   }, [contextPath, enabled, probeGraph, refresh]);
 
-  return useMemo<RepositoryController>(
-    () => ({
-      repo: state.repo,
-      status: state.status,
-      diffStats: state.diffStats,
-      changedCount: state.status?.changedFiles.length ?? 0,
-      upstream: state.status?.upstream ?? state.repo?.upstream ?? null,
-      ahead: state.status?.ahead ?? 0,
-      behind: state.status?.behind ?? 0,
-      hasRepo: state.repo !== null,
+  return useMemo<RepositoryController>(() => {
+    // 空 Space 没有仓库，不能在异步清理完成前继续暴露上一根目录的快照。
+    const repo = contextPath ? state.repo : null;
+    const status = contextPath ? state.status : null;
+    return {
+      repo,
+      status,
+      diffStats: status ? state.diffStats : null,
+      changedCount: status?.changedFiles.length ?? 0,
+      upstream: status?.upstream ?? repo?.upstream ?? null,
+      ahead: status?.ahead ?? 0,
+      behind: status?.behind ?? 0,
+      hasRepo: repo !== null,
       isLoading: enabled && !!contextPath && state.contextPath !== contextPath,
-      localError: state.localError,
+      isRefreshing:
+        refreshing && repo !== null && state.contextPath === contextPath,
+      localError: contextPath ? state.localError : null,
       busyAction: state.busyAction,
       lastRemoteError: state.lastRemoteError,
       revision: state.revision,
-      graphRevision: state.graphRevision,
+      graphRevision: repo ? state.graphRevision : null,
       refresh,
       runRemoteAction,
-    }),
-    [state, enabled, contextPath, refresh, runRemoteAction],
-  );
+    };
+  }, [state, refreshing, enabled, contextPath, refresh, runRemoteAction]);
 }

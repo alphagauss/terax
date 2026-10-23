@@ -1,6 +1,7 @@
 {
   "unknownError": "Unknown error",
   "loadingCommits": "Loading commits…",
+  "refreshingCommits": "Refreshing commits…",
   "retry": "Retry",
   "noCommitsYet": "No commits yet",
   "loadingMore": "Loading more…",

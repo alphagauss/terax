@@ -1,4 +1,4 @@
-/** 提交历史共用分页状态；查询变化立即隔离旧结果，隐藏时保留缓存并停止追加。 */
+/** 提交历史共用分页状态；查询变化隔离旧结果，同查询刷新保留内容，隐藏时停止追加。 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -21,16 +21,19 @@ export function normalizeGitHistoryError(error: unknown): string {
 /** Graph 与文件时间线共用加载、重试和过期请求保护，展示及搜索规则由调用方拥有。 */
 export function useCommitHistory<T extends { sha: string }>({
   queryKey,
+  refreshKey,
   enabled,
   fetchPage,
   morePageSize = 40,
   onInitialLoaded,
 }: {
   queryKey: string | null;
+  /** 查询身份不变时重新读取历史，保留已有结果直到刷新成功。 */
+  refreshKey?: string;
   enabled: boolean;
   fetchPage: (options: PageOptions) => Promise<T[]>;
   morePageSize?: number;
-  onInitialLoaded?: () => void;
+  onInitialLoaded?: (commits: T[]) => void;
 }) {
   const [state, setState] = useState<{
     key: string | null;
@@ -38,45 +41,84 @@ export function useCommitHistory<T extends { sha: string }>({
     loadStatus: LoadStatus;
     error: string | null;
     endReached: boolean;
+    loaded: boolean;
   }>({
     key: null,
     commits: [],
     loadStatus: "idle",
     error: null,
     endReached: false,
+    loaded: false,
   });
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const requestRef = useRef(0);
   const loadingRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
   const current = state.key === queryKey;
   const commits = current ? state.commits : [];
-  const loadStatus = current ? state.loadStatus : "idle";
+  const loadStatus = current
+    ? state.loadStatus
+    : enabled && queryKey
+      ? "initial"
+      : "idle";
   const error = current ? state.error : null;
   const endReached = current && state.endReached;
+  const refreshing = current && state.loaded && loadStatus === "initial";
 
   useEffect(() => {
     void queryKey;
+    void refreshKey;
     requestRef.current += 1;
     loadingRef.current = false;
     loadedKeyRef.current = null;
     return () => {
       requestRef.current += 1;
     };
-  }, [queryKey]);
+  }, [queryKey, refreshKey]);
 
   const loadInitial = useCallback(async () => {
     if (!enabled || !queryKey) return;
     const request = ++requestRef.current;
+    const previous = stateRef.current;
+    const refreshing = previous.key === queryKey && previous.loaded;
     loadingRef.current = true;
     setState((previous) => ({
       key: queryKey,
       commits: previous.key === queryKey ? previous.commits : [],
       loadStatus: "initial",
       error: null,
-      endReached: false,
+      endReached: previous.key === queryKey && previous.endReached,
+      loaded: refreshing,
     }));
     try {
-      const next = await fetchPage({ limit: 40 });
+      // 按新旧提交的相对位置补齐历史，避免固定多读一页仍挤掉原来的阅读范围。
+      let target = refreshing ? Math.max(40, previous.commits.length) : 40;
+      const positions = new Map(
+        previous.commits.map((commit, index) => [commit.sha, index]),
+      );
+      const next: T[] = [];
+      let endReached = false;
+      while (next.length < target) {
+        const limit = Math.min(200, target - next.length);
+        const page = await fetchPage({
+          limit,
+          ...(next.length ? { skip: next.length } : {}),
+        });
+        if (request !== requestRef.current) return;
+        if (refreshing)
+          page.forEach((commit, index) => {
+            const oldIndex = positions.get(commit.sha);
+            if (oldIndex !== undefined)
+              target = Math.max(
+                target,
+                previous.commits.length + next.length + index - oldIndex,
+              );
+          });
+        next.push(...page);
+        endReached = page.length < limit;
+        if (endReached) break;
+      }
       if (request !== requestRef.current) return;
       loadedKeyRef.current = queryKey;
       setState({
@@ -84,9 +126,10 @@ export function useCommitHistory<T extends { sha: string }>({
         commits: next,
         loadStatus: "idle",
         error: null,
-        endReached: next.length < 40,
+        endReached,
+        loaded: true,
       });
-      onInitialLoaded?.();
+      onInitialLoaded?.(next);
     } catch (error) {
       if (request !== requestRef.current) return;
       setState((previous) => ({
@@ -100,6 +143,7 @@ export function useCommitHistory<T extends { sha: string }>({
   }, [enabled, queryKey, fetchPage, onInitialLoaded]);
 
   useEffect(() => {
+    void refreshKey;
     if (
       enabled &&
       queryKey &&
@@ -107,7 +151,7 @@ export function useCommitHistory<T extends { sha: string }>({
       !loadingRef.current
     )
       void loadInitial();
-  }, [enabled, queryKey, loadInitial]);
+  }, [enabled, queryKey, refreshKey, loadInitial]);
 
   const loadMore = useCallback(async () => {
     if (
@@ -159,5 +203,13 @@ export function useCommitHistory<T extends { sha: string }>({
     morePageSize,
   ]);
 
-  return { commits, loadStatus, error, endReached, loadInitial, loadMore };
+  return {
+    commits,
+    loadStatus,
+    refreshing,
+    error,
+    endReached,
+    loadInitial,
+    loadMore,
+  };
 }

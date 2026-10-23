@@ -65,7 +65,8 @@
   "refresh": "刷新源代码管理",
   "commitGraph": "提交图",
   "panel": {
-    "loadingRepo": "正在加载仓库",
+    "loadingChanges": "正在加载变更…",
+    "refreshingChanges": "正在刷新变更…",
     "noRepo": "无仓库",
     "noRepoBody": "当前工作区不在 Git 仓库内。",
     "error": "源代码管理错误",

@@ -1,6 +1,7 @@
 {
   "unknownError": "未知错误",
   "loadingCommits": "正在加载提交…",
+  "refreshingCommits": "正在刷新提交…",
   "retry": "重试",
   "noCommitsYet": "暂无提交",
   "loadingMore": "正在加载更多…",

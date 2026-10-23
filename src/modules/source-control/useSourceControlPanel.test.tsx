@@ -77,6 +77,7 @@ it("can generate with its own model while chat is running and keeps drafts scope
     behind: 0,
     hasRepo: true,
     isLoading: false,
+    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,

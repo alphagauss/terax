@@ -77,6 +77,7 @@ const files: GitCommitFileChange[] = [
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   virtualRange.limit = Number.POSITIVE_INFINITY;
   vi.useFakeTimers();
   vi.mocked(native.gitLog)
@@ -93,6 +94,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   Reflect.deleteProperty(HTMLElement.prototype, "animate");
 });
 const wait = async (ms: number) =>
@@ -103,6 +105,7 @@ const wait = async (ms: number) =>
 const renderSearch = (
   props: {
     expanded?: boolean;
+    repoRoot?: string;
     headBranch?: string;
     present?: boolean;
     graphRevision?: string;
@@ -212,6 +215,232 @@ it("刷新令牌变化后重新读取提交图", async () => {
   expect(container.textContent).toContain("Commit remote");
 });
 
+it("同仓库慢刷新保留列表、展开和焦点，延迟提示并按阅读锚点更新", async () => {
+  await act(async () => renderSearch({ searchOpen: false }));
+  const row = container.querySelector<HTMLButtonElement>(
+    '[aria-label="a Commit a"]',
+  );
+  if (!row) throw new Error("缺少提交行");
+  await act(async () => row.click());
+  await wait(20);
+  const scroll = container.querySelector<HTMLElement>(".app-scrollbar");
+  if (!scroll) throw new Error("缺少滚动视口");
+  let finish!: (commits: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => {
+    row.focus();
+    scroll.scrollTop = 53;
+    scroll.dispatchEvent(new Event("scroll"));
+    renderSearch({ searchOpen: false, refreshToken: 1 });
+  });
+  expect(container.querySelector('[aria-label="a Commit a"]')).toBe(row);
+  expect(row.getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(row);
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
+  await wait(299);
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
+  await wait(1);
+  expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+  await act(async () =>
+    finish([commit("new", ["a"]), commit("a", ["b"]), commit("b", [])]),
+  );
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
+  expect(container.querySelector('[aria-label="a Commit a"]')).toBe(row);
+  expect(
+    container.querySelector('[data-commit-row="a:file:src/new.ts"]'),
+  ).not.toBeNull();
+  expect(scroll.scrollTop).toBe(77);
+  expect(document.activeElement).toBe(row);
+  expect(native.gitCommitFiles).toHaveBeenCalledTimes(1);
+});
+
+it("刷新失败保留旧内容，重试成功后移除已经消失的展开项", async () => {
+  await act(async () => renderSearch({ searchOpen: false }));
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="a Commit a"]')
+      ?.click(),
+  );
+  vi.mocked(native.gitLog).mockRejectedValueOnce(new Error("refresh failed"));
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+  expect(container.textContent).toContain("Commit a");
+  expect(container.textContent).toContain("refresh failed");
+  vi.mocked(native.gitLog).mockResolvedValueOnce([commit("b", [])]);
+  const retry = [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "retry",
+  );
+  await act(async () => retry?.click());
+  expect(container.textContent).not.toContain("refresh failed");
+  expect(container.querySelector('[data-commit-row="a"]')).toBeNull();
+  vi.mocked(native.gitLog).mockResolvedValueOnce([
+    commit("a", ["b"]),
+    commit("b", []),
+  ]);
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 2 }));
+  expect(
+    container
+      .querySelector('[aria-label="a Commit a"]')
+      ?.getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+it("切换仓库立即隔离旧列表，迟到的刷新不能覆盖新仓库", async () => {
+  await act(async () => renderSearch({ searchOpen: false }));
+  let finish!: (commits: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+  let load!: (commits: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog).mockReturnValueOnce(
+    new Promise((resolve) => {
+      load = resolve;
+    }),
+  );
+  await act(async () =>
+    renderSearch({ repoRoot: "/other", searchOpen: false }),
+  );
+  expect(container.textContent).not.toContain("Commit a");
+  expect(container.textContent).toContain("loadingCommits");
+  await act(async () => finish([commit("late", [])]));
+  expect(container.textContent).not.toContain("Commit late");
+  await act(async () => load([commit("other", [])]));
+  expect(container.textContent).toContain("Commit other");
+});
+
+it("连续刷新只接纳最新结果，快速完成和顶部阅读均不产生动画或滚动", async () => {
+  await act(async () => renderSearch({ searchOpen: false }));
+  let finish!: (commits: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () =>
+    renderSearch({ searchOpen: false, graphRevision: "refs-2" }),
+  );
+  vi.mocked(native.gitLog).mockResolvedValueOnce([
+    commit("latest", ["a"]),
+    commit("a", []),
+  ]);
+  await act(async () =>
+    renderSearch({ searchOpen: false, graphRevision: "refs-3" }),
+  );
+  await act(async () => finish([commit("stale", [])]));
+  await wait(500);
+  expect(container.textContent).toContain("Commit latest");
+  expect(container.textContent).not.toContain("Commit stale");
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
+  expect(
+    container.querySelector<HTMLElement>(".app-scrollbar")?.scrollTop,
+  ).toBe(0);
+});
+
+it("刷新空结果保留空状态，隐藏后停止进度提示，重新显示仍可完成刷新", async () => {
+  vi.mocked(native.gitLog).mockResolvedValueOnce([]);
+  await act(async () => renderSearch({ searchOpen: false }));
+  let finish!: (commits: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+  expect(container.textContent).toContain("noCommitsYet");
+  expect(container.textContent).not.toContain("loadingCommits");
+  await wait(300);
+  expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+  await act(async () =>
+    renderSearch({
+      searchOpen: false,
+      refreshToken: 1,
+      expanded: false,
+      present: false,
+    }),
+  );
+  await wait(500);
+  expect(container.childElementCount).toBe(0);
+  await act(async () => finish([commit("first", [])]));
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+  expect(container.textContent).toContain("Commit first");
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
+});
+
+it.each([1, 80])(
+  "刷新新增 %i 条提交时整批替换并保留旧尾部阅读位置",
+  async (count) => {
+    const history = Array.from({ length: 240 }, (_, index) =>
+      commit(String(index), [String(index + 1)]),
+    );
+    vi.mocked(native.gitLog).mockImplementation(async (_repo, options) =>
+      history.slice(
+        options?.skip ?? 0,
+        (options?.skip ?? 0) + (options?.limit ?? 40),
+      ),
+    );
+    await act(async () => renderSearch({ searchOpen: false }));
+    const scroll = container.querySelector<HTMLElement>(".app-scrollbar");
+    if (!scroll) throw new Error("缺少滚动视口");
+    Object.defineProperty(scroll, "scrollHeight", { value: 6000 });
+    Object.defineProperty(scroll, "clientHeight", { value: 200 });
+    for (let page = 0; page < 5; page++) {
+      scroll.scrollTop = 5900;
+      await act(async () => scroll.dispatchEvent(new Event("scroll")));
+    }
+    expect(container.querySelector('[data-commit-row="239"]')).not.toBeNull();
+    await act(async () => {
+      scroll.scrollTop = 230 * 24 + 5;
+      scroll.dispatchEvent(new Event("scroll"));
+    });
+    const withNew = [
+      ...Array.from({ length: count }, (_, index) =>
+        commit(index === 0 ? "new" : `new-${index}`, []),
+      ),
+      ...history,
+    ];
+    vi.mocked(native.gitLog)
+      .mockClear()
+      .mockImplementation(async (_repo, options) => {
+        if (options?.skip) throw new Error("second page failed");
+        return withNew.slice(0, options?.limit);
+      });
+    await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+    expect(native.gitLog).toHaveBeenNthCalledWith(1, "/repo", { limit: 200 });
+    expect(container.textContent).not.toContain("Commit new");
+    expect(container.querySelector('[data-commit-row="239"]')).not.toBeNull();
+    vi.mocked(native.gitLog)
+      .mockClear()
+      .mockImplementation(async (_repo, options) =>
+        withNew.slice(
+          options?.skip ?? 0,
+          (options?.skip ?? 0) + (options?.limit ?? 40),
+        ),
+      );
+    const retry = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "retry",
+    );
+    await act(async () => retry?.click());
+    expect(native.gitLog).toHaveBeenNthCalledWith(2, "/repo", {
+      limit: 40 + count,
+      skip: 200,
+    });
+    expect(native.gitLog).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-commit-row="239"]')).not.toBeNull();
+    expect(scroll.scrollTop).toBe((230 + count) * 24 + 5);
+    expect(container.textContent).toContain("Commit new");
+    expect(container.querySelector('[data-commit-row="239"]')).not.toBeNull();
+    vi.mocked(native.gitLog).mockClear();
+    await act(async () => renderSearch({ searchOpen: false, refreshToken: 2 }));
+    expect(native.gitLog).toHaveBeenCalledTimes(2);
+  },
+);
+
 it("引用 revision 变化后重新读取提交图", async () => {
   vi.mocked(native.gitLog)
     .mockReset()
@@ -236,10 +465,14 @@ it("同一提交切换分支后重新读取引用", async () => {
     .mockResolvedValueOnce([
       { ...commit("a", []), refs: [{ kind: "local", label: "master" }] },
     ]);
-  await act(async () => renderSearch({ headBranch: "nightly", searchOpen: false }));
+  await act(async () =>
+    renderSearch({ headBranch: "nightly", searchOpen: false }),
+  );
   expect(container.textContent).toContain("nightly");
 
-  await act(async () => renderSearch({ headBranch: "master", searchOpen: false }));
+  await act(async () =>
+    renderSearch({ headBranch: "master", searchOpen: false }),
+  );
 
   expect(native.gitLog).toHaveBeenCalledTimes(2);
   expect(container.textContent).toContain("master");
@@ -385,8 +618,8 @@ it("搜索分页失败后等待手动重试，不循环请求或误报搜索结�
   expect(container.textContent).not.toContain("noSearchResults");
   await wait(1000);
   expect(native.gitLog).toHaveBeenCalledTimes(2);
-  const retry = [...container.querySelectorAll("button")].find((button) =>
-    button.textContent?.includes("Retry"),
+  const retry = [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "retry",
   );
   await act(async () => retry?.click());
   expect(container.textContent).toContain("needle");

@@ -65,7 +65,8 @@
   "refresh": "Refresh source control",
   "commitGraph": "Commit Graph",
   "panel": {
-    "loadingRepo": "Loading repository",
+    "loadingChanges": "Loading changes…",
+    "refreshingChanges": "Refreshing changes…",
     "noRepo": "No repository",
     "noRepoBody": "The active workspace is not inside a Git repository.",
     "error": "Source control error",

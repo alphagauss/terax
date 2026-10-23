@@ -140,6 +140,22 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
     warmUntil.current = 0;
   }, [close]);
 
+  /** 刷新后只清理已消失提交的交互状态，SHA 不变的详情缓存仍有效。 */
+  const retainCommits = useCallback(
+    (commits: { sha: string }[]) => {
+      const known = new Set(commits.map((commit) => commit.sha));
+      const next = new Set(
+        [...expandedRef.current].filter((sha) => known.has(sha)),
+      );
+      if (next.size !== expandedRef.current.size) {
+        expandedRef.current = next;
+        setExpanded(next);
+      }
+      if (current.current && !known.has(current.current.sha)) close();
+    },
+    [close],
+  );
+
   useEffect(() => {
     if (repository.current !== repoRoot) reset();
     repository.current = repoRoot;
@@ -215,6 +231,7 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
       toggle,
       fetchFiles,
       reset,
+      retainCommits,
     }),
     [
       files,
@@ -228,6 +245,7 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
       toggle,
       fetchFiles,
       reset,
+      retainCommits,
     ],
   );
 }

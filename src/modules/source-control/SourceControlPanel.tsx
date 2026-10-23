@@ -59,6 +59,8 @@ import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
 import { GraphSection } from "@/modules/source-control/GraphSection";
+import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
+import { SourceControlRefreshProgress } from "@/modules/source-control/SourceControlRefreshProgress";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
@@ -431,6 +433,10 @@ function SourceControlViewContainerComponent({
   }, []);
 
   const isRefreshing = scm.panelState === "loading";
+  const graphRepoRoot = scm.repo?.repoRoot ?? null;
+  const graphLoading =
+    isRefreshing ||
+    (graphRepoRoot !== null && sourceControl.graphRevision === null);
   const repoLabel = useMemo(() => {
     if (!scm.status) return t("sourceControl");
     return scm.status.isDetached ? t("detached") : scm.status.branch;
@@ -729,7 +735,11 @@ function SourceControlViewContainerComponent({
               ),
               render: ({ present }) =>
                 present ? (
-                  <div className="flex h-full min-h-0 flex-col">
+                  <div className="relative flex h-full min-h-0 flex-col">
+                    <SourceControlRefreshProgress
+                      active={open && sourceControl.isRefreshing}
+                      label={t("panel.refreshingChanges")}
+                    />
                     <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/40 px-2.5">
                       <BranchDropdown
                         repoRoot={scm.repo?.repoRoot ?? null}
@@ -776,7 +786,10 @@ function SourceControlViewContainerComponent({
                     </div>
 
                     {scm.panelState === "loading" ? (
-                      <PanelCenter title="Loading repository" />
+                      <SourceControlLoading
+                        label={t("panel.loadingChanges")}
+                        active={open}
+                      />
                     ) : null}
 
                     {scm.panelState === "no-repo" ? (
@@ -796,6 +809,21 @@ function SourceControlViewContainerComponent({
                           </Button>
                         }
                       />
+                    ) : null}
+
+                    {scm.panelState === "ready" && scm.statusError ? (
+                      <div className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-[10.5px] text-destructive">
+                        <span role="alert" className="min-w-0 flex-1 truncate">
+                          {scm.statusError}
+                        </span>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={handleRefresh}
+                        >
+                          {t("panel.retry")}
+                        </Button>
+                      </div>
                     ) : null}
 
                     {scm.panelState === "ready" && scm.status ? (
@@ -1023,28 +1051,35 @@ function SourceControlViewContainerComponent({
                   </SidebarSectionAction>
                 </>
               ),
-              render: ({ expanded, present }) => (
-                <GraphSection
-                  key={scm.repo?.repoRoot ?? "no-repository"}
-                  repoRoot={scm.repo?.repoRoot ?? null}
-                  headBranch={scm.status?.branch ?? null}
-                  headSha={scm.status?.headSha ?? null}
-                  expanded={
-                    open && expanded && sourceControl.graphRevision !== null
-                  }
-                  present={open && present}
-                  searchOpen={graphSearchOpen}
-                  onCloseSearch={() => setGraphSearchOpen(false)}
-                  refreshToken={graphRefreshToken}
-                  graphRevision={sourceControl.graphRevision ?? ""}
-                  showUndoCommit={showUndoCommit}
-                  mayHavePushedHead={
-                    !!scm.status?.upstream && (scm.status?.ahead ?? 0) === 0
-                  }
-                  onDidUndo={handleRefresh}
-                  onOpenCommitFile={onOpenCommitFile}
-                />
-              ),
+              // 根目录检测期间快照仍可能属于上一 Space，不能继续展示其提交图。
+              render: ({ expanded, present }) =>
+                graphLoading ? (
+                  open && present ? (
+                    <SourceControlLoading
+                      label={t("gitHistory:loadingCommits")}
+                      active={expanded}
+                    />
+                  ) : null
+                ) : (
+                  <GraphSection
+                    key={graphRepoRoot}
+                    repoRoot={graphRepoRoot}
+                    headBranch={scm.status?.branch ?? null}
+                    headSha={scm.status?.headSha ?? null}
+                    expanded={open && expanded}
+                    present={open && present}
+                    searchOpen={graphSearchOpen}
+                    onCloseSearch={() => setGraphSearchOpen(false)}
+                    refreshToken={graphRefreshToken}
+                    graphRevision={sourceControl.graphRevision ?? ""}
+                    showUndoCommit={showUndoCommit}
+                    mayHavePushedHead={
+                      !!scm.status?.upstream && (scm.status?.ahead ?? 0) === 0
+                    }
+                    onDidUndo={handleRefresh}
+                    onOpenCommitFile={onOpenCommitFile}
+                  />
+                ),
             },
           ]}
         />
