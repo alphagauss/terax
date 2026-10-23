@@ -82,6 +82,8 @@
     "repeated": "{{count}} occurrences",
     "dismiss": "Dismiss: {{title}}",
     "dismissNotice": "Dismiss notice",
+    "ignore": "Ignore",
+    "ignoreReport": "Ignore: {{title}}",
     "operationFailed": "Operation failed",
     "saveFailed": "Could not save settings",
     "workspaceOpenFailed": "Failed to open Workspace window",

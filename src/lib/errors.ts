@@ -49,8 +49,41 @@ export function clearErrors(): void {
   errorStore.setState({ reports: [], historyOpen: false, historyTarget: null });
 }
 
-export function setErrorHistoryOpen(historyOpen: boolean): void {
-  errorStore.setState({ historyOpen, historyTarget: null });
+export function setErrorHistoryOpen(
+  historyOpen: boolean,
+  targetId?: string,
+): void {
+  if (historyOpen) remainingById.clear();
+  errorStore.setState(({ reports }) => ({
+    historyOpen,
+    // 每次主动查看都生成定位请求，即使目标未变也重新展开并滚动。
+    historyTarget:
+      historyOpen && targetId !== undefined ? { id: targetId } : null,
+    ...(historyOpen && {
+      reports: reports.map((report) =>
+        report.visible ? { ...report, visible: false } : report,
+      ),
+    }),
+  }));
+}
+
+/** 忽略只移除当前诊断记录；运行身份和原位错误继续由业务拥有。 */
+export function ignoreError(id: string): void {
+  remainingById.delete(id);
+  errorStore.setState((state) => {
+    const identity = state.reports.find((report) => report.id === id)?.identity;
+    const reports = state.reports.filter((report) => report.id !== id);
+    return {
+      reports,
+      historyOpen: state.historyOpen && reports.length > 0,
+      historyTarget:
+        state.historyTarget?.id === id ? null : state.historyTarget,
+      ...(identity !== undefined &&
+        !state.notices.has(identity) && {
+          notices: new Map(state.notices).set(identity, "reported" as const),
+        }),
+    };
+  });
 }
 
 function setNotice(identity: string, notice: ErrorNoticeState): void {
@@ -102,8 +135,7 @@ export function showErrorNoticeDetails(
     reports.find((report) => report.identity === identity)?.id ??
     reportError(title, { ...options, identity, overlay: false });
   if (!notice) setNotice(identity, "reported");
-  // 每次主动查看都生成定位请求，即使目标未变也重新展开并滚动。
-  errorStore.setState({ historyOpen: true, historyTarget: { id: reportId } });
+  setErrorHistoryOpen(true, reportId);
 }
 
 /** 提取有限的诊断字段，保留原因链和换行，不复制请求正文或任意业务对象。 */
@@ -175,7 +207,7 @@ export function reportError(title: string, options: ErrorOptions = {}): string {
     .filter(Boolean)
     .join("\n")
     .slice(0, 16000);
-  const reports = errorStore.getState().reports;
+  const { reports, historyOpen } = errorStore.getState();
   const previous = reports.find((report) =>
     options.identity !== undefined
       ? report.identity === options.identity
@@ -196,6 +228,7 @@ export function reportError(title: string, options: ErrorOptions = {}): string {
     visible:
       previous?.visible ??
       (options.overlay !== false &&
+        !historyOpen &&
         reports.filter((item) => item.visible).length < 3),
   };
   if (!previous && report.visible) remainingById.set(report.id, 8000);

@@ -82,6 +82,8 @@
     "repeated": "发生 {{count}} 次",
     "dismiss": "关闭：{{title}}",
     "dismissNotice": "关闭提示",
+    "ignore": "忽略",
+    "ignoreReport": "忽略：{{title}}",
     "operationFailed": "操作失败",
     "saveFailed": "保存设置失败",
     "workspaceOpenFailed": "打开 Workspace 窗口失败",

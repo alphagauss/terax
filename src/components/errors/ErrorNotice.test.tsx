@@ -11,6 +11,7 @@ import {
   clearErrors,
   dismissError,
   errorStore,
+  ignoreError,
   reportError,
   setErrorHistoryOpen,
 } from "@/lib/errors";
@@ -71,10 +72,14 @@ async function clickInline(label: string) {
   await act(async () => button?.click());
 }
 
-it("浮层关闭和清空历史都保留原位提示，详情仅主动恢复且不重新弹出", async () => {
+it("浮层关闭、忽略和清空历史都保留原位提示，详情仅主动恢复且不重新弹出", async () => {
   await render();
   const id = errorStore.getState().reports[0].id;
   await act(async () => dismissError(id));
+  expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  await act(async () => ignoreError(id));
+  await render();
+  expect(errorStore.getState().reports).toHaveLength(0);
   expect(container.querySelector('[role="alert"]')).not.toBeNull();
   await act(async () => clearErrors());
   await render({ visible: false });
@@ -236,7 +241,10 @@ it("原位和历史操作位于表单内时不触发提交", async () => {
   for (const label of ["errors.copy", "errors.hideDetails", "errors.clear"]) {
     const button = Array.from(
       document.querySelectorAll<HTMLButtonElement>("[data-error-host] button"),
-    ).find((item) => item.textContent === label);
+    ).find(
+      (item) =>
+        item.textContent === label || item.getAttribute("aria-label") === label,
+    );
     expect(button).toBeDefined();
     await act(async () => button?.click());
   }

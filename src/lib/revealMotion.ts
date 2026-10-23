@@ -46,6 +46,12 @@ export class RevealMotion {
     });
   }
 
+  /** 独立背景层可复用同一会话，不缩放文字或改变真实布局尺寸。 */
+  animate(element: HTMLElement, frames: Keyframe[]) {
+    if (element.animate && this.options.duration)
+      this.animations.push(element.animate(frames, this.options));
+  }
+
   move(element: HTMLElement, from: number, to = 0) {
     if (!element.animate || !this.options.duration) return;
     if (Math.abs(from - to) < 0.5) {

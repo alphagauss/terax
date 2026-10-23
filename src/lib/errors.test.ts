@@ -5,12 +5,70 @@ import {
   elapseErrors,
   errorDetails,
   errorStore,
+  ignoreError,
   reportError,
+  reportErrorNotice,
+  setErrorHistoryOpen,
+  showErrorNoticeDetails,
 } from "@/lib/errors";
 
 beforeEach(() => {
   clearErrors();
   vi.restoreAllMocks();
+});
+
+it("打开历史结束所有临时提醒，历史期间的新错误不在关闭后重新弹出", () => {
+  reportError("first");
+  reportError("second");
+  setErrorHistoryOpen(true);
+  expect(errorStore.getState().reports.every((report) => !report.visible)).toBe(
+    true,
+  );
+  const id = reportError("during history");
+  expect(
+    errorStore.getState().reports.find((report) => report.id === id)?.visible,
+  ).toBe(false);
+  setErrorHistoryOpen(false);
+  elapseErrors(8000, new Set());
+  expect(errorStore.getState().reports.every((report) => !report.visible)).toBe(
+    true,
+  );
+  reportError("after history");
+  expect(errorStore.getState().reports[0].visible).toBe(true);
+  showErrorNoticeDetails("detail-target", "details", {});
+  expect(errorStore.getState().reports.every((report) => !report.visible)).toBe(
+    true,
+  );
+});
+
+it("忽略仅移除本条历史，保留运行提示身份，忽略最后一条同时关闭历史", () => {
+  reportErrorNotice("run-one", "failed", {});
+  const first = errorStore.getState().reports[0].id;
+  const other = reportError("other");
+  ignoreError(first);
+  expect(errorStore.getState().reports.map((report) => report.id)).toEqual([
+    other,
+  ]);
+  expect(errorStore.getState().notices.get("run-one")).toBe("reported");
+  reportErrorNotice("run-one", "failed", {});
+  expect(errorStore.getState().reports).toHaveLength(1);
+  showErrorNoticeDetails("run-one", "failed", {});
+  const restored = errorStore.getState().historyTarget?.id;
+  if (!restored) throw new Error("缺少详情目标");
+  ignoreError(restored);
+  expect(errorStore.getState().historyTarget).toBeNull();
+  expect(errorStore.getState().historyOpen).toBe(true);
+  ignoreError(other);
+  expect(errorStore.getState().reports).toHaveLength(0);
+  expect(errorStore.getState().historyOpen).toBe(false);
+  reportErrorNotice("run-two", "failed", {});
+  expect(errorStore.getState().reports[0].visible).toBe(true);
+  const raw = reportError("runtime error", { identity: "" });
+  ignoreError(raw);
+  reportErrorNotice("", "runtime error", {});
+  expect(
+    errorStore.getState().reports.some((report) => report.identity === ""),
+  ).toBe(false);
 });
 
 it("短时间重复错误合并，关闭不删除历史也不被轮询重新弹出", () => {

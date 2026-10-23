@@ -2,12 +2,24 @@
  * 所有窗口共用的错误浮层，提供阅读暂停、详情复制和当前窗口的最近错误。
  * 弹窗打开时把同一个展示节点移入其焦点范围，避免仅提高层级却无法操作。
  */
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
+import { ContentReveal } from "@/components/controls/content-reveal";
+import { dialogCloseIconButtonClassName } from "@/components/controls/close-button";
+import { Hint } from "@/components/controls/tooltip";
+import { ErrorPresentation } from "@/components/errors/ErrorPresentation";
 import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { writeClipboardText } from "@/lib/clipboard";
 import {
@@ -16,6 +28,7 @@ import {
   dismissError,
   elapseErrors,
   errorStore,
+  ignoreError,
   setErrorHistoryOpen,
   type ErrorReport,
 } from "@/lib/errors";
@@ -25,23 +38,41 @@ function ErrorCard({
   historical,
   reveal,
   pause,
+  scrollRef,
 }: {
   report: ErrorReport;
   historical: boolean;
   reveal: { id: string } | null;
   pause: (id: string, paused: boolean) => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation("common");
   const [expanded, setExpanded] = useState(false);
+  const [detailHeight, setDetailHeight] = useState(224);
   const card = useRef<HTMLElement>(null);
+  const setDetailsOpen = useCallback((open: boolean) => {
+    if (open && card.current)
+      setDetailHeight(
+        Math.max(
+          64,
+          Math.min(
+            224,
+            window.innerHeight -
+              (card.current
+                .querySelector("[data-error-heading]")
+                ?.getBoundingClientRect().bottom ??
+                card.current.getBoundingClientRect().bottom) -
+              24,
+          ),
+        ),
+      );
+    setExpanded(open);
+  }, []);
   useEffect(() => {
     if (!reveal) return;
-    setExpanded(true);
-  }, [reveal]);
-  useEffect(() => {
-    if (reveal && expanded)
-      card.current?.scrollIntoView?.({ block: "nearest" });
-  }, [reveal, expanded]);
+    card.current?.scrollIntoView?.({ block: "nearest" });
+    setDetailsOpen(true);
+  }, [reveal, setDetailsOpen]);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [copyState, setCopyState] = useState<"copy" | "copied" | "copyFailed">(
@@ -83,7 +114,7 @@ function ErrorCard({
     <section
       ref={card}
       aria-label={report.title}
-      className="rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-2 duration-surface"
+      className="relative rounded-lg border border-transparent p-3 text-xs text-popover-foreground"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocusCapture={() => setFocused(true)}
@@ -92,90 +123,128 @@ function ErrorCard({
           setFocused(false);
       }}
     >
-      <div className="flex items-start gap-2">
-        <HugeiconsIcon
-          icon={Alert02Icon}
-          size={14}
-          strokeWidth={1.75}
-          className="mt-0.5 shrink-0 text-destructive"
-          aria-hidden="true"
-        />
-        <button
-          type="button"
-          className="min-w-0 flex-1 cursor-default select-text text-left"
-          aria-label={
-            historical
-              ? report.title
-              : t("errors.dismiss", { title: report.title })
-          }
-          aria-expanded={historical ? expanded : undefined}
-          onClick={() => {
-            if (window.getSelection()?.toString()) return;
-            if (historical) setExpanded(!expanded);
-            else dismissError(report.id);
-          }}
+      <div
+        data-error-surface
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-px origin-top-left rounded-lg border border-border bg-popover shadow-lg"
+      />
+      <div className="relative">
+        <div data-error-heading className="flex items-start gap-2">
+          <HugeiconsIcon
+            icon={Alert02Icon}
+            size={14}
+            strokeWidth={1.75}
+            className="mt-0.5 shrink-0 text-destructive"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              className="block w-full min-w-0 cursor-default select-text text-left"
+              aria-label={
+                historical
+                  ? report.title
+                  : t("errors.dismiss", { title: report.title })
+              }
+              aria-expanded={historical ? expanded : undefined}
+              onClick={() => {
+                if (window.getSelection()?.toString()) return;
+                if (historical) setDetailsOpen(!expanded);
+                else dismissError(report.id);
+              }}
+            >
+              <span className="block line-clamp-2 break-words font-medium">
+                {report.title}
+              </span>
+            </button>
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                aria-expanded={expanded}
+                aria-label={t(
+                  expanded ? "errors.hideDetails" : "errors.details",
+                )}
+                onClick={() => setDetailsOpen(!expanded)}
+              >
+                {t("errors.details")}
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={12}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className={`transition-transform duration-control ${expanded ? "rotate-180" : ""}`}
+                />
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={() => void copy()}
+              >
+                {t(`errors.${copyState}`)}
+              </Button>
+              {report.count > 1 && (
+                <span className="ml-auto text-muted-foreground">
+                  {t("errors.repeated", { count: report.count })}
+                </span>
+              )}
+            </div>
+            {report.source && (
+              <span className="mt-1 block truncate text-muted-foreground">
+                {report.source}
+              </span>
+            )}
+            {report.details && (
+              <span
+                data-error-preview
+                className="mt-1 line-clamp-2 select-text break-words text-muted-foreground"
+              >
+                {report.details}
+              </span>
+            )}
+          </div>
+          <div className="flex w-14 shrink-0 flex-col items-stretch gap-1">
+            {!historical && (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={() => dismissError(report.id)}
+              >
+                {t("close")}
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-label={t("errors.ignoreReport", { title: report.title })}
+              onClick={() => ignoreError(report.id)}
+            >
+              {t("errors.ignore")}
+            </Button>
+          </div>
+        </div>
+        <ContentReveal
+          open={expanded}
+          transitionKey={null}
+          scrollRef={scrollRef}
         >
-          <span className="block line-clamp-2 break-words font-medium">
-            {report.title}
-          </span>
-          {report.source && (
-            <span className="mt-1 block truncate text-muted-foreground">
-              {report.source}
-            </span>
-          )}
-          {!expanded && report.details && (
-            <span className="mt-1 line-clamp-2 break-words text-muted-foreground">
-              {report.details}
-            </span>
-          )}
-        </button>
-        {!historical && (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            onClick={() => dismissError(report.id)}
+          <section
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: 长诊断区必须能用键盘聚焦滚动。
+            tabIndex={0}
+            aria-label={t("errors.details")}
+            className="mt-2 select-text overflow-auto border-t border-border pt-2"
+            style={{ maxHeight: detailHeight }}
           >
-            {t("close")}
-          </Button>
-        )}
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+              {copyableError(report)}
+            </pre>
+          </section>
+        </ContentReveal>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
-        >
-          {t(expanded ? "errors.hideDetails" : "errors.details")}
-        </Button>
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          onClick={() => void copy()}
-        >
-          {t(`errors.${copyState}`)}
-        </Button>
-        {report.count > 1 && (
-          <span className="ml-auto text-muted-foreground">
-            {t("errors.repeated", { count: report.count })}
-          </span>
-        )}
-      </div>
-      {expanded && (
-        <section
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: 长诊断区必须能用键盘聚焦滚动。
-          tabIndex={0}
-          aria-label={t("errors.details")}
-          className="mt-2 max-h-56 select-text overflow-auto border-t border-border pt-2"
-        >
-          <pre className="whitespace-pre-wrap break-words font-mono text-xs">
-            {copyableError(report)}
-          </pre>
-        </section>
-      )}
     </section>
   );
 }
@@ -188,6 +257,8 @@ export function ErrorHost() {
   const target = useStore(errorStore, (state) => state.historyTarget);
   const hasVisibleErrors = reports.some((report) => report.visible);
   const showing = hasVisibleErrors || (history && reports.length > 0);
+  const [present, setPresent] = useState(showing);
+  const attached = showing || present;
   const [mount] = useState(() => document.createElement("div"));
   const paused = useRef(new Set<string>());
   const [pause] = useState(() => (id: string, value: boolean) => {
@@ -196,7 +267,47 @@ export function ErrorHost() {
   });
 
   useEffect(() => {
-    if (!showing) return;
+    if (!history) return;
+    const inside = (event: Event) =>
+      event
+        .composedPath()
+        .some(
+          (node) =>
+            node === mount ||
+            (node instanceof Element &&
+              node.closest("[data-error-history-button]")),
+        );
+    const outside = (event: Event) => {
+      if (!inside(event)) setErrorHistoryOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !mount.querySelector('[role="menu"]')
+      )
+        setErrorHistoryOpen(false);
+    };
+    const blur = () => setErrorHistoryOpen(false);
+    const visibility = () => {
+      if (document.hidden) blur();
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("focusin", outside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("focusin", outside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [history, mount]);
+
+  useEffect(() => {
+    if (!attached) return;
     mount.dataset.errorHost = "";
     // 原生 top layer 保持窗口坐标，DOM 仍属于当前模态框的焦点范围。
     mount.setAttribute("popover", "manual");
@@ -258,7 +369,7 @@ export function ErrorHost() {
       observer.disconnect();
       mount.remove();
     };
-  }, [mount, showing]);
+  }, [mount, attached]);
 
   useEffect(() => {
     if (!hasVisibleErrors || history) return;
@@ -283,49 +394,45 @@ export function ErrorHost() {
     };
   }, [history, hasVisibleErrors, mount]);
 
-  if (!showing) return null;
   return createPortal(
-    <aside
-      aria-label={t("errors.region")}
-      className="pointer-events-auto flex max-h-[calc(100dvh-56px)] flex-col gap-2"
-    >
-      {history && (
+    <ErrorPresentation
+      reports={reports}
+      history={history}
+      label={t("errors.region")}
+      onPresentChange={setPresent}
+      renderHeader={(count) => (
         <div className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2 text-xs text-popover-foreground shadow-sm">
-          <span className="mr-auto">
-            {t("errors.history", { count: reports.length })}
-          </span>
+          <span className="mr-auto">{t("errors.history", { count })}</span>
           <Button type="button" size="xs" variant="ghost" onClick={clearErrors}>
             {t("errors.clear")}
           </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            onClick={() => setErrorHistoryOpen(false)}
-          >
-            {t("close")}
-          </Button>
+          <Hint content={t("close")}>
+            <button
+              type="button"
+              aria-label={t("close")}
+              className={dialogCloseIconButtonClassName}
+              onClick={() => setErrorHistoryOpen(false)}
+            >
+              <HugeiconsIcon
+                icon={Cancel01Icon}
+                size={14}
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+            </button>
+          </Hint>
         </div>
       )}
-      <div
-        id="error-history-list"
-        className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain p-0.5"
-        aria-live="polite"
-        aria-relevant="additions"
-      >
-        {(history ? reports : reports.filter((report) => report.visible)).map(
-          (report) => (
-            <ErrorCard
-              key={report.id}
-              report={report}
-              historical={history}
-              reveal={history && target?.id === report.id ? target : null}
-              pause={pause}
-            />
-          ),
-        )}
-      </div>
-    </aside>,
+      renderCard={(report, historical, scrollRef) => (
+        <ErrorCard
+          report={report}
+          historical={historical}
+          reveal={history && target?.id === report.id ? target : null}
+          pause={pause}
+          scrollRef={scrollRef}
+        />
+      )}
+    />,
     mount,
   );
 }
