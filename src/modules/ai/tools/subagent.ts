@@ -55,7 +55,7 @@ export function buildSubagentTools(
   return {
     subagent_task: tool({
       description:
-        "Manage subagents belonging to this chat. list returns task IDs, latest execution states and concurrency limit/running counts; get returns a paginated history of inputs, outputs and tool calls (each entry is limited to 8000 characters; use wait for the full latest final result); wait blocks for the current execution result (default 30 seconds, timeout leaves the task running); stop cancels the task, terminates its managed process trees and waits for cleanup, discarding unconsumed queued instructions; send queues instructions for the next safe boundary of a running task (queued is not yet consumed), or resumes an ended task with a fresh step budget. A finishing task may reject send; retry after completion. stop also cleans up managed processes from ended tasks and prior executions; cleanup=completed confirms cleanup succeeded independently of the latest execution status. stop does not undo completed actions. Use the short task_id returned by this chat. Context-exhausted tasks require a new run_subagent task.",
+        "Manage this chat's subagents.\n- list: find task IDs, states, and available concurrency.\n- get: inspect paginated task history. Entries may be truncated; use wait for the full latest final result.\n- wait: obtain a task's result before proceeding. A timeout leaves it running.\n- send: add instructions or resume an ended task. queued means the instructions have not yet been read. Retry after completion only if the error says the task is finishing; for exhausted context, start a new task.\n- stop: cancel the task, discard unread instructions, and clean up its managed processes, including earlier runs. Check cleanup=completed before claiming cleanup succeeded. Completed actions are not undone; an already-ended task keeps its status.",
       inputSchema: z
         .object({
           action: z.enum(["list", "get", "stop", "send", "wait"]),
@@ -165,20 +165,14 @@ export function buildSubagentTools(
     }),
     run_subagent: tool({
       description:
-        "Run a focused subagent with a fresh conversation and the current " +
-        "chat's workspace, model policy, and permission-filtered tools. It cannot request interactive approval. Give it a " +
-        "self-contained task. Set wait=true when its result must inform the " +
-        "next model step. With wait=false, the tool returns immediately and " +
-        "the result is appended later in the same turn unless retrieved by subagent_task wait. Use the returned task_id to inspect, stop, wait for, or continue this task. At most the configured " +
-        "number of subagents may run concurrently in this chat. Subagents " +
-        "cannot create other subagents. Managed background processes may keep running after a subagent completes; use subagent_task stop to clean them up.",
+        "Delegate a focused task in this chat's workspace. Assign work that can be completed with the available tools, without interactive approval or further delegation. Check subagent_task action=list for available concurrency before starting more tasks. Use the returned task_id with subagent_task to follow up or stop the task and clean up its managed processes.",
       inputSchema: z.object({
         task: z
           .string()
           .trim()
           .min(1)
           .describe(
-            "Self-contained task. The subagent has no parent chat history, so include all relevant context.",
+            "Include the necessary context, paths, constraints, and expected result. The subagent cannot see the parent chat history.",
           ),
         label: z
           .string()
@@ -191,7 +185,7 @@ export function buildSubagentTools(
           .boolean()
           .default(false)
           .describe(
-            "Wait for the final result before the main agent continues. Defaults to false for background execution.",
+            "Use true when the next step needs the result. Defaults to false: continue independent work, then use subagent_task action=wait if the result has not arrived.",
           ),
       }),
       execute: async ({ task, label, wait }, { abortSignal, toolCallId }) =>

@@ -14,7 +14,7 @@ export function buildSearchTools(ctx: ToolContext) {
   return {
     find_files: tool({
       description:
-        "Discover files and directories by path. Prefer this over shell directory listings. Without recursive it lists immediate children; with recursive=true it walks the tree and honors ignore files. glob matches relative paths, for example '**/*.ts'. Results are paged with offset/limit. Use grep to search file contents. Outside-workspace and sensitive paths require approval unless full access is enabled.",
+        "Find files and directories by name or path. Prefer this over shell directory listings. Set path to the relevant directory; omit recursive to list immediate children, or set recursive=true to search below it while honoring ignore files. Use glob to match relative paths, for example '**/*.ts'. Continue from next_offset when present. Use grep to search file contents.",
       inputSchema: z.object({
         path: z.string().min(1).optional(),
         glob: z.string().min(1).optional(),
@@ -69,7 +69,7 @@ export function buildSearchTools(ctx: ToolContext) {
 
     grep: tool({
       description:
-        "Search UTF-8 file contents in a file or directory. Limit path to the relevant project or subdirectory before searching. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Continue from next_offset when present. If truncated=true without next_offset, narrow path, include, or pattern. Counts are matching-line counts, not occurrence counts; when truncated=true, treat them as lower bounds, not exact totals. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
+        "Search UTF-8 file contents. Prefer this over shell grep and limit path to the relevant file or directory. Use output=files to locate files, then read the relevant ranges with read_file before editing. Use output=content for matching lines and add only the context_lines you need. Continue from next_offset when present. If truncated=true without next_offset, narrow path, include, or pattern. Counts are matching-line counts, not occurrence counts; when truncated=true, treat them as lower bounds, not exact totals.",
       inputSchema: z
         .object({
           pattern: z.string().min(1),

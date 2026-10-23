@@ -12,7 +12,7 @@ export function buildTerminalTools(ctx: ToolContext) {
   return {
     get_terminal_output: tool({
       description:
-        "Read retained output from the active terminal to inspect commands or errors. Defaults: lines=80, offset=0. offset skips lines from the end; lines=80, offset=80 reads the previous 80 lines. New output shifts offsets, so pages may overlap or miss lines. Returns up to 2000 lines and 24000 characters; character truncation keeps the end of the requested range. Returns empty output when no terminal or history is available; refuses Privacy mode.",
+        "Inspect commands or errors in the active terminal. Start with the latest output (lines=80, offset=0 by default). To inspect earlier output, increase offset; lines=80, offset=80 requests the previous 80 lines. Do not treat successive reads as a fixed snapshot: new output shifts offsets and can cause overlaps or gaps. Each result is limited to 2000 lines and 24000 characters and may keep only the end of the requested range. If output is empty, do not infer that a command succeeded; there may be no terminal or retained history. Respect Privacy mode refusals.",
       inputSchema: z.object({
         lines: z
           .number()

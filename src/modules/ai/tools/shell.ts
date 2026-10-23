@@ -19,16 +19,16 @@ const DEFAULT_YIELD_MS = 10_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 
 const POSIX_INDEPENDENT_SERVICE =
-  "For an independent noninteractive service that must outlive Terax, use nohup with all three standard streams redirected, e.g. nohup ./server </dev/null >server.log 2>&1 & echo $!.";
+  "For a service that must keep running after Terax exits, use nohup and redirect stdin, stdout, and stderr, e.g. nohup ./server </dev/null >server.log 2>&1 & echo $!.";
 
 /** 仅选择实际执行环境的说明，避免把宿主平台或其他连接方式写入模型工具定义。 */
 const SHELL_ENVIRONMENT_DESCRIPTIONS = {
   Windows:
-    "This tool runs on local Windows. Start-Process and Start-Job inside this tool do not escape its Job Object. For independent launch, use the system WMI/CIM Win32_Process.Create method with absolute executable paths, set CurrentDirectory and Win32_ProcessStartup.ShowWindow=0, redirect stdin and both outputs in the launched command, and check ReturnValue and ProcessId. The independent process does not inherit this tool's environment variables.",
-  Linux: `This tool runs on local Linux. ${POSIX_INDEPENDENT_SERVICE}`,
-  macOS: `This tool runs on local macOS. ${POSIX_INDEPENDENT_SERVICE}`,
-  wsl: `This tool runs inside the current WSL distribution. Service commands, paths, and logs belong to that distribution. ${POSIX_INDEPENDENT_SERVICE}`,
-  ssh: `This tool runs on the current Linux SSH host. Commands, paths, and logs are remote. SSH connection loss can interrupt managed processes; neither survival nor successful remote cleanup is guaranteed after a disconnect. ${POSIX_INDEPENDENT_SERVICE}`,
+    "Run commands on local Windows and leave login unset or false. For a service that must keep running after Terax exits, use WMI/CIM Win32_Process.Create instead of Start-Process or Start-Job. Use absolute executable paths, set CurrentDirectory and Win32_ProcessStartup.ShowWindow=0, and redirect stdin, stdout, and stderr in the launched command. Set any required environment explicitly in that command. Check ReturnValue and ProcessId.",
+  Linux: `Run commands on local Linux. ${POSIX_INDEPENDENT_SERVICE}`,
+  macOS: `Run commands on local macOS. ${POSIX_INDEPENDENT_SERVICE}`,
+  wsl: `Run commands and use paths inside the current WSL distribution. ${POSIX_INDEPENDENT_SERVICE}`,
+  ssh: `Run commands and use paths on the current Linux SSH host. After an SSH disconnect, check the actual process state before retrying a launch or claiming cleanup succeeded. ${POSIX_INDEPENDENT_SERVICE}`,
   Unknown: "",
 };
 
@@ -74,7 +74,7 @@ const waitOptions = {
     .max(120_000)
     .optional()
     .describe(
-      "Maximum time to wait for wait_for. Only valid when wait_for is set and defaults to 10000. This does not change the process timeout.",
+      "Use with wait_for and omit yield_time_ms. Defaults to 10000 ms. This does not change the process timeout.",
     ),
 };
 
@@ -164,16 +164,16 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Recognized commands within the session working directory run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. The process timeout starts at launch and continues after status=running is returned; pass timeout_secs=null for an intentionally long-running server or watcher. A running response confirms launch, not success. If the task depends on the result, poll until exit and check the exit status before claiming completion. Normal agent or subagent completion does not stop managed background processes, but cancellation of their execution, explicit termination, timeout, chat deletion, and application exit can stop them. " +
+        "Run tests, builds, package commands, or services.\n- Initialize any required environment in command on every call, or use conda run -n <env> or a verified interpreter path. Do not assume the user's terminal environment is active.\n- For a finite command, if status=running, poll with shell_process until exit and check exit_code before claiming success. For a server or watcher, use timeout_secs=null and verify readiness without waiting for exit.\n- Use commands that work without an interactive terminal; do not start vim, less, or top.\n- Managed processes stop on timeout, execution cancellation, chat deletion, or Terax exit. Stop temporary processes before finishing; task completion alone does not stop them.\n" +
         environmentDescription +
-        " Wait for the launcher to exit and separately verify the service PID and readiness; launcher success is not service success. Independently launched services are not registered in shell_list, cannot be controlled by shell_process, and are not covered by this tool's timeout or cleanup after the launcher exits; inspect their log files and stop them explicitly by their verified OS identity. Before finishing, terminate temporary processes you no longer need; report the managed process_id or independent OS PID, purpose, observed status, access details, log locations, and how to stop any intentionally retained services. Subagents must include this handoff in their result. Only stop processes you started or were explicitly asked to manage. Never start full-screen TTY programs such as vim, less, or top.",
+        "\nFor an independent service, verify its PID and readiness, inspect its logs, and stop it using OS commands; shell_list and shell_process cannot manage it after its launcher exits. Only stop processes you started or were asked to manage. For services left running, report the process_id or OS PID, purpose, observed status, access address, logs, and stop command, including in subagent reports.",
       inputSchema: z.object({
         command: z
           .string()
           .min(1)
           .max(256 * 1024)
           .describe(
-            "Shell source interpreted directly by the selected shell. Use its syntax and invoke scripts directly. When nesting shells, protect inner variables from expansion by the outer shell." +
+            "Write commands using the selected shell's syntax. Terax supplies shell startup flags; do not wrap the command in another shell unless the task requires it. If nesting shells, quote inner variables so the outer shell does not expand them." +
               (hasPowerShell
                 ? " For PowerShell scripts, use & './script.ps1' in the selected interpreter."
                 : ""),
@@ -184,7 +184,7 @@ export function buildShellTools(ctx: ToolContext) {
           .nullable()
           .optional()
           .describe(
-            "Explicit cwd applies only to this process; relative values resolve from the session's fixed working directory. If omitted or null, uses the chat cwd, initially the session directory. Only commands without explicit cwd that finish before shell_exec returns update the chat cwd.",
+            "Set cwd whenever a command needs a specific directory; relative values resolve from the session Working directory. Omit or use null to use the chat's last remembered shell directory, initially the session directory. Setting cwd applies only to this call.",
           ),
         timeout_secs: z
           .number()
@@ -194,7 +194,7 @@ export function buildShellTools(ctx: ToolContext) {
           .nullable()
           .optional()
           .describe(
-            "Process lifetime limit in seconds, counted from launch and still active after status=running is returned. Defaults to 300; use null to disable the automatic timeout for an intentionally long-running process.",
+            "Set the process timeout in seconds; defaults to 300. Use null for an intentionally long-running server or watcher. Finish or stop the process before this deadline; returning status=running or polling does not extend it.",
           ),
         yield_time_ms: z
           .number()
@@ -215,13 +215,13 @@ export function buildShellTools(ctx: ToolContext) {
           .enum(["default", ...shells.map(({ kind }) => kind)])
           .optional()
           .describe(
-            'Omitted or "default" uses the default interpreter listed in SESSION ENVIRONMENT. Explicit selectors use their listed executable. Use the selected interpreter’s syntax. Unavailable selections fail; execution failures never switch interpreters.',
+            'Omit or use "default" for the default shell in SESSION ENVIRONMENT. To choose another listed shell, pass its selector here and write command in its syntax. If execution fails, inspect the error; the tool does not retry with a different shell.',
           ),
         login: z
           .boolean()
           .optional()
           .describe(
-            "Defaults to false. Requests login mode for the selected interpreter; unsupported selections fail.",
+            "Omit or leave false normally. Use true only to load login startup files in a supported shell. Initialize any required environment explicitly in command.",
           ),
       }),
       execute: async (input) => {
@@ -296,7 +296,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     shell_list: tool({
       description:
-        "List managed shell processes owned by this chat in the current Workspace. Call this before starting a dev server or watcher so an existing process can be reused instead of duplicated. Auto-executes.",
+        "List this chat's managed shell processes. Check before starting a server or watcher; reuse an appropriate running process instead of starting a duplicate.",
       inputSchema: z.object({
         include_exited: z
           .boolean()

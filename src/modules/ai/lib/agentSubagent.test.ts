@@ -1166,7 +1166,7 @@ describe.sequential("Agent background subagents", () => {
         )
         .slice(-1)[0];
       expect(JSON.stringify(summaryCall?.prompt)).toContain(
-        "reached its tool-step limit",
+        "Stop using tools: you have reached the step limit.",
       );
       const firstChild = activeModel.doStreamCalls.find((call) =>
         JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),

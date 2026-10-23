@@ -23,7 +23,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a known UTF-8 text file with 1-based line numbers. The response reports end_line, total_lines, next_line, truncated, and line_truncated; continue from next_line when present. line_truncated=true means one long line was only partially returned and cannot be continued by line number, so never use that partial content for a complete rewrite. unchanged=true means duplicate content was omitted, not that the file is empty; reuse the previous read or set force=true to retrieve it again. Binary, non-UTF-8, oversized, and special-device paths are refused; non-UTF-8 text may be reported as binary. Outside-workspace and sensitive paths require approval unless full access is enabled.",
+        "Read a UTF-8 text file with 1-based line numbers.\n- Before editing existing content, read the relevant range here unless this chat already read or successfully wrote the current version. A partial read allows targeted edits; grep and shell output do not satisfy this requirement.\n- Continue from next_line to read more. If line_truncated=true, do not reconstruct the whole file from this output; increasing start_line cannot retrieve the missing part of that line.\n- If unchanged=true, reuse the previous content or set force=true to read it again. Do not treat omitted content as an empty file.\nBinary, non-UTF-8, oversized files, and device paths are unsupported.",
       inputSchema: z.object({
         path: z.string().min(1),
         start_line: z
@@ -82,7 +82,7 @@ export function buildFsTools(ctx: ToolContext) {
     write_file: tool({
       ...fileEditInputHooks(ctx, "write_file"),
       description:
-        "Create one complete UTF-8 text file, or intentionally rewrite one complete file. Missing parent directories are created automatically. mode defaults to create and refuses an existing target. Use rewrite only when the complete current content is known from read_file or the complete file content was authored by this chat; use apply_patch for targeted changes or partially read files. Workspace-local writes run automatically; outside or sensitive paths require approval unless full access is enabled.",
+        "Write a complete UTF-8 text file; missing parent directories are created automatically. Use apply_patch for targeted changes or partially read files. Supply raw content without read_file line-number prefixes.",
       inputSchema: z.object({
         path: z.string().min(1),
         content: z.string(),
@@ -90,7 +90,7 @@ export function buildFsTools(ctx: ToolContext) {
           .enum(["create", "rewrite"])
           .optional()
           .describe(
-            "Defaults to create, which refuses an existing target. rewrite replaces the complete existing file and requires a current version baseline from read_file or a successful write_file/apply_patch in this chat.",
+            "Defaults to create, which requires a missing target. Use rewrite only when this chat has read or successfully written the complete current file content.",
           ),
       }),
       execute: async (input, { toolCallId }) => {
@@ -112,7 +112,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     file_operation: tool({
       description:
-        "Perform one structural filesystem operation: move, copy, delete, or create_directory. move/copy require destination and never overwrite it. copy supports files only. Deleting a directory requires recursive=true. Workspace-local ordinary operations run automatically; recursive deletion, outside paths, and sensitive paths require approval unless full access is enabled.",
+        "Move or delete a file or directory, copy a file, or create a directory. For move or copy, provide destination and choose a target that does not already exist; omit destination otherwise. To delete a directory, set recursive=true. Omit recursive for other operations.",
       inputSchema: z
         .object({
           operation: z.enum(["move", "copy", "delete", "create_directory"]),

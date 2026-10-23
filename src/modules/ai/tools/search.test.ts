@@ -162,7 +162,6 @@ describe("AI search tools", () => {
     expect(properties.limit.description).toContain("Defaults to 30");
     expect(tools.grep.description).toContain("Continue from next_offset");
     expect(tools.grep.description).toContain("lower bounds, not exact totals");
-    expect(tools.find_files.description).toContain("require approval");
     if (!grepSchema.validate) throw new Error("grep validator missing");
     for (const output of ["files", "count"]) {
       expect(

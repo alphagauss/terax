@@ -28,7 +28,7 @@ export function buildMessageTools(ctx: ToolContext) {
   return {
     message: tool({
       description:
-        "Send text or existing files to the current channel conversation. Paths may be absolute or relative to the session cwd. Use this to deliver attachments; writing a path in your reply does not send a file. Ordinary final text replies are delivered automatically. presentation defaults to file; request image, video, or audio only when that presentation is intended. accepted means the platform accepted the message, not that the recipient read it. Do not repeat an unknown delivery: the platform may already have accepted it.",
+        "Send text or existing files to the current channel conversation. To deliver a file, put its absolute path or path relative to the session cwd in attachments; writing a path in your reply does not send it. Use the final reply for ordinary text and avoid sending the same text twice. Leave presentation as file unless you intend image, video, or audio presentation. Check the returned status and parts; report only confirmed accepted parts as delivered, not that the recipient read them. If a delivery status is unknown, do not resend that part automatically: the platform may already have accepted it.",
       inputSchema: messageInputSchema,
       execute: async (input, { abortSignal }) => {
         if (!send) return { error: "Channel delivery is unavailable" };

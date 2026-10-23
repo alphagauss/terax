@@ -28,7 +28,7 @@
 
 - 读取和写入同时检查字面路径、canonical 路径与普通文件类型；不存在的目标解析最近存在祖先，I/O 使用授权后的稳定物理路径。敏感类别以源码策略为准，发现和宽泛搜索不能泄露被过滤结果。
 - Windows Local 拒绝设备名和 alternate data stream；WSL、SSH 保持各自路径大小写语义。移动或删除最终符号链接只操作链接本身。
-- `write_file` 明确区分 create 与 rewrite，并创建父目录。create 要求目标仍缺失；rewrite 和 `apply_patch` 要求当前聊天通过 `read_file` 或成功的 `write_file`、`apply_patch` 建立当前版本基线。目标内容已知且文件未被外部修改时，无须重复读取。
+- `write_file` 明确区分 create 与 rewrite，并创建父目录。create 要求目标仍缺失；rewrite 和 `apply_patch` 要求当前聊天通过 `read_file` 或成功的 `write_file`、`apply_patch` 建立当前版本基线。局部读取可以建立基线，搜索和 Shell 输出不能。目标内容已知且文件未被外部修改时，无须重复读取。批量补丁在路径授权后一次报告全部缺失基线的文件，此时不写入任何文件。
 - 精确补丁仅处理已有的 UTF-8 文件，并保留原 CRLF 换行风格。
 - 自动写入和需审批写入都经过 prepared mutation 与条件提交。需要审批时先生成不可变 before/after，在一个或多个只读 diff 页按整个调用决定，批准前不得写入。
 - 提交前重验路径和全部基线，再逐文件原子发布；中途失败尽力回滚，不承诺跨文件系统事务。结构操作拒绝隐式覆盖、文件系统根和未显式声明的目录递归删除。

@@ -46,7 +46,7 @@ import {
 
 const SUBAGENT_STEP_LIMIT_ERROR =
   "Subagent reached its step limit before completing the task.";
-const SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT = `The Subagent has reached its tool-step limit. Do not call any more tools. Based only on the task, conversation, and tool results already available, provide a concise partial report with: completed work, confirmed findings or evidence, unresolved items, and recommended next steps. Clearly state that the task is incomplete and do not claim full completion.`;
+const SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT = `Stop using tools: you have reached the step limit. Using only the task, conversation, and results already available, give a concise partial report of completed work, confirmed findings and evidence, unresolved items, and recommended next steps. Clearly state that the task is incomplete; do not claim full completion.`;
 /** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
 export function buildSubagentTaskRunner({
   opts,

@@ -25,7 +25,7 @@ describe("agent configuration", () => {
     expect(MAIN_AGENT.instructions).toContain(":line_number");
     expect(MAIN_AGENT.instructions).not.toMatch(/Windows|Linux|macOS|WSL|SSH/);
     expect(MAIN_AGENT.instructions).toContain(
-      "Relative paths are also supported and resolve from the session's fixed Working directory",
+      "If using a relative path, resolve it from the session's Working directory.",
     );
     expect(CHANNEL_AGENT.instructions).not.toContain("# File references");
     expect(CHANNEL_AGENT.tools).not.toContain("get_terminal_output");

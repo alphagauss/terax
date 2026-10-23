@@ -2020,8 +2020,8 @@ async fn prepare_writes(
                 return Err(format!("patch must contain 1 to {MAX_PATCH_FILES} files"));
             }
             let mut seen = HashSet::new();
-            let mut total_bytes: usize = 0;
-            let mut writes = Vec::with_capacity(files.len());
+            let mut authorized_files = Vec::with_capacity(files.len());
+            let mut missing_reads = Vec::new();
             for file in files {
                 if file.edits.is_empty() || file.edits.len() > MAX_EDITS_PER_FILE {
                     return Err(format!(
@@ -2035,6 +2035,20 @@ async fn prepare_writes(
                 if !seen.insert(authorized.canonical.clone()) {
                     return Err(format!("duplicate patch path: {}", authorized.actual));
                 }
+                if state.read_version(owner, &authorized.canonical).is_none() {
+                    missing_reads.push(authorized.actual.clone());
+                }
+                authorized_files.push((file, authorized));
+            }
+            if !missing_reads.is_empty() {
+                return Err(format!(
+                    "must call read_file on these paths first:\n{}\nNo files were written.",
+                    missing_reads.join("\n")
+                ));
+            }
+            let mut total_bytes: usize = 0;
+            let mut writes = Vec::with_capacity(authorized_files.len());
+            for (file, authorized) in authorized_files {
                 let snapshot = read_text_snapshot(&authorized.io_path, workspace).await?;
                 require_read_version(state, owner, &authorized.canonical, &snapshot.version)?;
                 let (after, replacements) = apply_edits(snapshot.content.clone(), &file.edits)?;
@@ -2418,6 +2432,73 @@ async fn copy_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn batch_patch_reports_all_missing_reads_without_writing_and_can_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = to_canon(directory.path());
+        let state = AgentFileState::default();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let owner = Uuid::new_v4().to_string();
+        let names = ["read.txt", "unread-a.txt", "unread-b.txt"];
+        for name in names {
+            std::fs::write(directory.path().join(name), "before\r\n").unwrap();
+        }
+        let read = |path| {
+            agent_file_read(
+                &state,
+                &registry,
+                serde_json::from_value(serde_json::json!({
+                    "ownerSessionId": owner, "root": root, "permissionMode": "ask", "path": path
+                }))
+                .unwrap(),
+            )
+        };
+        let prepare = || {
+            agent_file_prepare_mutation(&state, &registry, serde_json::from_value(serde_json::json!({
+                "ownerSessionId": owner, "toolCallId": "edit", "root": root, "permissionMode": "ask",
+                "mutation": { "kind": "patch", "files": names.map(|path| serde_json::json!({
+                    "path": path, "edits": [{ "old_text": "before", "new_text": "after" }]
+                })) }
+            })).unwrap())
+        };
+        read(names[0]).await.unwrap();
+        let error = prepare().await.err().unwrap();
+        assert!(error.contains("unread-a.txt"), "{error}");
+        assert!(error.contains("unread-b.txt"), "{error}");
+        assert!(!error.contains("/read.txt"), "{error}");
+        assert!(error.contains("No files were written"), "{error}");
+        assert!(state.prepared.lock().await.is_empty());
+        for name in names {
+            assert_eq!(
+                std::fs::read_to_string(directory.path().join(name)).unwrap(),
+                "before\r\n"
+            );
+        }
+        for name in &names[1..] {
+            read(*name).await.unwrap();
+        }
+        assert_eq!(prepare().await.unwrap().files.len(), names.len());
+        let result = agent_file_commit_mutation(
+            &state,
+            &registry,
+            &(),
+            AgentMutationKeyRequest {
+                owner_session_id: owner.clone(),
+                tool_call_id: "edit".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        for name in names {
+            assert_eq!(
+                std::fs::read_to_string(directory.path().join(name)).unwrap(),
+                "after\r\n"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn committed_mutations_keep_edit_versions_without_marking_content_as_read() {

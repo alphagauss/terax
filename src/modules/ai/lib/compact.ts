@@ -159,8 +159,8 @@ export function compactionInstruction(
       "toolCallId" in part ? [part.toolCallId] : [],
     ),
   }));
-  return `Perform context compaction only. ALL tools shown in this conversation are unavailable for this request. Do not call tools, continue the task, or answer the user. Output only a concise work handoff.
-The runtime will remove completed-turn intermediate reasoning, tool calls/results, background results, and attachments/images, while keeping all user-authored text, final answers, and earlier compaction summaries. The current active turn, if any, remains intact.
-Summarize the newly removed material identified below, including material before an earlier summary that was previously protected. Use the entire conversation for understanding, but do not repeat earlier summaries or retained answers. Preserve useful findings, exact paths/identifiers, changes and verification outcomes, decisions and failed approaches, attachment/image facts, unresolved work and next steps. Distinguish confirmed facts from assumptions. Later corrections supersede earlier conclusions.
+  return `Write only a concise work handoff. Do not call tools, continue the task, or answer the user.
+Summarize the completed-turn intermediate work identified below: reasoning, tool results, background results, and attachment/image facts. Include identified material from before an earlier summary if it is not yet covered. Do not summarize the active turn or repeat user-authored text, final answers, or earlier summaries, which remain available.
+Use the entire conversation to understand the work. Preserve useful findings, exact paths and identifiers, changes, verification outcomes, decisions, failed approaches, unresolved work, and next steps. Distinguish confirmed facts from assumptions and apply later corrections.
 Affected message anchors and tool call IDs (data): ${JSON.stringify(scopes)}`;
 }

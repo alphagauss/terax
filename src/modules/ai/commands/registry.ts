@@ -39,7 +39,7 @@ const INIT_PROMPT = `Scan this workspace and create or update AGENTS.md at the w
 
 If AGENTS.md already exists, preserve valid project-specific instructions and update it surgically instead of replacing it blindly.
 
-Use grep/find_files/read_file to explore. Cap AGENTS.md under 200 lines. Use write_file mode=create for a new file, mode=rewrite for an intentionally complete replacement, or apply_patch for targeted updates. All mutations use the normal approval flow.`;
+Use grep/find_files/read_file to explore, and read an existing AGENTS.md before editing it. Keep AGENTS.md under 200 lines. Use write_file mode=create for a new file, mode=rewrite for an intentionally complete replacement, or apply_patch for targeted updates.`;
 
 function noArguments(
   args: string,

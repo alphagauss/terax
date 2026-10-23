@@ -237,7 +237,7 @@ describe("agent system prompt", () => {
     expect(prompt).toContain('"version":"5.1"');
     expect(prompt).not.toContain('"version":null');
     expect(prompt).toContain(
-      'Omitting shell or choosing "default" executes commands directly in the default shell.',
+      "Put commands directly in shell_exec.command",
     );
     const unknownVersionPrompt = buildAgentSystemPrompt({
       ...options,
@@ -262,7 +262,7 @@ describe("agent system prompt", () => {
     expect(cmdPrompt).not.toContain('"pwsh"');
     expect(cmdPrompt).not.toContain('"powershell"');
     expect(prompt).toContain(
-      'Omitting shell or choosing "default" executes commands directly in the default shell.',
+      "Use the default shell unless the task needs another listed shell.",
     );
     expect(prompt).toContain('Working directory: "D:/workspace/project"');
 

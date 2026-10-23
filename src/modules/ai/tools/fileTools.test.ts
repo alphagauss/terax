@@ -97,7 +97,7 @@ describe("AI file tools", () => {
       'Example: {"files":[{"path":"a.py","edits":',
     );
     expect(tool.description).toContain(
-      'must omit the "N| " line-number prefixes',
+      "without read_file line-number prefixes",
     );
     expect(files.description).toContain("JSON array, not a string");
     expect(files.items?.properties?.edits.description).toContain(
@@ -122,11 +122,13 @@ describe("AI file tools", () => {
     >;
 
     expect(tools.read_file.description).toContain("line_truncated=true");
-    expect(tools.read_file.description).toContain("continue from next_line");
-    expect(tools.read_file.description).toContain("not that the file is empty");
+    expect(tools.read_file.description).toContain("Continue from next_line");
+    expect(tools.read_file.description).toContain(
+      "Do not treat omitted content as an empty file",
+    );
     expect(readProperties.force.description).toContain("exact range");
-    expect(tools.write_file.description).toContain(
-      "complete current content is known",
+    expect(writeProperties.mode.description).toContain(
+      "read or successfully written the complete current file content",
     );
     expect(writeProperties.mode.description).toContain("Defaults to create");
   });

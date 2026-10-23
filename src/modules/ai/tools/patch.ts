@@ -15,7 +15,7 @@ export function buildPatchTools(ctx: ToolContext) {
     apply_patch: tool({
       ...fileEditInputHooks(ctx, "apply_patch"),
       description:
-        'Apply ordered exact-text replacements to one or more existing UTF-8 files. Each file requires a current version baseline from read_file or a successful write_file/apply_patch in this chat; no reread is needed while the target text is known and the file is unchanged. old_text and new_text are raw file content and must omit the "N| " line-number prefixes added by read_file. Each non-replace_all old_text must occur exactly once; any invalid edit aborts the whole preparation before writing. Pass files and edits as JSON arrays, never as JSON-encoded strings. Example: {"files":[{"path":"a.py","edits":[{"old_text":"old","new_text":"new"}]}]}. Workspace-local patches run automatically; outside or sensitive paths require approval unless full access is enabled.',
+        'Replace exact text in existing UTF-8 files.\n- Read each target with read_file first unless this chat already read or successfully wrote its current version. Reading the relevant range is sufficient; grep and shell output do not count.\n- Put path and edits inside each files entry. Example: {"files":[{"path":"a.py","edits":[{"old_text":"old","new_text":"new"}]}]}.\n- Use raw content without read_file line-number prefixes. Choose old_text that matches exactly once, or set replace_all=true. For multiple edits to one file, match the text left by earlier edits.\nIf an edit is invalid, no files are written. If a file changed since reading, reread it and revise the patch.',
       inputSchema: z.object({
         files: z
           .array(
@@ -24,7 +24,7 @@ export function buildPatchTools(ctx: ToolContext) {
                 .string()
                 .min(1)
                 .describe(
-                  "Path to an existing UTF-8 file with a current version baseline from read_file or a successful write_file/apply_patch in this chat.",
+                  "Path to an existing UTF-8 file; include each path only once.",
                 ),
               edits: z
                 .array(

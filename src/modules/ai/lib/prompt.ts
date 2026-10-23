@@ -95,11 +95,11 @@ Shell choices (selector, executable, version): ${JSON.stringify(
   )}
 ${
   environment.shells.length
-    ? `Omitting shell or choosing "default" executes commands directly in the default shell.`
-    : "No supported shell was found in this environment. Shell execution is unavailable."
+    ? `Use the default shell unless the task needs another listed shell. Put commands directly in shell_exec.command and use the selected shell's syntax; the tool sets shell startup options automatically.`
+    : "Shell execution is unavailable. Use other available tools and explain when missing shell access prevents completion."
 }${hasSh ? "\nUse POSIX syntax when selecting sh." : ""}
 Working directory: ${JSON.stringify(cwd)}
-Relative paths passed to tools resolve from this directory. This environment is fixed for the session.`;
+Use this environment for all tool calls. Resolve relative file paths from the Working directory above; use shell_exec.cwd to choose a command's directory.`;
   return composeAgentPromptSections({
     environment: environmentBlock,
     workspace: projectInstructions.map(({ path, content }) =>

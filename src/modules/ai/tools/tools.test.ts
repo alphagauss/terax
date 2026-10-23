@@ -66,7 +66,7 @@ describe("AI tool provider schemas", () => {
       "Linux SSH",
       { kind: "ssh", profileId: "server" } as const,
       "windows" as const,
-      /SSH connection loss/,
+      /After an SSH disconnect/,
       /Windows|macOS|WSL|WMI|Start-Process/,
     ],
   ])(
