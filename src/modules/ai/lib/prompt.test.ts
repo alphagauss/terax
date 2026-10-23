@@ -112,7 +112,9 @@ describe("agent system prompt", () => {
         sections.find((section) => section.kind === kind)?.content,
       );
     }
-    expect(buildAgentSystemPrompt(options)).not.toContain("developer terminal");
+    expect(buildAgentSystemPrompt(options)).not.toContain(
+      "Help the user work in the Terax desktop developer terminal.",
+    );
     expect(buildAgentSystemPrompt(options)).not.toContain(
       "approval UI is the confirmation",
     );
