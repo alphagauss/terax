@@ -282,10 +282,14 @@ export function ErrorHost() {
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (
-        event.key === "Escape" &&
-        !event.defaultPrevented &&
-        !mount.querySelector('[role="menu"]')
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        mount.querySelector('[role="menu"]')
       )
+        return;
+      // 先于 Radix 对话框消费 Escape，避免同时丢弃底层草稿；输入法取消仅消费按键。
+      event.preventDefault();
+      if (!event.isComposing && event.keyCode !== 229)
         setErrorHistoryOpen(false);
     };
     const blur = () => setErrorHistoryOpen(false);
@@ -294,13 +298,13 @@ export function ErrorHost() {
     };
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("focusin", outside);
-    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", closeOnEscape, true);
     window.addEventListener("blur", blur);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("focusin", outside);
-      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("keydown", closeOnEscape, true);
       window.removeEventListener("blur", blur);
       document.removeEventListener("visibilitychange", visibility);
     };

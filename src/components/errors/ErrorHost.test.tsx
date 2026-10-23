@@ -260,6 +260,66 @@ it("错误节点进入模态框焦点范围且不重建详情，关闭弹窗后�
   expect(document.querySelector("body > [data-error-host] pre")).toBe(details);
 });
 
+it("模态框内 Escape 优先收起错误列表，输入法取消保留列表和草稿", async () => {
+  const changed = vi.fn();
+  await act(async () => {
+    root.render(
+      <>
+        <ErrorHost />
+        <Dialog open onOpenChange={changed}>
+          <DialogContent>
+            <DialogTitle>settings</DialogTitle>
+            <input aria-label="draft" />
+          </DialogContent>
+        </Dialog>
+      </>,
+    );
+  });
+  await act(async () => {
+    reportError("failed");
+    setErrorHistoryOpen(true);
+  });
+  expect(
+    document.querySelector('[role="dialog"] [data-error-host]'),
+  ).not.toBeNull();
+  await act(async () => button("errors.copy").focus());
+  for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+    await act(async () =>
+      button("errors.copy").dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+          ...composing,
+        }),
+      ),
+    );
+    expect(errorStore.getState().historyOpen).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+  }
+  await act(async () =>
+    button("errors.copy").dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(errorStore.getState().historyOpen).toBe(false);
+  expect(changed).not.toHaveBeenCalled();
+  await act(async () =>
+    document.querySelector("input")?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(changed).toHaveBeenCalledExactlyOnceWith(false);
+});
+
 it("页内弹窗的祖先隐藏或禁用后释放错误浮层，重新显示时恢复归属", async () => {
   const render = (hidden: boolean) =>
     root.render(
