@@ -76,7 +76,7 @@ try {
 
 ## 证据与收尾
 
-React 开发组件轨道会把变化前后的完整 props 复制到浏览器 Performance 时间线，长流可能在 JS 堆之外累积大量内存。桌面入口默认及时清理这些组件记录，业务埋点、断点、热更新和源码映射不受影响。需要直接查询最近的组件记录时设置 `VITE_REACT_PROFILE=true`，保留窗口为一秒；浏览器性能录制仍可消费轨道事件。不要通过关闭整个 Performance API 或要求用户清空会话处理内存问题。
+React 开发组件轨道会复制变化前后的 props。React DOM 19.3 已包含[性能记录回收修复](https://github.com/react/react/pull/34803)，由 React 自身及时清理组件记录，主窗口和辅助窗口不再安装额外观察器；浏览器 Performance 录制仍能消费轨道事件。不要通过关闭整个 Performance API 或要求用户清空会话处理内存问题。
 
 AI 性能验证同时记录 renderer 私有内存、JS 堆、Performance 记录数量和可见组件订阅；分别验证长流、内外层折叠、侧栏隐藏、取消与冷恢复。
 

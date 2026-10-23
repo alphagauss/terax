@@ -5,7 +5,6 @@
 
 import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
 import { PageContextMenu } from "@/components/menu/PageContextMenu";
-import "@/lib/developmentPerformance";
 import { installEditableClipboard } from "@/lib/editableClipboard";
 import { TooltipProvider } from "@/components/controls/tooltip";
 import {
