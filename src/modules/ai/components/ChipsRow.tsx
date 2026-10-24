@@ -8,12 +8,15 @@ import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
 import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 import { useTranslation } from "react-i18next";
 import type { FileAttachment } from "../lib/composer";
 import type { Snippet } from "../lib/snippets";
 import { Chip } from "./Chip";
 
 type Props = {
+  /** 隐藏时停止布局观察，标签与附件仍由输入区持有。 */
+  active?: boolean;
   files: FileAttachment[];
   onRemoveFile: (id: string) => void;
   snippets: Snippet[];
@@ -22,7 +25,9 @@ type Props = {
   leading?: ReactNode;
 };
 
+/** 附件和片段增删后平滑补位，换行不重建已有标签。 */
 export function ChipsRow({
+  active = true,
   files,
   onRemoveFile,
   snippets,
@@ -33,7 +38,7 @@ export function ChipsRow({
   const hasAttachments = files.length > 0 || snippets.length > 0;
   if (!leading && !hasAttachments) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <LayoutFlow active={active} className="flex flex-wrap items-center gap-1.5">
       {leading}
       {snippets.map((s) => (
         <Chip
@@ -70,7 +75,7 @@ export function ChipsRow({
           ) : null}
         </Chip>
       ))}
-    </div>
+    </LayoutFlow>
   );
 }
 

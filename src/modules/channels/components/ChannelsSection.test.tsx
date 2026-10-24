@@ -76,7 +76,9 @@ let container: HTMLDivElement;
 
 beforeEach(async () => {
   io.reportError.mockReset();
-  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  vi.stubGlobal("matchMedia", () =>
+    Object.assign(new EventTarget(), { matches: true }),
+  );
   usePreferencesStore.setState(DEFAULT_PREFERENCES);
   io.model.mockReset().mockResolvedValue(undefined);
   io.parameters.mockReset().mockResolvedValue(undefined);

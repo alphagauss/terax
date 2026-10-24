@@ -6,6 +6,7 @@
 import { Button } from "@/components/controls/button";
 import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,8 +67,9 @@ import { useComposerDrop } from "@/modules/ai/hooks/useComposerDrop";
 /**
  * AI 侧栏输入组件。
  * 负责附件、模型和权限选择；运行中有输入时提供引导，并始终保留中止入口。
+ * 隐藏时只释放布局动效的观察，保留草稿、附件和业务运行。
  */
-export function AiSidebarComposer() {
+export function AiSidebarComposer({ visible = true }: { visible?: boolean }) {
   const { t } = useTranslation("ai");
   const c = useComposer();
   const drop = useComposerDrop(c);
@@ -103,6 +105,7 @@ export function AiSidebarComposer() {
         {drop.active ? <FileDropOutline /> : null}
 
         <ChipsRow
+          active={visible}
           files={c.files}
           onRemoveFile={c.removeFile}
           snippets={c.pickedSnippets}
@@ -124,7 +127,10 @@ export function AiSidebarComposer() {
         ) : null}
         <AiComposerInput />
 
-        <div className="flex min-w-0 items-center gap-0.5">
+        <LayoutFlow
+          active={visible}
+          className="flex min-w-0 items-center gap-0.5"
+        >
           <IconBtn
             title={t(
               c.canPickFiles
@@ -210,7 +216,7 @@ export function AiSidebarComposer() {
               )}
             </Button>
           </Hint>
-        </div>
+        </LayoutFlow>
 
         {c.workingDirectory ? (
           <div className="-mt-2 flex min-w-0 items-center gap-1.5 px-1 text-[11px] leading-3 text-muted-foreground">

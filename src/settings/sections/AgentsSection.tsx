@@ -64,11 +64,15 @@ import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { getToolAvailability, subscribeToolAvailability } from "@/modules/ai/lib/agentConfiguration";
+import {
+  getToolAvailability,
+  subscribeToolAvailability,
+} from "@/modules/ai/lib/agentConfiguration";
 import { Trans, useTranslation } from "react-i18next";
 import { reportError } from "@/lib/errors";
 import { FormField } from "@/components/layout/FormField";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 
 const ICON_OPTIONS: AgentIconId[] = [
   "coder",
@@ -169,7 +173,7 @@ export function AgentsSection() {
             {t("agents.list.newAgent")}
           </Button>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <LayoutFlow className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {agents.map((a) => (
             <AgentCard
               key={a.id}
@@ -181,7 +185,7 @@ export function AgentsSection() {
               }
             />
           ))}
-        </div>
+        </LayoutFlow>
       </section>
 
       <section className="flex flex-col gap-2">
@@ -223,7 +227,7 @@ export function AgentsSection() {
             />
           </div>
         ) : (
-          <ul className="flex flex-col gap-1.5">
+          <LayoutFlow as="ul" className="flex flex-col gap-1.5">
             {snippets.map((s) => (
               <li
                 key={s.id}
@@ -272,7 +276,7 @@ export function AgentsSection() {
                 </Hint>
               </li>
             ))}
-          </ul>
+          </LayoutFlow>
         )}
       </section>
 
@@ -422,7 +426,10 @@ export function AgentEditorDialog({
   onSave: (a: Agent) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const toolAvailability = useSyncExternalStore(subscribeToolAvailability, getToolAvailability);
+  const toolAvailability = useSyncExternalStore(
+    subscribeToolAvailability,
+    getToolAvailability,
+  );
   const [draft, setDraft] = useState<Agent | null>(agent);
   const [workspaceFiles, setWorkspaceFiles] = useState("");
   const [saving, setSaving] = useState(false);

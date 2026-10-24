@@ -107,7 +107,7 @@ export function AiSidebarPanel({
         )}
       </ChatDisplayContext>
       {hasComposer ? (
-        <AiSidebarComposer />
+        <AiSidebarComposer visible={visible} />
       ) : (
         <AiInputBarConnect onAdd={() => void openSettingsWindow("models")} />
       )}

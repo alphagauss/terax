@@ -2,7 +2,7 @@
 import { Component, createRef, type ReactNode, type RefObject } from "react";
 import type { ErrorReport } from "@/lib/errors";
 import { readMotionDurationMs, readMotionEasing } from "@/lib/motion";
-import { ErrorLayoutMotion } from "@/components/errors/ErrorLayoutMotion";
+import { LayoutMotion } from "@/lib/layoutMotion";
 
 type Props = {
   reports: ErrorReport[];
@@ -71,7 +71,10 @@ export class ErrorPresentation extends Component<
   private animations = new Map<HTMLElement, Animation>();
   private restores: (() => void)[] = [];
   private query: MediaQueryList | null = null;
-  private layout = new ErrorLayoutMotion();
+  private layout = new LayoutMotion({
+    surface: "[data-error-surface]",
+    retainHeight: true,
+  });
 
   static getDerivedStateFromProps(props: Props, state: State) {
     if (props.reports === state.source && props.history === state.sourceHistory)

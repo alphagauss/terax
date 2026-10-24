@@ -4,6 +4,7 @@
  */
 
 import { cn } from "@/lib/utils";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 import type { ComponentProps, ReactNode } from "react";
 
 /** 双栏按详情高度对齐底边；窄窗口中列表排列在详情上方。 */
@@ -93,8 +94,8 @@ export function ConnectionSettingsActions({
   children: ReactNode;
 }) {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+    <LayoutFlow className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
       {children}
-    </div>
+    </LayoutFlow>
   );
 }

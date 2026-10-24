@@ -52,6 +52,7 @@ import { useMemo, useRef, useState } from "react";
 import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 
 /** 主题设置分区。 */
 export function ThemesSection() {
@@ -202,7 +203,7 @@ export function ThemesSection() {
             {importError}
           </div>
         ) : null}
-        <div className="grid grid-cols-2 gap-2">
+        <LayoutFlow className="grid grid-cols-2 gap-2">
           {themes.map((theme) => {
             const v =
               theme.variants[resolvedMode] ??
@@ -294,7 +295,7 @@ export function ThemesSection() {
               </div>
             );
           })}
-        </div>
+        </LayoutFlow>
       </fieldset>
 
       <div className="flex flex-col gap-2">

@@ -132,6 +132,44 @@ it("明确边界内原本在屏外的后续内容也接续位移，边界外内�
   finish();
 });
 
+it("排列宿主拥有卡片补位，内部揭示不重复移动相邻卡片", () => {
+  const renderCards = (size: number) =>
+    act(() =>
+      root.render(
+        <section data-reveal-boundary>
+          <div data-layout-flow>
+            <div>
+              <ContentReveal open transitionKey={String(size)}>
+                <div data-size={size} />
+              </ContentReveal>
+              <div data-inside />
+            </div>
+            <div data-neighbor />
+          </div>
+          <div data-outside />
+        </section>,
+      ),
+    );
+  renderCards(100);
+  const inside = host.querySelector<HTMLElement>("[data-inside]");
+  if (!inside) throw new Error("缺少卡片内部后续内容");
+  inside.getBoundingClientRect = () =>
+    new DOMRect(
+      0,
+      Number(host.querySelector("[data-size]")?.getAttribute("data-size")),
+      200,
+      20,
+    );
+  renderCards(200);
+  expect(animate.mock.contexts).toContain(inside);
+  expect(animate.mock.contexts).not.toContain(
+    host.querySelector("[data-neighbor]"),
+  );
+  expect(animate.mock.contexts).not.toContain(
+    host.querySelector("[data-outside]"),
+  );
+});
+
 it("长列表按滚动视口揭示，后续分组与裁剪边界同步移动", () => {
   const scrollRef = createRef<HTMLDivElement>();
   const renderList = (open: boolean) =>

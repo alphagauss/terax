@@ -14,6 +14,7 @@ import {
 } from "@/components/controls/select";
 import { Hint } from "@/components/controls/tooltip";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
+import { LayoutFlow } from "@/components/layout/LayoutFlow";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -499,7 +500,7 @@ export function ModelsSection() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <LayoutFlow className="flex flex-col gap-2">
             {visibleProviders.map((provider) => {
               const providerId = builtinProviderId(provider.id);
               return (
@@ -546,7 +547,7 @@ export function ModelsSection() {
                 onRemove={() => removeCustomProvider(provider.id)}
               />
             ))}
-          </div>
+          </LayoutFlow>
         )}
       </div>
     </div>

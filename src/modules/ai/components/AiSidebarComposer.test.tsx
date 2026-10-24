@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { preloadEn } from "@/i18n";
 import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
+import type { FileAttachment } from "@/modules/ai/lib/composer";
 
 const composer = vi.hoisted(() => ({
   isBusy: true,
@@ -22,7 +23,8 @@ const composer = vi.hoisted(() => ({
   changeWorkingDirectory: vi.fn(),
   canRevealWorkingDirectory: true,
   revealWorkingDirectory: vi.fn(),
-  files: [],
+  files: [] as FileAttachment[],
+  removeFile: vi.fn(),
   pickedSnippets: [],
   voice: { supported: false },
   stop: vi.fn(),
@@ -35,7 +37,9 @@ vi.mock("@/modules/ai/hooks/useComposerDrop", () => ({
   useComposerDrop: () => ({ ref: { current: null }, active: false, label: "" }),
 }));
 vi.mock("@/modules/ai/components/AiComposerInput", () => ({
-  AiComposerInput: () => <div data-testid="composer-input" />,
+  AiComposerInput: () => (
+    <input data-testid="composer-input" defaultValue="draft" />
+  ),
 }));
 
 it("运行中提交引导后在输入框上方显示待接入状态", async () => {
@@ -51,7 +55,9 @@ it("运行中提交引导后在输入框上方显示待接入状态", async () =
     render();
     act(() =>
       container
-        .querySelector<HTMLButtonElement>('button[aria-label="Stop current execution"]')
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Stop current execution"]',
+        )
         ?.click(),
     );
     expect(composer.stop).toHaveBeenCalledTimes(1);
@@ -61,13 +67,17 @@ it("运行中提交引导后在输入框上方显示待接入状态", async () =
       'button[aria-label="Guide the current task"]',
     );
     expect(guide).not.toBeNull();
-    expect(container.querySelector('button[aria-label="Stop current execution"]')).not.toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Stop current execution"]'),
+    ).not.toBeNull();
     act(() => guide?.click());
     expect(composer.submit).toHaveBeenCalledTimes(1);
     composer.canSend = false;
     composer.pendingSteering = 1;
     render();
-    expect(container.querySelector('button[aria-label="Stop current execution"]')).not.toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Stop current execution"]'),
+    ).not.toBeNull();
     const status = container.querySelector<HTMLElement>('[role="status"]');
     const input = container.querySelector<HTMLElement>(
       '[data-testid="composer-input"]',
@@ -176,4 +186,89 @@ it("远端禁用原生文件选择入口，本机点击调用选择器", async (
     act(() => root.unmount());
     environment.IS_REACT_ACT_ENVIRONMENT = false;
   }
+});
+
+it("收起停止操作栏和标签的布局观察，恢复及移除附件保留输入草稿和剩余标签", async () => {
+  await preloadEn();
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const observed = new Set<Element>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      private targets = new Set<Element>();
+      observe(element: Element) {
+        this.targets.add(element);
+        observed.add(element);
+      }
+      unobserve(element: Element) {
+        this.targets.delete(element);
+        observed.delete(element);
+      }
+      disconnect() {
+        for (const element of this.targets) observed.delete(element);
+        this.targets.clear();
+      }
+    },
+  );
+  composer.files = [
+    {
+      id: "first",
+      kind: "selection",
+      source: "terminal",
+      text: "first selection",
+    },
+    {
+      id: "second",
+      kind: "selection",
+      source: "terminal",
+      text: "second selection",
+    },
+  ];
+  composer.removeFile.mockClear();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (visible: boolean) =>
+    act(() => root.render(<AiSidebarComposer visible={visible} />));
+  try {
+    render(true);
+    const flows = [...container.querySelectorAll("[data-layout-flow]")];
+    expect(flows).toHaveLength(2);
+    expect(flows.every((flow) => observed.has(flow))).toBe(true);
+    const input = container.querySelector<HTMLInputElement>(
+      '[data-testid="composer-input"]',
+    );
+    const chips = flows[0];
+    const remainingChip = chips.lastElementChild;
+    const remove = chips.querySelector<HTMLButtonElement>("button");
+    if (!input || !remove) throw new Error("缺少输入框或附件移除入口");
+    input.value = "keep draft";
+    input.focus();
+    input.setSelectionRange(1, 4);
+    render(false);
+    expect(flows.every((flow) => !observed.has(flow))).toBe(true);
+    expect(container.querySelector('[data-testid="composer-input"]')).toBe(
+      input,
+    );
+    expect(chips.lastElementChild).toBe(remainingChip);
+    render(true);
+    expect(flows.every((flow) => observed.has(flow))).toBe(true);
+    expect(input.value).toBe("keep draft");
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 4]);
+    act(() => remove.click());
+    expect(composer.removeFile).toHaveBeenCalledWith("first");
+    composer.files = composer.files.slice(1);
+    render(true);
+    expect(chips.children).toHaveLength(1);
+    expect(chips.firstElementChild).toBe(remainingChip);
+    expect(input.value).toBe("keep draft");
+    expect(document.activeElement).toBe(input);
+  } finally {
+    composer.files = [];
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  }
+  expect(observed.size).toBe(0);
 });

@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ErrorLayoutMotion } from "@/components/errors/ErrorLayoutMotion";
+import { LayoutMotion } from "@/lib/layoutMotion";
 
 let root: HTMLDivElement;
 let first: HTMLElement;
 let second: HTMLElement;
-let layout: ErrorLayoutMotion;
+let layout: LayoutMotion;
 let notify: () => void;
 let height: number;
 let animations: {
@@ -42,6 +42,10 @@ beforeEach(() => {
       get: () =>
         element === first ? height : element === second ? 100 : height + 100,
     });
+    Object.defineProperty(element, "offsetWidth", {
+      configurable: true,
+      value: 380,
+    });
     Object.defineProperty(element, "offsetTop", {
       configurable: true,
       get: () => (element === second ? height : 0),
@@ -62,7 +66,10 @@ beforeEach(() => {
     animations.push({ element: this, frames: frames as Keyframe[], animation });
     return animation;
   });
-  layout = new ErrorLayoutMotion();
+  layout = new LayoutMotion({
+    surface: "[data-error-surface]",
+    retainHeight: true,
+  });
   layout.sync(root);
 });
 

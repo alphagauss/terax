@@ -22,13 +22,19 @@ type Snapshot = {
 /** 宿主以 data-reveal-boundary 声明同列布局边界，范围内不省略屏外后续项。 */
 function followingElements(shell: HTMLElement) {
   const result: Snapshot["followers"] = [];
-  const boundary = shell.closest("[data-reveal-boundary]");
+  const boundary = shell.closest("[data-reveal-boundary], [data-layout-flow]");
   if (!boundary) return result;
   for (
     let branch: Element | null = shell;
     branch && branch !== boundary;
     branch = branch.parentElement
   ) {
+    // 通用排列拥有直接子项的补位，揭示只移动该子项内部的后续内容。
+    if (
+      branch.parentElement === boundary &&
+      boundary.hasAttribute("data-layout-flow")
+    )
+      break;
     for (
       let next = branch.nextElementSibling;
       next;
