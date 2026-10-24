@@ -76,7 +76,7 @@ fn pipe_host_preserves_read_before_edit_and_conflict_checks() {
     let path = root.path().join("note.txt");
     std::fs::write(&path, "before").unwrap();
     let mut host = HostProcess::new(root.path());
-    let context = json!({ "ownerSessionId": "6b9145ce-933e-4c54-8a4b-90831a2e4d84", "root": root.path(), "permissionMode": "ask", "path": "note.txt" });
+    let context = json!({ "ownerSessionId": "6b9145ce-933e-4c54-8a4b-90831a2e4d84", "toolCallId": "read", "visibleReadIds": [], "root": root.path(), "permissionMode": "ask", "path": "note.txt" });
     assert!(host
         .call("agent_file_read", json!({"request": context}))
         .get("result")

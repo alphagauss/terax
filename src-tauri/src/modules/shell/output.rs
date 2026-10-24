@@ -4,6 +4,7 @@
 //! 截断都会显式返回，避免模型在重试或长任务输出中静默丢失上下文。
 
 use std::collections::VecDeque;
+use std::time::Instant;
 
 const OUTPUT_CAPACITY: usize = 4 * 1024 * 1024;
 
@@ -26,6 +27,7 @@ pub struct OutputLog {
     next_offset: u64,
     pending_stdout: Vec<u8>,
     pending_stderr: Vec<u8>,
+    last_output_at: Option<Instant>,
 }
 
 pub struct OutputSlice {
@@ -43,6 +45,7 @@ impl OutputLog {
         if bytes.is_empty() {
             return;
         }
+        self.last_output_at = Some(Instant::now());
         let pending = match stream {
             OutputStream::Stdout => &mut self.pending_stdout,
             OutputStream::Stderr => &mut self.pending_stderr,
@@ -151,6 +154,11 @@ impl OutputLog {
         self.next_offset
     }
 
+    /// 原始字节到达即记为活动，未完成的 UTF-8 字符和未换行输出同样有效。
+    pub fn last_output_at(&self) -> Option<Instant> {
+        self.last_output_at
+    }
+
     /// 进程结束后进一步压缩保留输出，避免终态记录长期占用完整运行缓冲。
     pub fn compact(&mut self, capacity: usize) {
         self.trim_to(capacity);
@@ -209,6 +217,22 @@ fn is_utf8_continuation(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_partial_bytes_refresh_activity_but_reads_and_eof_do_not() {
+        let mut log = OutputLog::default();
+        assert!(log.last_output_at().is_none());
+        log.push(OutputStream::Stdout, &[0xe4]);
+        let first = log.last_output_at().unwrap();
+        assert!(log.read(0, 1024).stdout.is_empty());
+        log.push(OutputStream::Stderr, b"");
+        assert_eq!(log.last_output_at(), Some(first));
+        log.finish_stream(OutputStream::Stdout);
+        assert_eq!(log.last_output_at(), Some(first));
+        log.push(OutputStream::Stderr, b"no newline");
+        assert!(log.last_output_at().unwrap() >= first);
+        assert_eq!(log.read(0, 1024).stderr, "no newline");
+    }
 
     #[test]
     fn one_cursor_preserves_both_streams() {

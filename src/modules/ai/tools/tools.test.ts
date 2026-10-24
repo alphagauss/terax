@@ -92,9 +92,9 @@ describe("AI tool provider schemas", () => {
   });
   const requiredParameters = {
     read_file: ["path"],
-    write_file: ["path", "content"],
+    write_file: ["path", "content", "mode"],
     file_operation: ["operation", "path"],
-    apply_patch: ["files"],
+    apply_patch: ["edits"],
     find_files: [],
     grep: ["pattern"],
     shell_exec: ["command"],

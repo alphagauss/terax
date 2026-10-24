@@ -58,16 +58,20 @@ describe("file mutation bridge", () => {
       toolCallId: "call",
       toolName: "apply_patch",
       input: {
-        files: [
+        edits: [
           {
             path: "a.txt",
-            edits: [
-              {
-                old_text: "before",
-                new_text: "after",
-                replace_all: true,
-              },
-            ],
+            old_text: "before",
+            new_text: "after",
+            replace_all: true,
+            expected_replacements: 2,
+          },
+          { path: "b.txt", old_text: "x", new_text: "y" },
+          {
+            path: "a.txt",
+            old_text: "after",
+            new_text: "final",
+            replace_all: true,
           },
         ],
       },
@@ -87,9 +91,12 @@ describe("file mutation bridge", () => {
                   old_text: "before",
                   new_text: "after",
                   replace_all: true,
+                  expected_replacements: 2,
                 },
+                { old_text: "after", new_text: "final", replace_all: true },
               ],
             },
+            { path: "b.txt", edits: [{ old_text: "x", new_text: "y" }] },
           ],
         },
       }),

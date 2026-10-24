@@ -15,49 +15,49 @@ export function buildPatchTools(ctx: ToolContext) {
     apply_patch: tool({
       ...fileEditInputHooks(ctx, "apply_patch"),
       description:
-        'Replace exact text in existing UTF-8 files.\n- Read each target with read_file first unless this chat already read or successfully wrote its current version. Reading the relevant range is sufficient; grep and shell output do not count.\n- Put path and edits inside each files entry. Example: {"files":[{"path":"a.py","edits":[{"old_text":"old","new_text":"new"}]}]}.\n- Use raw content without read_file line-number prefixes. Choose old_text that matches exactly once, or set replace_all=true. For multiple edits to one file, match the text left by earlier edits.\nIf an edit is invalid, no files are written. If a file changed since reading, reread it and revise the patch.',
-      inputSchema: z.object({
-        files: z
+        'Replace exact text in existing UTF-8 files.\n- Read each target with read_file first unless this chat already read or successfully wrote its current version. Reading the relevant range is sufficient; grep and shell output do not count.\n- Put each replacement directly in edits. Example: {"edits":[{"path":"a.py","old_text":"old","new_text":"new"}]}. Repeat a path for further replacements in the same file, using the same spelling.\n- Use raw content without read_file line-number prefixes. Choose old_text that matches exactly once, or set replace_all=true. Use expected_replacements to require a specific match count. Later edits match the text left by earlier edits to that file.\nIf an edit is invalid, no files are written. If a file changed since reading, reread it and revise the patch.',
+      inputSchema: z.strictObject({
+        edits: z
           .array(
-            z.object({
+            z.strictObject({
               path: z
                 .string()
                 .min(1)
-                .describe(
-                  "Path to an existing UTF-8 file; include each path only once.",
-                ),
-              edits: z
-                .array(
-                  z.object({
-                    old_text: z
-                      .string()
-                      .min(1)
-                      .describe("Exact text from the current file version."),
-                    new_text: z
-                      .string()
-                      .describe("Complete replacement text, not a diff."),
-                    replace_all: z
-                      .boolean()
-                      .optional()
-                      .describe("Replace every match instead of exactly one."),
-                  }),
-                )
+                .describe("Path to an existing UTF-8 file."),
+              old_text: z
+                .string()
                 .min(1)
-                .max(100)
-                .describe("Ordered exact-text replacements for this file."),
+                .describe("Exact text from the current file version."),
+              new_text: z
+                .string()
+                .describe("Complete replacement text, not a diff."),
+              replace_all: z
+                .boolean()
+                .optional()
+                .describe("Replace every match instead of exactly one."),
+              expected_replacements: z
+                .number()
+                .int()
+                .min(1)
+                .optional()
+                .describe(
+                  "Require exactly this many replacements; no files are written if the count differs.",
+                ),
             }),
           )
           .min(1)
-          .max(20)
-          .describe("File patch objects as a JSON array, not a string."),
+          .max(100)
+          .describe(
+            "Ordered replacement objects as a JSON array, not a string; at most 20 distinct files.",
+          ),
       }),
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         const approvalRequired =
           ctx.supportsApprovals &&
           ctx.getPermissionMode() === "ask" &&
-          input.files.some((file) =>
-            pathNeedsApproval(file.path, ctx.getCwd()),
+          input.edits.some((edit) =>
+            pathNeedsApproval(edit.path, ctx.getCwd()),
           );
         return executeFileMutation(ctx, {
           sessionId,

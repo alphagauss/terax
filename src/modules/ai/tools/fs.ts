@@ -3,7 +3,7 @@
  * 所有文件系统语义由 Rust Agent 文件后端执行，前端只声明 schema、权限模式与审批规则。
  */
 
-import { tool } from "ai";
+import { tool, type ModelMessage } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import {
@@ -13,6 +13,31 @@ import {
 } from "./authorization";
 import type { ToolContext } from "./context";
 import { executeFileMutation, fileEditInputHooks } from "./fileMutation";
+
+/** 只承认实际模型输入中仍保留正文的读取回执，压缩摘要或 unchanged 回执不能替代正文。 */
+export function visibleFileReadIds(
+  messages: readonly ModelMessage[],
+): string[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "tool") return [];
+    return message.content.flatMap((part) => {
+      if (
+        part.type !== "tool-result" ||
+        part.toolName !== "read_file" ||
+        part.output.type !== "json"
+      )
+        return [];
+      const value = part.output.value;
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return [];
+      return value.unchanged === false &&
+        typeof value.content === "string" &&
+        !value.error
+        ? [part.toolCallId]
+        : [];
+    });
+  });
+}
 
 /** 创建已知文件读取、完整文件写入和结构化路径操作工具。 */
 export function buildFsTools(ctx: ToolContext) {
@@ -24,7 +49,7 @@ export function buildFsTools(ctx: ToolContext) {
     read_file: tool({
       description:
         "Read a UTF-8 text file with 1-based line numbers.\n- Before editing existing content, read the relevant range here unless this chat already read or successfully wrote the current version. A partial read allows targeted edits; grep and shell output do not satisfy this requirement.\n- Continue from next_line to read more. If line_truncated=true, do not reconstruct the whole file from this output; increasing start_line cannot retrieve the missing part of that line.\n- If unchanged=true, reuse the previous content or set force=true to read it again. Do not treat omitted content as an empty file.\nBinary, non-UTF-8, oversized files, and device paths are unsupported.",
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         path: z.string().min(1),
         start_line: z
           .number()
@@ -46,7 +71,10 @@ export function buildFsTools(ctx: ToolContext) {
             "Return the content again even when this exact range and file version were already read. Defaults to false.",
           ),
       }),
-      execute: async ({ path, start_line, line_count, force }) => {
+      execute: async (
+        { path, start_line, line_count, force },
+        { toolCallId, messages },
+      ) => {
         const approvalRequired = needsPathApproval(path);
         try {
           const result = await native.agentFileRead({
@@ -57,6 +85,8 @@ export function buildFsTools(ctx: ToolContext) {
               approvalRequired,
             ),
             path,
+            toolCallId,
+            visibleReadIds: visibleFileReadIds(messages),
             startLine: start_line,
             lineCount: line_count,
             force,
@@ -82,15 +112,14 @@ export function buildFsTools(ctx: ToolContext) {
     write_file: tool({
       ...fileEditInputHooks(ctx, "write_file"),
       description:
-        "Write a complete UTF-8 text file; missing parent directories are created automatically. Use apply_patch for targeted changes or partially read files. Supply raw content without read_file line-number prefixes.",
-      inputSchema: z.object({
+        "Write a complete UTF-8 text file. Always specify mode: create for a missing target, rewrite to replace an existing file whose complete current content this chat has read or successfully written. Missing parent directories are created automatically. Use apply_patch for targeted changes or partially read files. Supply raw content without read_file line-number prefixes.",
+      inputSchema: z.strictObject({
         path: z.string().min(1),
         content: z.string(),
         mode: z
           .enum(["create", "rewrite"])
-          .optional()
           .describe(
-            "Defaults to create, which requires a missing target. Use rewrite only when this chat has read or successfully written the complete current file content.",
+            "Required: create requires a missing target. Use rewrite only when this chat has read or successfully written the complete current file content.",
           ),
       }),
       execute: async (input, { toolCallId }) => {

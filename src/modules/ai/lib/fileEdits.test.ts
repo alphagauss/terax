@@ -90,7 +90,7 @@ describe("文件编辑展示事实", async () => {
       "patch",
       undefined,
       "apply_patch",
-      '{"files":[{"path":"a.ts","edits":[{"old_text":"a\\nb","new_text":"c',
+      '{"edits":[{"path":"a.ts","old_text":"a\\nb","new_text":"c',
     );
     vi.advanceTimersByTime(500);
     runtime.fail("patch");

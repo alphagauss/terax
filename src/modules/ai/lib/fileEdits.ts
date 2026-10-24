@@ -93,9 +93,7 @@ export function estimateFileEdit(
   const value = input as
     | {
         content?: unknown;
-        files?: Array<{
-          edits?: Array<{ old_text?: unknown; new_text?: unknown }>;
-        }>;
+        edits?: Array<{ old_text?: unknown; new_text?: unknown }>;
       }
     | undefined;
   if (toolName === "write_file") {
@@ -105,15 +103,12 @@ export function estimateFileEdit(
     };
   }
   const stats = { added: 0, removed: 0 };
-  if (!Array.isArray(value?.files)) return stats;
-  for (const file of value.files) {
-    if (!Array.isArray(file?.edits)) continue;
-    for (const edit of file.edits) {
-      if (typeof edit?.old_text === "string")
-        stats.removed += countLines(edit.old_text);
-      if (typeof edit?.new_text === "string")
-        stats.added += countLines(edit.new_text);
-    }
+  if (!Array.isArray(value?.edits)) return stats;
+  for (const edit of value.edits) {
+    if (typeof edit?.old_text === "string")
+      stats.removed += countLines(edit.old_text);
+    if (typeof edit?.new_text === "string")
+      stats.added += countLines(edit.new_text);
   }
   return stats;
 }

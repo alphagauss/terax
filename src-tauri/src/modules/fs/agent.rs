@@ -62,6 +62,7 @@ struct ReadState {
     version: FileVersion,
     // 写入提交保留后续编辑的版本基线，但不能代表正文已经返回给模型。
     read_window: Option<(usize, usize)>,
+    read_call_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -100,6 +101,8 @@ pub struct AgentReadRequest {
     root: String,
     permission_mode: AgentPermissionMode,
     path: String,
+    tool_call_id: String,
+    visible_read_ids: Vec<String>,
     start_line: Option<usize>,
     line_count: Option<usize>,
     force: Option<bool>,
@@ -240,6 +243,7 @@ pub struct AgentTextEdit {
     new_text: String,
     #[serde(default)]
     replace_all: bool,
+    expected_replacements: Option<usize>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -418,6 +422,7 @@ pub async fn agent_file_read(
     request: AgentReadRequest,
 ) -> Result<AgentReadResponse, String> {
     validate_owner(&request.owner_session_id)?;
+    validate_tool_call_id(&request.tool_call_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let authorized = authorize_path(
         registry,
@@ -467,6 +472,7 @@ pub async fn agent_file_read(
             &version,
             start_line,
             line_count,
+            &request.visible_read_ids,
         );
     if unchanged {
         return Ok(AgentReadResponse {
@@ -488,6 +494,7 @@ pub async fn agent_file_read(
         authorized.canonical,
         version,
         Some((start_line, line_count)),
+        Some(request.tool_call_id),
     );
     Ok(response)
 }
@@ -844,6 +851,7 @@ pub async fn agent_file_commit_mutation(
             write.canonical.clone(),
             version.clone(),
             None,
+            None,
         );
     }
     prepared.remove(&key);
@@ -1034,6 +1042,7 @@ impl AgentFileState {
         version: &FileVersion,
         start_line: usize,
         line_count: usize,
+        visible_read_ids: &[String],
     ) -> bool {
         self.reads
             .lock()
@@ -1043,6 +1052,10 @@ impl AgentFileState {
             .is_some_and(|read| {
                 versions_equal(&read.version, version)
                     && read.read_window == Some((start_line, line_count))
+                    && read
+                        .read_call_id
+                        .as_ref()
+                        .is_some_and(|id| visible_read_ids.contains(id))
             })
     }
 
@@ -1052,6 +1065,7 @@ impl AgentFileState {
         path: String,
         version: FileVersion,
         read_window: Option<(usize, usize)>,
+        read_call_id: Option<String>,
     ) {
         let mut owners = self
             .reads
@@ -1066,6 +1080,7 @@ impl AgentFileState {
             ReadState {
                 version,
                 read_window,
+                read_call_id,
             },
         );
     }
@@ -1981,7 +1996,7 @@ async fn prepare_writes(
             match mode {
                 AgentWriteMode::Create => {
                     if path_exists(&authorized.io_path, workspace).await? {
-                        return Err(format!("file already exists: {}", authorized.actual));
+                        return Err(format!("file already exists: {}. Use mode=\"rewrite\" only after reading or successfully writing the complete current content; use apply_patch for partial edits. No files were written.", authorized.actual));
                     }
                     Ok(vec![PreparedWrite {
                         path: authorized.actual,
@@ -2051,7 +2066,10 @@ async fn prepare_writes(
             for (file, authorized) in authorized_files {
                 let snapshot = read_text_snapshot(&authorized.io_path, workspace).await?;
                 require_read_version(state, owner, &authorized.canonical, &snapshot.version)?;
-                let (after, replacements) = apply_edits(snapshot.content.clone(), &file.edits)?;
+                let (after, replacements) = apply_edits(snapshot.content.clone(), &file.edits)
+                    .map_err(|error| {
+                        format!("{}: {error}. No files were written.", authorized.actual)
+                    })?;
                 total_bytes = total_bytes
                     .saturating_add(snapshot.content.len())
                     .saturating_add(after.len());
@@ -2126,24 +2144,28 @@ fn apply_edits(mut content: String, edits: &[AgentTextEdit]) -> Result<(String, 
         content = content.replace("\r\n", "\n");
     }
     let mut replacements = 0;
-    for edit in edits {
+    for (index, edit) in edits.iter().enumerate() {
+        let fail = |message: String| {
+            format!(
+                "file edit {} (1-based within this path): {message}",
+                index + 1
+            )
+        };
         let old_text = edit.old_text.replace("\r\n", "\n");
         let new_text = edit.new_text.replace("\r\n", "\n");
         if old_text.is_empty() {
-            return Err("old_text cannot be empty".into());
+            return Err(fail("old_text cannot be empty".into()));
         }
         if old_text == new_text {
-            return Err("old_text and new_text are identical".into());
+            return Err(fail("old_text and new_text are identical".into()));
         }
         let count = content.matches(&old_text).count();
         if count == 0 {
-            let diagnostic = closest_line(&content, &old_text)
-                .map(|(line, text)| format!("; closest line {line}: {:?}", clip_text(text, 160)))
-                .unwrap_or_default();
-            return Err(format!(
+            let diagnostic = near_match_diagnostic(&content, &old_text);
+            return Err(fail(format!(
                 "old_text not found: {:?}{diagnostic}",
                 clip_text(&old_text, 120),
-            ));
+            )));
         }
         if !edit.replace_all && count != 1 {
             let lines = occurrence_lines(&content, &old_text, 3)
@@ -2151,9 +2173,14 @@ fn apply_edits(mut content: String, edits: &[AgentTextEdit]) -> Result<(String, 
                 .map(|line| line.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(format!(
+            return Err(fail(format!(
                 "old_text appears {count} times at line(s) {lines}; provide more context or set replace_all=true"
-            ));
+            )));
+        }
+        if let Some(expected) = edit.expected_replacements {
+            if expected == 0 || count != expected {
+                return Err(fail(format!("expected {expected} replacements but found {count}; reread the target and revise expected_replacements or old_text")));
+            }
         }
         if edit.replace_all {
             content = content.replace(&old_text, &new_text);
@@ -2183,11 +2210,102 @@ fn occurrence_lines(content: &str, needle: &str, limit: usize) -> Vec<usize> {
         .collect()
 }
 
+/// 相近文本只用于有界诊断，不放宽实际匹配，也不修改模型提交的替换内容。
+fn near_match_diagnostic(content: &str, expected: &str) -> String {
+    let Some((line, _)) = closest_line(content, expected) else {
+        return "; no similar text found; reread the target range".into();
+    };
+    let leading_empty = expected
+        .lines()
+        .take_while(|line| line.trim().is_empty())
+        .count();
+    let start = line.saturating_sub(1 + leading_empty);
+    let wanted: Vec<_> = expected.lines().collect();
+    let actual: Vec<_> = content.lines().skip(start).take(wanted.len()).collect();
+    // 围绕首个差异选窗口，避免长补丁仅展示相同的开头；实际匹配仍然严格。
+    let first_difference = wanted
+        .iter()
+        .enumerate()
+        .position(|(index, before)| actual.get(index) != Some(before))
+        .unwrap_or_else(|| wanted.len().saturating_sub(1));
+    let window_start = first_difference.saturating_sub(2);
+    let window_end = (window_start + 6).min(wanted.len());
+    let omitted_after = window_end < wanted.len();
+    let wanted = &wanted[window_start..window_end];
+    let actual = &actual[window_start.min(actual.len())..window_end.min(actual.len())];
+    let wanted_text = wanted.join("\n");
+    let actual_text = actual.join("\n");
+    let whitespace = |text: &str| {
+        text.lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let quotes = |text: &str| {
+        text.chars()
+            .map(|ch| match ch {
+                '‘' | '’' => '\'',
+                '“' | '”' => '"',
+                ch => ch,
+            })
+            .collect::<String>()
+    };
+    let mut causes = Vec::new();
+    if wanted_text != actual_text {
+        if whitespace(&wanted_text) == whitespace(&actual_text) {
+            causes.push("whitespace or indentation differs");
+        }
+        if wanted_text.to_lowercase() == actual_text.to_lowercase() {
+            causes.push("letter case differs");
+        }
+        if quotes(&wanted_text) == quotes(&actual_text) {
+            causes.push("quote style differs");
+        }
+    }
+    if expected.ends_with('\n')
+        && !content.ends_with('\n')
+        && content.ends_with(expected.trim_end_matches('\n'))
+    {
+        causes.push("trailing newline differs");
+    }
+    let mut diagnostic = format!("; closest line {}", start + 1);
+    if !causes.is_empty() {
+        diagnostic.push_str(&format!("; possible cause: {}", causes.join(", ")));
+    }
+    diagnostic.push_str(&format!(
+        "\n@@ line {} (provided - / actual +) @@",
+        start + window_start + 1
+    ));
+    if window_start > 0 {
+        diagnostic.push_str("\n... earlier lines omitted ...");
+    }
+    for index in 0..wanted.len().max(actual.len()) {
+        match (wanted.get(index), actual.get(index)) {
+            (Some(before), Some(after)) if before == after => {
+                diagnostic.push_str(&format!("\n {}", clip_text(before, 160)))
+            }
+            (before, after) => {
+                if let Some(before) = before {
+                    diagnostic.push_str(&format!("\n-{}", clip_text(before, 160)));
+                }
+                if let Some(after) = after {
+                    diagnostic.push_str(&format!("\n+{}", clip_text(after, 160)));
+                }
+            }
+        }
+    }
+    if omitted_after {
+        diagnostic.push_str("\n... later lines omitted ...");
+    }
+    clip_text(&diagnostic, 2000)
+}
+
 fn closest_line<'a>(content: &'a str, expected: &str) -> Option<(usize, &'a str)> {
     let reference = expected
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())?;
+    let reference = reference.to_lowercase();
     let tokens: Vec<_> = reference
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .filter(|token| token.len() >= 3)
@@ -2196,7 +2314,7 @@ fn closest_line<'a>(content: &'a str, expected: &str) -> Option<(usize, &'a str)
         .lines()
         .enumerate()
         .map(|(index, line)| {
-            let trimmed = line.trim();
+            let trimmed = line.trim().to_lowercase();
             let token_score = tokens
                 .iter()
                 .filter(|token| trimmed.contains(**token))
@@ -2431,6 +2549,20 @@ async fn copy_file(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn patch_diagnostic_shows_late_difference_and_omissions() {
+        let actual =
+            "unique_anchor\none\ntwo\nthree\nfour\nfive\nactual_value\nseven\neight\nnine\nten\n";
+        let expected = actual.replace("actual_value", "wrong_value");
+        let diagnostic = super::near_match_diagnostic(actual, &expected);
+        assert!(diagnostic.contains("-wrong_value"), "{diagnostic}");
+        assert!(diagnostic.contains("+actual_value"), "{diagnostic}");
+        assert!(diagnostic.contains("earlier lines omitted"));
+        assert!(diagnostic.contains("later lines omitted"));
+        assert!(diagnostic.chars().count() <= 2014);
+        let missing = super::near_match_diagnostic("anchor\n", "anchor\nmissing\n");
+        assert!(missing.contains("-missing"));
+    }
     use super::*;
 
     #[tokio::test]
@@ -2450,7 +2582,7 @@ mod tests {
                 &state,
                 &registry,
                 serde_json::from_value(serde_json::json!({
-                    "ownerSessionId": owner, "root": root, "permissionMode": "ask", "path": path
+                    "ownerSessionId": owner, "toolCallId": "read-call", "visibleReadIds": ["read-call"], "root": root, "permissionMode": "ask", "path": path
                 }))
                 .unwrap(),
             )
@@ -2510,7 +2642,7 @@ mod tests {
         let owner = Uuid::new_v4().to_string();
         let read = |start_line| {
             agent_file_read(&state, &registry, serde_json::from_value(serde_json::json!({
-            "ownerSessionId": owner, "root": root, "permissionMode": "full-access", "path": "a.txt", "startLine": start_line
+            "ownerSessionId": owner, "toolCallId": "read-call", "visibleReadIds": ["read-call"], "root": root, "permissionMode": "full-access", "path": "a.txt", "startLine": start_line
         })).unwrap())
         };
         for (index, (mutation, expected, reread)) in [
@@ -2544,6 +2676,78 @@ mod tests {
             assert!(read(2).await.is_err());
         }
         assert!(read(1).await.unwrap().unchanged);
+        let after_compaction = agent_file_read(
+            &state,
+            &registry,
+            serde_json::from_value(serde_json::json!({
+                "ownerSessionId": owner, "toolCallId": "after-compaction", "visibleReadIds": [],
+                "root": root, "permissionMode": "full-access", "path": "a.txt"
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(!after_compaction.unchanged);
+        assert!(after_compaction.content.contains("fourth"));
+    }
+
+    #[tokio::test]
+    async fn batch_patch_count_and_match_diagnostics_never_publish_partial_writes() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = to_canon(directory.path());
+        let state = AgentFileState::default();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let owner = Uuid::new_v4().to_string();
+        for name in ["a.txt", "b.py"] {
+            std::fs::write(
+                directory.path().join(name),
+                "    value = 1\r\n    return value\r\n",
+            )
+            .unwrap();
+            agent_file_read(
+                &state,
+                &registry,
+                serde_json::from_value(serde_json::json!({
+                    "ownerSessionId": owner, "toolCallId": name, "visibleReadIds": [], "root": root,
+                    "permissionMode": "ask", "path": name
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        }
+        for (edit, detail) in [
+            (
+                serde_json::json!({"old_text": "value", "new_text": "result", "replace_all": true, "expected_replacements": 3}),
+                "expected 3 replacements but found 2",
+            ),
+            (
+                serde_json::json!({"old_text": "value = 1\nreturn value", "new_text": "value = 2\nreturn value"}),
+                "whitespace or indentation differs",
+            ),
+        ] {
+            let error = agent_file_prepare_mutation(&state, &registry, serde_json::from_value(serde_json::json!({
+                "ownerSessionId": owner, "toolCallId": "invalid", "root": root, "permissionMode": "ask",
+                "mutation": {"kind": "patch", "files": [
+                    {"path": "a.txt", "edits": [{"old_text": "value", "new_text": "first", "replace_all": true}]},
+                    {"path": "b.py", "edits": [edit]}
+                ]}
+            })).unwrap()).await.err().unwrap();
+            assert!(
+                error.contains("b.py: file edit 1 (1-based within this path):"),
+                "{error}"
+            );
+            assert!(error.contains(detail), "{error}");
+            assert!(error.contains("No files were written"), "{error}");
+            assert!(state.prepared.lock().await.is_empty());
+            for name in ["a.txt", "b.py"] {
+                assert_eq!(
+                    std::fs::read(directory.path().join(name)).unwrap(),
+                    b"    value = 1\r\n    return value\r\n"
+                );
+            }
+        }
     }
 
     #[tokio::test]
@@ -2576,7 +2780,7 @@ mod tests {
             for name in ["a.txt", "b.txt"] {
                 std::fs::write(directory.path().join(name), "before\r\n").unwrap();
                 agent_file_read(&state, &registry, serde_json::from_value(serde_json::json!({
-                    "ownerSessionId": owner, "root": root, "permissionMode": "full-access", "path": name
+                    "ownerSessionId": owner, "toolCallId": "read-call", "visibleReadIds": ["read-call"], "root": root, "permissionMode": "full-access", "path": name
                 })).unwrap()).await.unwrap();
             }
             let preview = agent_file_prepare_mutation(&state, &registry, serde_json::from_value(serde_json::json!({
@@ -2696,11 +2900,13 @@ mod tests {
                 old_text: "alpha".into(),
                 new_text: "gamma".into(),
                 replace_all: false,
+                expected_replacements: None,
             },
             AgentTextEdit {
                 old_text: "gamma beta".into(),
                 new_text: "done".into(),
                 replace_all: false,
+                expected_replacements: None,
             },
         ];
         assert_eq!(
@@ -2713,6 +2919,7 @@ mod tests {
                 old_text: "same".into(),
                 new_text: "other".into(),
                 replace_all: false,
+                expected_replacements: None,
             }],
         )
         .unwrap_err();
@@ -2723,6 +2930,7 @@ mod tests {
                 old_text: "const value = 2;".into(),
                 new_text: "const value = 3;".into(),
                 replace_all: false,
+                expected_replacements: None,
             }],
         )
         .unwrap_err();
@@ -2734,6 +2942,7 @@ mod tests {
                 old_text: "first\nsecond".into(),
                 new_text: "one\ntwo".into(),
                 replace_all: false,
+                expected_replacements: None,
             }],
         )
         .unwrap();
@@ -2814,14 +3023,42 @@ mod tests {
             "/work/a.txt".into(),
             version.clone(),
             Some((1, 20)),
+            Some("read-call".into()),
         );
-        assert!(state.read_matches("owner", "/work/a.txt", &version, 1, 20));
-        assert!(!state.read_matches("owner", "/work/a.txt", &version, 21, 20));
+        assert!(state.read_matches(
+            "owner",
+            "/work/a.txt",
+            &version,
+            1,
+            20,
+            &["read-call".into()]
+        ));
+        assert!(!state.read_matches(
+            "owner",
+            "/work/a.txt",
+            &version,
+            21,
+            20,
+            &["read-call".into()]
+        ));
+        // 正文离开模型上下文后不可跳过读取，但不能撤销用于条件写入的版本基线。
+        assert!(!state.read_matches("owner", "/work/a.txt", &version, 1, 20, &[]));
+        assert_eq!(
+            state.read_version("owner", "/work/a.txt").unwrap().revision,
+            version.revision
+        );
         let changed = FileVersion {
             revision: "b".repeat(64),
             ..version
         };
-        assert!(!state.read_matches("owner", "/work/a.txt", &changed, 1, 20));
+        assert!(!state.read_matches(
+            "owner",
+            "/work/a.txt",
+            &changed,
+            1,
+            20,
+            &["read-call".into()]
+        ));
     }
 
     #[test]

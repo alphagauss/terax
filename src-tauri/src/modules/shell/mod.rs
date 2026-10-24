@@ -444,9 +444,10 @@ pub async fn shell_exec(
 
     if timeout_secs > 0 {
         let timeout = timeout_secs.clamp(1, MAX_AGENT_TIMEOUT_SECS);
+        let deadline = process.set_timeout(Duration::from_secs(timeout));
         let timed = Arc::downgrade(&process);
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(timeout)).await;
+            tokio::time::sleep_until(deadline.into()).await;
             if let Some(timed) = timed.upgrade() {
                 if timed.is_running() {
                     let _ = timed.terminate_as(ProcessStatus::TimedOut).await;
@@ -1828,6 +1829,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(started.status, ProcessStatus::Running);
+        assert!(started
+            .remaining_timeout_ms
+            .is_some_and(|remaining| remaining <= 1000));
         let process = state
             .owned_process(&started.process_id, &owner, &WorkspaceEnv::Local)
             .unwrap();
@@ -1845,6 +1849,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(status, ProcessStatus::TimedOut);
+        assert_eq!(process.response(0, 8192).remaining_timeout_ms, Some(0));
     }
 
     #[test]

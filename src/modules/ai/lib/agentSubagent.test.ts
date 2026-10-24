@@ -285,7 +285,7 @@ describe.sequential("Agent background subagents", () => {
                 controller.enqueue({
                   type: "tool-input-delta",
                   id: "child-edit",
-                  delta: 'line\\n"}',
+                  delta: 'line\\n","mode":"create"}',
                 });
                 controller.enqueue({
                   type: "tool-input-end",
@@ -298,6 +298,7 @@ describe.sequential("Agent background subagents", () => {
                   input: JSON.stringify({
                     path: "a.txt",
                     content: "new\nline\n",
+                    mode: "create",
                   }),
                 });
                 controller.enqueue({
@@ -396,6 +397,8 @@ describe.sequential("Agent background subagents", () => {
         stderr: "",
         exit_code: 0,
         elapsed_ms: 1,
+        output_idle_ms: 0,
+        remaining_timeout_ms: null,
         truncated: false,
         dropped_bytes: 0,
         next_offset: 0,

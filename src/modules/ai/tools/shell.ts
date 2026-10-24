@@ -24,7 +24,7 @@ const POSIX_INDEPENDENT_SERVICE =
 /** 仅选择实际执行环境的说明，避免把宿主平台或其他连接方式写入模型工具定义。 */
 const SHELL_ENVIRONMENT_DESCRIPTIONS = {
   Windows:
-    "Run commands on local Windows and leave login unset or false. For a service that must keep running after Terax exits, use WMI/CIM Win32_Process.Create instead of Start-Process or Start-Job. Use absolute executable paths, set CurrentDirectory and Win32_ProcessStartup.ShowWindow=0, and redirect stdin, stdout, and stderr in the launched command. Set any required environment explicitly in that command. Check ReturnValue and ProcessId.",
+    "Run commands on local Windows and leave login unset or false. For recursive PowerShell enumeration of a known directory, use Get-ChildItem -LiteralPath; -Path with -Recurse may search a larger tree when the named target is missing. Prefer find_files or grep for file discovery. For a service that must keep running after Terax exits, use WMI/CIM Win32_Process.Create instead of Start-Process or Start-Job. Use absolute executable paths, set CurrentDirectory and Win32_ProcessStartup.ShowWindow=0, and redirect stdin, stdout, and stderr in the launched command. Set any required environment explicitly in that command. Check ReturnValue and ProcessId.",
   Linux: `Run commands on local Linux. ${POSIX_INDEPENDENT_SERVICE}`,
   macOS: `Run commands on local macOS. ${POSIX_INDEPENDENT_SERVICE}`,
   wsl: `Run commands and use paths inside the current WSL distribution. ${POSIX_INDEPENDENT_SERVICE}`,
@@ -264,7 +264,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     shell_process: tool({
       description:
-        "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output. If truncated is true, continue reading from next_offset; dropped_bytes greater than zero means older output was evicted and cannot be recovered. Polling and waiting do not extend the process timeout.",
+        "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output. If truncated is true, continue reading from next_offset; dropped_bytes greater than zero means older output was evicted and cannot be recovered. output_idle_ms measures time since actual output bytes, not the last poll; silence does not establish a stall. remaining_timeout_ms is null for an unlimited process. Polling and waiting do not extend the process timeout.",
       inputSchema: processInputSchema,
       execute: async (input) => {
         const sessionId = ctx.getSessionId();
@@ -332,7 +332,9 @@ function redactProcessResponse(
   };
 }
 
-function redactProcessInfo(process: ShellProcessInfo): Omit<ShellProcessInfo, "execution_id"> {
+function redactProcessInfo(
+  process: ShellProcessInfo,
+): Omit<ShellProcessInfo, "execution_id"> {
   const { execution_id: _executionId, ...publicProcess } = process;
   return {
     ...publicProcess,

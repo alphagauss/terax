@@ -131,22 +131,23 @@ export function describeToolCall(
       if (value.case_insensitive === true) label("caseInsensitive");
       break;
     case "write_file":
-      if (
-        value.mode === "create" ||
-        value.mode === "rewrite" ||
-        (complete && value.mode === undefined)
-      )
+      if (value.mode === "create" || value.mode === "rewrite")
         label(value.mode === "rewrite" ? "rewrite" : "create");
       parts.push(text("path"));
       break;
     case "apply_patch": {
-      const files = Array.isArray(value.files) ? value.files : [];
-      const first = files.find(
-        (file) =>
-          file && typeof file === "object" && typeof file.path === "string",
-      );
-      if (first) parts.push(first.path);
-      if (files.length > 1) label("moreFiles", { count: files.length - 1 });
+      const edits = Array.isArray(value.edits) ? value.edits : [];
+      const paths = [
+        ...new Set(
+          edits.flatMap((edit) =>
+            edit && typeof edit === "object" && typeof edit.path === "string"
+              ? [edit.path]
+              : [],
+          ),
+        ),
+      ];
+      if (paths.length) parts.push(paths[0]);
+      if (paths.length > 1) label("moreFiles", { count: paths.length - 1 });
       break;
     }
     case "file_operation": {

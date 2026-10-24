@@ -419,6 +419,7 @@ pub struct AgentProcess {
     pub started_at_ms: u64,
     pub(crate) purpose: ProcessPurpose,
     started: Instant,
+    timeout_deadline: Mutex<Option<Instant>>,
     last_access: Mutex<Instant>,
     last_read_offset: AtomicU64,
     marker: String,
@@ -436,6 +437,8 @@ pub struct ProcessResponse {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub elapsed_ms: u64,
+    pub output_idle_ms: u64,
+    pub remaining_timeout_ms: Option<u64>,
     pub truncated: bool,
     pub dropped_bytes: u64,
     pub next_offset: u64,
@@ -458,6 +461,8 @@ pub struct ProcessInfo {
     pub started_at_ms: u64,
     pub elapsed_ms: u64,
     pub idle_ms: u64,
+    pub output_idle_ms: u64,
+    pub remaining_timeout_ms: Option<u64>,
     pub exit_code: Option<i32>,
     pub unread_output: bool,
 }
@@ -535,6 +540,7 @@ impl AgentProcess {
             started_at_ms: now_ms(),
             purpose,
             started: Instant::now(),
+            timeout_deadline: Mutex::new(None),
             last_access: Mutex::new(Instant::now()),
             last_read_offset: AtomicU64::new(0),
             marker,
@@ -616,6 +622,7 @@ impl AgentProcess {
             started_at_ms: now_ms(),
             purpose,
             started: Instant::now(),
+            timeout_deadline: Mutex::new(None),
             last_access: Mutex::new(Instant::now()),
             last_read_offset: AtomicU64::new(0),
             marker,
@@ -921,6 +928,8 @@ impl AgentProcess {
             started_at_ms: self.started_at_ms,
             elapsed_ms: elapsed_ms(self.started, state.finished_at),
             idle_ms: last_access.elapsed().as_millis() as u64,
+            output_idle_ms: self.output_idle_ms(state.finished_at),
+            remaining_timeout_ms: self.remaining_timeout_ms(state.status),
             exit_code: state.exit_code,
             unread_output: self.shared.output.lock().unwrap().next_offset()
                 > self.last_read_offset.load(Ordering::Acquire),
@@ -929,6 +938,39 @@ impl AgentProcess {
 
     pub fn is_running(&self) -> bool {
         self.shared.is_running()
+    }
+
+    /// 硬截止时间仅在启动时设置，轮询、写入和输出不会延长预算。
+    pub fn set_timeout(&self, timeout: Duration) -> Instant {
+        let deadline = Instant::now() + timeout;
+        *self.timeout_deadline.lock().unwrap() = Some(deadline);
+        deadline
+    }
+
+    fn output_idle_ms(&self, finished_at: Option<Instant>) -> u64 {
+        let last = self
+            .shared
+            .output
+            .lock()
+            .unwrap()
+            .last_output_at()
+            .unwrap_or(self.started);
+        finished_at
+            .unwrap_or_else(Instant::now)
+            .saturating_duration_since(last)
+            .as_millis() as u64
+    }
+
+    fn remaining_timeout_ms(&self, status: ProcessStatus) -> Option<u64> {
+        self.timeout_deadline.lock().unwrap().map(|deadline| {
+            if status == ProcessStatus::Running {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis() as u64
+            } else {
+                0
+            }
+        })
     }
 
     /// 清理失败的远端进程仍占资源额度，不能按普通已完成记录淘汰。
@@ -988,6 +1030,8 @@ impl AgentProcess {
             stderr: output.stderr,
             exit_code: state.exit_code,
             elapsed_ms: elapsed_ms(self.started, state.finished_at),
+            output_idle_ms: self.output_idle_ms(state.finished_at),
+            remaining_timeout_ms: self.remaining_timeout_ms(state.status),
             truncated: output.truncated || output.dropped_bytes > 0,
             dropped_bytes: output.dropped_bytes,
             next_offset: output.next_offset,
@@ -2185,6 +2229,57 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
         assert_eq!(response.status, ProcessStatus::Exited);
         assert_eq!(response.exit_code, Some(0));
         assert!(response.stdout.contains("eof"));
+    }
+
+    #[tokio::test]
+    async fn polling_silence_preserves_activity_time_and_hard_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let command = "[Console]::Write('ready'); $null = [Console]::ReadLine(); [Console]::Error.Write('partial'); $null = [Console]::ReadLine()";
+        #[cfg(unix)]
+        let command = "printf ready; IFS= read -r line; printf partial >&2; IFS= read -r line";
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+            WorkspaceEnv::Local,
+            command.into(),
+            directory.path().to_string_lossy().into_owned(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::Shell,
+        )
+        .unwrap();
+        let ready = process.wait_snapshot(0, Duration::from_secs(5), Some("ready"), 8192);
+        assert_eq!(ready.wait_for_matched, Some(true));
+        assert_eq!(ready.remaining_timeout_ms, None);
+        process.set_timeout(Duration::from_secs(20));
+        let before = process.response(ready.next_offset, 8192);
+        let last_output = process.shared.output.lock().unwrap().last_output_at();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let silent = process.response(ready.next_offset, 8192);
+        assert_eq!(silent.status, ProcessStatus::Running);
+        assert!(silent.output_idle_ms >= before.output_idle_ms + 20);
+        assert!(silent.remaining_timeout_ms.unwrap() < before.remaining_timeout_ms.unwrap());
+        assert_eq!(
+            process.shared.output.lock().unwrap().last_output_at(),
+            last_output
+        );
+        process.write("continue\n".into()).await.unwrap();
+        let partial = process.wait_snapshot(
+            ready.next_offset,
+            Duration::from_secs(5),
+            Some("partial"),
+            8192,
+        );
+        assert_eq!(partial.wait_for_matched, Some(true));
+        assert!(partial.stderr.contains("partial"));
+        assert!(process.shared.output.lock().unwrap().last_output_at() > last_output);
+        assert!(partial.remaining_timeout_ms.unwrap() <= silent.remaining_timeout_ms.unwrap());
+        process
+            .terminate_as(ProcessStatus::Terminated)
+            .await
+            .unwrap();
+        assert_eq!(process.response(0, 8192).remaining_timeout_ms, Some(0));
     }
 
     #[tokio::test]

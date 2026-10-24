@@ -14,7 +14,7 @@ const FALLBACK_ERROR =
 
 export function formatAiError(error: unknown): string {
   const toolInputError = formatInvalidToolInput(error);
-  if (toolInputError) return toolInputError;
+  if (toolInputError) return sanitizeErrorMessage(toolInputError);
   const details = extractErrorDetails(error);
   if (!details) return FALLBACK_ERROR;
   const message = sanitizeErrorMessage(details.message);
@@ -42,10 +42,28 @@ function formatInvalidToolInput(error: unknown): string | null {
   }
   if (validation?.name !== "AI_TypeValidationError" || !("value" in validation))
     return null;
-  const issue = firstValidationIssue(validation.cause);
-  if (!issue) return null;
+  const issues = validationIssues(validation.cause);
+  if (!issues.length) return null;
+  const details = issues
+    .slice(0, 3)
+    .map((issue) => formatValidationIssue(issue, validation.value));
+  const encodedStructure = issues.some(
+    (issue) =>
+      typeof valueAtPath(
+        validation.value,
+        Array.isArray(issue.path) ? issue.path : [],
+      ) === "string" &&
+      (issue.expected === "array" || issue.expected === "object"),
+  );
+  const hint = encodedStructure
+    ? " Pass JSON arrays and objects directly, not as JSON-encoded strings."
+    : toolInputHint(input.toolName, issues);
+  return `Invalid input for tool ${input.toolName}: ${details.join("; ")}.${hint} Call the tool again with input that matches the schema. The tool was not executed.`;
+}
+
+function formatValidationIssue(issue: ValidationIssue, value: unknown): string {
   const path = Array.isArray(issue.path) ? issue.path : [];
-  const actual = valueAtPath(validation.value, path);
+  const actual = valueAtPath(value, path);
   let detail =
     issue.code === "invalid_type" && typeof issue.expected === "string"
       ? `${formatIssuePath(path)}: expected ${issue.expected}, received ${valueType(actual)}`
@@ -60,13 +78,51 @@ function formatInvalidToolInput(error: unknown): string | null {
     const comparison = issue.code === "too_big" ? "<" : ">";
     detail = `${formatIssuePath(path)}: expected number ${comparison}${issue.inclusive ? "=" : ""} ${bound}, received ${actual}`;
   }
-  const encodedStructure =
-    typeof actual === "string" &&
-    (issue.expected === "array" || issue.expected === "object");
-  const retryHint = encodedStructure
-    ? " Pass JSON arrays and objects directly, not as JSON-encoded strings."
-    : "";
-  return `Invalid input for tool ${input.toolName}: ${detail}.${retryHint} Call the tool again with input that matches the schema. The tool was not executed.`;
+  if (issue.code === "unrecognized_keys" && Array.isArray(issue.keys)) {
+    detail = `${formatIssuePath(path)}: unexpected field(s) ${issue.keys
+      .filter((key): key is string => typeof key === "string")
+      .slice(0, 5)
+      .map((key) => key.slice(0, 80))
+      .join(", ")}`;
+  }
+  return detail;
+}
+
+function toolInputHint(toolName: string, issues: ValidationIssue[]): string {
+  if (
+    toolName === "apply_patch" &&
+    issues.some(
+      (issue) =>
+        Array.isArray(issue.path) &&
+        issue.path[issue.path.length - 1] === "expected_replacements",
+    )
+  ) {
+    return " expected_replacements must be a positive integer matching the exact occurrence count. To replace multiple matches, also set replace_all=true.";
+  }
+  if (
+    toolName === "apply_patch" &&
+    issues.some(
+      (issue) =>
+        issue.code === "unrecognized_keys" ||
+        (issue.code === "invalid_type" &&
+          Array.isArray(issue.path) &&
+          (issue.path[0] === "files" ||
+            (issue.path[0] === "edits" &&
+              (issue.path.length <= 2 ||
+                issue.path[issue.path.length - 1] === "path")))),
+    )
+  ) {
+    return ' Put path, old_text, and new_text inside each edits[] entry. Example: {"edits":[{"path":"a.py","old_text":"old","new_text":"new"}]}.';
+  }
+  if (
+    toolName === "write_file" &&
+    issues.some(
+      (issue) => Array.isArray(issue.path) && issue.path[0] === "mode",
+    )
+  ) {
+    return ' Specify mode="create" for a missing target or mode="rewrite" for an existing file whose complete current content is known.';
+  }
+  return "";
 }
 
 /** 在 SDK 生成工具回执前压缩参数错误；返回 null 保持拒绝，不修复或执行输入。 */
@@ -76,7 +132,7 @@ export async function reportInvalidToolInput({
   error: Error;
 }): Promise<null> {
   const message = formatInvalidToolInput(error);
-  if (message) error.message = message;
+  if (message) error.message = sanitizeErrorMessage(message);
   return null;
 }
 
@@ -95,13 +151,15 @@ type ValidationIssue = {
   expected?: unknown;
   message?: unknown;
   path?: unknown;
+  keys?: unknown;
 };
 
-function firstValidationIssue(value: unknown): ValidationIssue | null {
-  if (!value || typeof value !== "object") return null;
+function validationIssues(value: unknown): ValidationIssue[] {
+  if (!value || typeof value !== "object") return [];
   const issues = (value as { issues?: unknown }).issues;
-  const issue = Array.isArray(issues) ? issues[0] : undefined;
-  return issue && typeof issue === "object" ? issue : null;
+  return Array.isArray(issues)
+    ? issues.filter((issue) => issue && typeof issue === "object")
+    : [];
 }
 
 function formatIssuePath(path: unknown[]): string {

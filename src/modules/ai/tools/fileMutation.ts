@@ -176,35 +176,40 @@ function mutationInput(
   input: Record<string, unknown>,
 ): AgentMutationInput {
   if (toolName === "write_file") {
+    if (input.mode !== "create" && input.mode !== "rewrite") {
+      throw new Error('write_file requires mode: "create" or "rewrite"');
+    }
     return {
       kind: "write",
       path: stringField(input, "path"),
       content: stringField(input, "content"),
-      mode: input.mode === "rewrite" ? "rewrite" : "create",
+      mode: input.mode,
     };
   }
-  if (!Array.isArray(input.files)) {
-    throw new Error("apply_patch files are required");
+  if (!Array.isArray(input.edits)) {
+    throw new Error("apply_patch edits are required");
+  }
+  const files = new Map<
+    string,
+    Extract<AgentMutationInput, { kind: "patch" }>["files"][number]
+  >();
+  for (const value of input.edits) {
+    const edit = record(value);
+    const path = stringField(edit, "path");
+    const file = files.get(path) ?? { path, edits: [] };
+    file.edits.push({
+      old_text: stringField(edit, "old_text"),
+      new_text: stringField(edit, "new_text"),
+      ...(edit.replace_all === true ? { replace_all: true } : {}),
+      ...(typeof edit.expected_replacements === "number"
+        ? { expected_replacements: edit.expected_replacements }
+        : {}),
+    });
+    files.set(path, file);
   }
   return {
     kind: "patch",
-    files: input.files.map((value) => {
-      const file = record(value);
-      if (!Array.isArray(file.edits)) {
-        throw new Error("apply_patch edits are required");
-      }
-      return {
-        path: stringField(file, "path"),
-        edits: file.edits.map((editValue) => {
-          const edit = record(editValue);
-          return {
-            old_text: stringField(edit, "old_text"),
-            new_text: stringField(edit, "new_text"),
-            ...(edit.replace_all === true ? { replace_all: true } : {}),
-          };
-        }),
-      };
-    }),
+    files: [...files.values()],
   };
 }
 

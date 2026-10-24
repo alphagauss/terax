@@ -23,8 +23,8 @@ export function buildToolApproval(ctx: ToolContext) {
     find_files: ({ path }) =>
       status(pathNeedsApproval(path ?? ".", ctx.getCwd())),
     grep: ({ path }) => status(pathNeedsApproval(path ?? ".", ctx.getCwd())),
-    apply_patch: ({ files }) =>
-      status(files.some(({ path }) => pathNeedsApproval(path, ctx.getCwd()))),
+    apply_patch: ({ edits }) =>
+      status(edits.some(({ path }) => pathNeedsApproval(path, ctx.getCwd()))),
     file_operation: (input) =>
       status(fileOperationNeedsApproval(input, ctx.getCwd())),
     shell_exec: (input) =>

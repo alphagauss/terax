@@ -45,11 +45,11 @@ describe("activity headline summaries", () => {
     expect(headline("write_file", { path: "src/app.tsx" })?.text).toBe(
       "src/app.tsx",
     );
-    expect(headline("apply_patch", { files: [{}] })).toMatchObject({
+    expect(headline("apply_patch", { edits: [{}] })).toMatchObject({
       kind: "tool",
       text: "apply_patch",
     });
-    expect(headline("apply_patch", { files: [{ path: "a.ts" }] })?.text).toBe(
+    expect(headline("apply_patch", { edits: [{ path: "a.ts" }] })?.text).toBe(
       "a.ts",
     );
     expect(headline("find_files", {})).toMatchObject({

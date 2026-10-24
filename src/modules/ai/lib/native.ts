@@ -54,6 +54,8 @@ export type ShellProcessResponse = {
   stderr: string;
   exit_code: number | null;
   elapsed_ms: number;
+  output_idle_ms: number;
+  remaining_timeout_ms: number | null;
   truncated: boolean;
   dropped_bytes: number;
   next_offset: number;
@@ -75,6 +77,8 @@ export type ShellProcessInfo = {
   started_at_ms: number;
   elapsed_ms: number;
   idle_ms: number;
+  output_idle_ms: number;
+  remaining_timeout_ms: number | null;
   exit_code: number | null;
   unread_output: boolean;
 };
@@ -137,6 +141,7 @@ export type AgentMutationInput =
           old_text: string;
           new_text: string;
           replace_all?: boolean;
+          expected_replacements?: number;
         }>;
       }>;
     };
@@ -335,6 +340,8 @@ export const native = {
     root: string;
     permissionMode: AgentPermissionMode;
     path: string;
+    toolCallId: string;
+    visibleReadIds: string[];
     startLine?: number;
     lineCount?: number;
     force?: boolean;

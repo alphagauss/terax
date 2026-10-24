@@ -12,6 +12,54 @@ import { z } from "zod";
 import { formatAiError, reportInvalidToolInput } from "./errors";
 
 describe("formatAiError", () => {
+  it("redacts and bounds schema errors in both UI and model receipts", async () => {
+    const secret = "sk-ant-abcdefghijklmnop";
+    const value = { [secret]: true };
+    const parsed = z.strictObject({}).safeParse(value);
+    if (parsed.success) throw new Error("expected invalid input");
+    const error = new InvalidToolInputError({
+      toolName: "apply_patch",
+      toolInput: JSON.stringify(value),
+      cause: new TypeValidationError({ value, cause: parsed.error }),
+    });
+    expect(formatAiError(error)).toContain("[redacted]");
+    expect(formatAiError(error)).not.toContain(secret);
+    await reportInvalidToolInput({ error });
+    expect(error.message).toBe(formatAiError(error));
+    const oversized = new InvalidToolInputError({
+      toolName: "apply_patch",
+      toolInput: "{}",
+      cause: new TypeValidationError({
+        value: {},
+        cause: { issues: [{ path: [], message: "x".repeat(2000) }] },
+      }),
+    });
+    await reportInvalidToolInput({ error: oversized });
+    expect(oversized.message.length).toBeLessThanOrEqual(800);
+    expect(formatAiError(oversized)).toBe(oversized.message);
+  });
+
+  it("gives count guidance instead of a structural example for an invalid count", () => {
+    const value = { edits: [{ expected_replacements: 0 }] };
+    const parsed = z
+      .object({
+        edits: z.array(
+          z.object({ expected_replacements: z.number().int().min(1) }),
+        ),
+      })
+      .safeParse(value);
+    if (parsed.success) throw new Error("expected invalid input");
+    const message = formatAiError(
+      new InvalidToolInputError({
+        toolName: "apply_patch",
+        toolInput: JSON.stringify(value),
+        cause: new TypeValidationError({ value, cause: parsed.error }),
+      }),
+    );
+    expect(message).toContain("positive integer");
+    expect(message).toContain("replace_all=true");
+    expect(message).not.toContain("Example:");
+  });
   it("surfaces nested provider model errors", () => {
     expect(
       formatAiError({
@@ -67,14 +115,14 @@ describe("formatAiError", () => {
 
   it("summarizes invalid tool input without echoing a large payload", () => {
     const value = {
-      files: JSON.stringify([
+      edits: JSON.stringify([
         {
           path: "count_line.py",
           edits: [{ old_text: "x".repeat(2_000), new_text: "new" }],
         },
       ]),
     };
-    const parsed = z.object({ files: z.array(z.object({})) }).safeParse(value);
+    const parsed = z.object({ edits: z.array(z.object({})) }).safeParse(value);
     if (parsed.success) throw new Error("expected invalid test input");
     const validation = new TypeValidationError({ value, cause: parsed.error });
     const error = new InvalidToolInputError({
@@ -96,7 +144,7 @@ describe("formatAiError", () => {
 
     for (const input of [error, transported]) {
       expect(formatAiError(input)).toBe(
-        "Invalid input for tool apply_patch: files: expected array, received string. Pass JSON arrays and objects directly, not as JSON-encoded strings. Call the tool again with input that matches the schema. The tool was not executed.",
+        "Invalid input for tool apply_patch: edits: expected array, received string. Pass JSON arrays and objects directly, not as JSON-encoded strings. Call the tool again with input that matches the schema. The tool was not executed.",
       );
       expect(formatAiError(input)).not.toContain("count_line.py");
     }
@@ -166,9 +214,21 @@ describe("formatAiError", () => {
   it("returns concise tool errors without executing invalid input or changing request prefixes", async () => {
     const execute = vi.fn();
     const inputs = [
-      '{"files":[{"path":"a.py","edits":[]}',
-      JSON.stringify({ files: [{ edits: [] }], path: "a.py" }),
+      '{"edits":[{"path":"a.py"}',
+      JSON.stringify({
+        edits: [
+          {
+            old_text: "private-source-marker",
+            new_text: "private-replacement-marker",
+          },
+        ],
+        path: "a.py",
+      }),
       JSON.stringify({ yield_time_ms: 60000 }),
+      JSON.stringify({
+        path: "private-target",
+        content: "private-source-marker",
+      }),
     ];
     let step = 0;
     const model = new MockLanguageModelV4({
@@ -182,7 +242,12 @@ describe("formatAiError", () => {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: `call-${step}`,
-                  toolName: step === 3 ? "shell_exec" : "apply_patch",
+                  toolName:
+                    step === 4
+                      ? "write_file"
+                      : step === 3
+                        ? "shell_exec"
+                        : "apply_patch",
                   input,
                 });
               }
@@ -219,16 +284,28 @@ describe("formatAiError", () => {
           execute,
         },
         apply_patch: {
-          inputSchema: z.object({
-            files: z.array(
-              z.object({ path: z.string(), edits: z.array(z.object({})) }),
+          inputSchema: z.strictObject({
+            edits: z.array(
+              z.strictObject({
+                path: z.string(),
+                old_text: z.string(),
+                new_text: z.string(),
+              }),
             ),
+          }),
+          execute,
+        },
+        write_file: {
+          inputSchema: z.strictObject({
+            path: z.string(),
+            content: z.string(),
+            mode: z.enum(["create", "rewrite"]),
           }),
           execute,
         },
       },
       repairToolCall: reportInvalidToolInput,
-      stopWhen: isStepCount(4),
+      stopWhen: isStepCount(5),
     };
     const messages = [{ role: "user" as const, content: "edit" }];
     const result = streamText({ ...options, messages });
@@ -250,7 +327,7 @@ describe("formatAiError", () => {
       {
         type: "error-text",
         value: expect.stringContaining(
-          "files[0].path: expected string, received undefined",
+          "edits[0].path: expected string, received undefined",
         ),
       },
       {
@@ -259,12 +336,16 @@ describe("formatAiError", () => {
           "yield_time_ms: expected number <= 30000, received 60000",
         ),
       },
+      {
+        type: "error-text",
+        value: expect.stringContaining('Specify mode="create"'),
+      },
     ]);
     for (const output of outputs) {
       expect(JSON.stringify(output)).toContain("The tool was not executed.");
-      expect(JSON.stringify(output)).not.toContain("a.py");
+      expect(JSON.stringify(output)).not.toContain("private-source-marker");
     }
-    for (let index = 1; index < 4; index++) {
+    for (let index = 1; index < 5; index++) {
       const previous = model.doStreamCalls[index - 1];
       const current = model.doStreamCalls[index];
       expect(current.prompt.slice(0, previous.prompt.length)).toEqual(
@@ -278,9 +359,9 @@ describe("formatAiError", () => {
       messages: [...messages, ...JSON.parse(JSON.stringify(responseMessages))],
     });
     await restored.consumeStream();
-    const previous = model.doStreamCalls[3];
+    const previous = model.doStreamCalls[4];
     expect(
-      model.doStreamCalls[4].prompt.slice(0, previous.prompt.length),
+      model.doStreamCalls[5].prompt.slice(0, previous.prompt.length),
     ).toEqual(previous.prompt);
   });
 

@@ -1,13 +1,20 @@
 /**
  * 本文件测试六工具方案中的读取、写入、补丁和文件树操作。
- * 测试锁定固定会话根、动态审批、默认创建模式及统一原生调用边界。
+ * 测试锁定固定会话根、动态审批、显式写入模式及统一原生调用边界。
  */
 
 import {
   getFileEditRuntime,
   releaseFileEditRuntime,
 } from "@/modules/ai/lib/fileEditRuntime";
-import { asSchema, type ToolExecutionOptions } from "ai";
+import {
+  asSchema,
+  isStepCount,
+  streamText,
+  type ToolExecutionOptions,
+  type ModelMessage,
+} from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 
@@ -22,7 +29,7 @@ const nativeMock = vi.hoisted(() => ({
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
 import { buildToolApproval } from "./approval";
-import { buildFsTools } from "./fs";
+import { buildFsTools, visibleFileReadIds } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildTools } from "./tools";
 
@@ -83,10 +90,10 @@ describe("AI file tools", () => {
     }
   });
 
-  it("describes apply_patch nested arrays and exact replacement fields", async () => {
+  it("describes flat edits and rejects misplaced fields before execution", async () => {
     const tool = buildPatchTools(context).apply_patch;
     const schema = await asSchema(tool.inputSchema).jsonSchema;
-    const files = schema.properties?.files as {
+    const edits = schema.properties?.edits as {
       description?: string;
       items?: {
         properties?: Record<string, { description?: string; items?: unknown }>;
@@ -94,18 +101,24 @@ describe("AI file tools", () => {
     };
 
     expect(tool.description).toContain(
-      'Example: {"files":[{"path":"a.py","edits":',
+      'Example: {"edits":[{"path":"a.py","old_text":',
     );
     expect(tool.description).toContain(
       "without read_file line-number prefixes",
     );
-    expect(files.description).toContain("JSON array, not a string");
-    expect(files.items?.properties?.edits.description).toContain(
-      "Ordered exact-text replacements",
-    );
-    expect(files.items?.properties?.path.description).toContain(
+    expect(edits.description).toContain("JSON array, not a string");
+    expect(edits.items?.properties?.path.description).toContain(
       "existing UTF-8 file",
     );
+    const validator = asSchema(tool.inputSchema);
+    for (const input of [
+      { path: "a.py", edits: [{ old_text: "old", new_text: "new" }] },
+      {
+        edits: [{ path: "a.py", old_text: "old", new_text: "new", typo: true }],
+      },
+    ])
+      expect((await validator.validate?.(input))?.success).toBe(false);
+    expect(nativeMock.agentPrepareMutation).not.toHaveBeenCalled();
   });
 
   it("describes read truncation and complete rewrite requirements", async () => {
@@ -130,7 +143,7 @@ describe("AI file tools", () => {
     expect(writeProperties.mode.description).toContain(
       "read or successfully written the complete current file content",
     );
-    expect(writeProperties.mode.description).toContain("Defaults to create");
+    expect(writeSchema.required).toContain("mode");
   });
 
   it("reads through the owner-scoped native backend", async () => {
@@ -167,6 +180,8 @@ describe("AI file tools", () => {
       root: "/workspace",
       permissionMode: "ask",
       path: "a.txt",
+      toolCallId: options.toolCallId,
+      visibleReadIds: [],
       startLine: 10,
       lineCount: 20,
       force: undefined,
@@ -179,20 +194,32 @@ describe("AI file tools", () => {
       throw new Error("write_file must support dynamic approval and execution");
     }
     expect(
-      buildToolApproval(context).write_file({ path: "a.txt", content: "text" }),
+      buildToolApproval(context).write_file({
+        path: "a.txt",
+        content: "text",
+        mode: "create",
+      }),
     ).toBe("not-applicable");
     expect(
       buildToolApproval(context).write_file({
         path: "../outside.txt",
         content: "text",
+        mode: "create",
       }),
     ).toBe("user-approval");
     permissionMode = "full-access";
     expect(
-      buildToolApproval(context).write_file({ path: "a.txt", content: "text" }),
+      buildToolApproval(context).write_file({
+        path: "a.txt",
+        content: "text",
+        mode: "create",
+      }),
     ).toBe("not-applicable");
 
-    await tool.execute({ path: "a.txt", content: "text" }, options);
+    await tool.execute(
+      { path: "a.txt", content: "text", mode: "create" },
+      options,
+    );
     expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith(
       expect.objectContaining({
         permissionMode: "full-access",
@@ -208,6 +235,127 @@ describe("AI file tools", () => {
       context.getSessionId(),
       options.toolCallId,
     );
+  });
+
+  it("only deduplicates read receipts whose original content remains in the actual model messages", async () => {
+    const original = {
+      role: "tool" as const,
+      content: [
+        {
+          type: "tool-result" as const,
+          toolName: "read_file",
+          toolCallId: "original",
+          output: {
+            type: "json" as const,
+            value: { path: "a.txt", content: "1| text", unchanged: false },
+          },
+        },
+      ],
+    };
+    const skipped = {
+      role: "tool" as const,
+      content: [
+        {
+          type: "tool-result" as const,
+          toolName: "read_file",
+          toolCallId: "cached",
+          output: {
+            type: "json" as const,
+            value: { path: "a.txt", content: "", unchanged: true },
+          },
+        },
+      ],
+    };
+    expect(visibleFileReadIds([original, skipped])).toEqual(["original"]);
+    expect(
+      visibleFileReadIds([
+        skipped,
+        { role: "user", content: "Compaction summary: a.txt was read" },
+      ]),
+    ).toEqual([]);
+    const execute = buildFsTools(context).read_file.execute;
+    if (!execute) throw new Error("read_file execute missing");
+    await execute(
+      { path: "a.txt" },
+      { ...options, messages: [original, skipped] },
+    );
+    expect(nativeMock.agentFileRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        toolCallId: options.toolCallId,
+        visibleReadIds: ["original"],
+      }),
+    );
+    await execute({ path: "a.txt" }, { ...options, messages: [skipped] });
+    expect(nativeMock.agentFileRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ visibleReadIds: [] }),
+    );
+  });
+
+  it("passes SDK read history across steps but not into compacted or independent runs", async () => {
+    nativeMock.agentFileRead.mockImplementation(async ({ visibleReadIds }) => ({
+      path: "a.txt",
+      content: visibleReadIds.length ? "" : "1| body",
+      unchanged: visibleReadIds.length > 0,
+    }));
+    const run = async (
+      prefix: string,
+      steps: number,
+      messages: ModelMessage[],
+    ) => {
+      let call = 0;
+      const model = new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: new ReadableStream({
+            start(stream) {
+              stream.enqueue({ type: "stream-start", warnings: [] });
+              stream.enqueue({
+                type: "tool-call",
+                toolCallId: `${prefix}-${++call}`,
+                toolName: "read_file",
+                input: '{"path":"a.txt"}',
+              });
+              stream.enqueue({
+                type: "finish",
+                finishReason: { unified: "tool-calls", raw: "tool_calls" },
+                usage: {
+                  inputTokens: {
+                    total: 10,
+                    noCache: 10,
+                    cacheRead: 0,
+                    cacheWrite: undefined,
+                  },
+                  outputTokens: { total: 1, text: 1, reasoning: 0 },
+                },
+              });
+              stream.close();
+            },
+          }),
+        }),
+      });
+      const result = streamText({
+        model,
+        tools: { read_file: buildFsTools(context).read_file },
+        messages,
+        stopWhen: isStepCount(steps),
+      });
+      await result.consumeStream();
+    };
+    await run("parent", 2, [{ role: "user", content: "Read twice" }]);
+    await run("compacted", 1, [
+      { role: "user", content: "Summary: a.txt was read" },
+    ]);
+    await run("child", 1, [{ role: "user", content: "Read independently" }]);
+    expect(
+      nativeMock.agentFileRead.mock.calls.map(([input]) => ({
+        id: input.toolCallId,
+        visible: input.visibleReadIds,
+      })),
+    ).toEqual([
+      { id: "parent-1", visible: [] },
+      { id: "parent-2", visible: ["parent-1"] },
+      { id: "compacted-1", visible: [] },
+      { id: "child-1", visible: [] },
+    ]);
   });
 
   it("uses one-call full access after approving an outside read", async () => {
@@ -260,14 +408,17 @@ describe("AI file tools", () => {
     if (!tool.execute) throw new Error("apply_patch execute missing");
     await tool.execute(
       {
-        files: [
+        edits: [
           {
             path: "a.txt",
-            edits: [{ old_text: "a", new_text: "b" }],
+            old_text: "a",
+            new_text: "b",
           },
           {
             path: "b.txt",
-            edits: [{ old_text: "x", new_text: "y", replace_all: true }],
+            old_text: "x",
+            new_text: "y",
+            replace_all: true,
           },
         ],
       },
@@ -366,7 +517,10 @@ describe("AI file tools", () => {
     const tool = buildFsTools(context).write_file;
     if (!tool.execute) throw new Error("write_file execute missing");
     expect(
-      await tool.execute({ path: "a.txt", content: "new" }, options),
+      await tool.execute(
+        { path: "a.txt", content: "new", mode: "rewrite" },
+        options,
+      ),
     ).toEqual({
       error: "rollback failed",
       files: [],

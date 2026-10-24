@@ -73,10 +73,14 @@ describe("tool call summaries", () => {
         content: "secret body",
       }),
     ).toEqual([{ label: "rewrite" }, "a.ts"]);
-    expect(summary("write_file", { path: "a.ts" })).toBe("Create · a.ts");
+    expect(summary("write_file", { path: "a.ts" })).toBe("a.ts");
     expect(
       summary("apply_patch", {
-        files: [{ path: "a.ts", edits: ["secret patch"] }, { path: "b.ts" }],
+        edits: [
+          { path: "a.ts", old_text: "secret patch" },
+          { path: "a.ts" },
+          { path: "b.ts" },
+        ],
       }),
     ).toBe("a.ts · 1 more file");
   });
