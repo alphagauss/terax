@@ -21,9 +21,10 @@ const RUNTIME_LOCK_FILENAME: &str = "terax-workspace-runtime.lock";
 const RUNTIME_CHANGED_EVENT: &str = "terax://workspace-runtime-changed";
 const MAX_RUNTIME_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_REGISTERED_WINDOWS: usize = 128;
-const MAX_PENDING_MESSAGES: usize = 32;
+// 容纳资源管理器逐项投递的批量打开，避免主窗口恢复期间队列过早耗尽。
+const MAX_PENDING_MESSAGES: usize = 128;
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
-const MAX_OPEN_FILES: usize = 64;
+const MAX_OPEN_PATHS: usize = 64;
 const MESSAGE_TTL_MILLIS: u64 = 10 * 60 * 1000;
 const MAX_PATH_BYTES: usize = 32 * 1024;
 const MAX_URL_BYTES: usize = 8 * 1024;
@@ -106,8 +107,13 @@ pub enum WorkspacePage {
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum WorkspaceRuntimeMessage {
     Activate,
-    OpenFiles { files: Vec<String> },
-    CopyPage { page: WorkspacePage },
+    OpenPaths {
+        directories: Vec<String>,
+        files: Vec<String>,
+    },
+    CopyPage {
+        page: WorkspacePage,
+    },
 }
 
 /// 同环境内可接收工作页的临时 Workspace 窗口。
@@ -294,12 +300,13 @@ fn validate_page(page: &WorkspacePage) -> Result<(), String> {
 fn validate_message(message: &WorkspaceRuntimeMessage) -> Result<(), String> {
     match message {
         WorkspaceRuntimeMessage::Activate => Ok(()),
-        WorkspaceRuntimeMessage::OpenFiles { files } => {
-            if files.is_empty() || files.len() > MAX_OPEN_FILES {
-                return Err("invalid Workspace file-open request".to_string());
+        WorkspaceRuntimeMessage::OpenPaths { directories, files } => {
+            let count = directories.len() + files.len();
+            if count == 0 || count > MAX_OPEN_PATHS {
+                return Err("invalid Workspace path-open request".to_string());
             }
-            for file in files {
-                validate_text(file, MAX_PATH_BYTES, false, "Workspace file path")?;
+            for path in directories.iter().chain(files) {
+                validate_text(path, MAX_PATH_BYTES, false, "Workspace path")?;
             }
             Ok(())
         }
@@ -443,14 +450,14 @@ pub fn unregister_window(state: &WorkspaceProcessState) -> Result<(), String> {
 }
 
 fn request_message(
+    root: &Path,
     environment: &str,
     target_window_id: &str,
     payload: WorkspaceRuntimeMessage,
 ) -> Result<(), String> {
-    let root = runtime_root()?;
     let now = now_millis();
-    mutate_document(&root, |document| {
-        prune(document, &root, now)?;
+    mutate_document(root, |document| {
+        prune(document, root, now)?;
         append_message(document, target_window_id, environment, payload, now)?;
         Ok(())
     })
@@ -461,19 +468,28 @@ pub(crate) fn request_workspace_activation(
     environment: &str,
     workspace_id: &str,
 ) -> Result<(), String> {
-    request_message(environment, workspace_id, WorkspaceRuntimeMessage::Activate)
+    request_message(
+        &runtime_root()?,
+        environment,
+        workspace_id,
+        WorkspaceRuntimeMessage::Activate,
+    )
 }
 
-/// 向已经运行的主窗口投递一组待打开文件。
-pub(crate) fn request_workspace_file_open(
+/// 向主窗口投递系统打开的路径，尚未完成启动的窗口在恢复后统一消费。
+pub(crate) fn request_workspace_paths_open(
+    root: &Path,
     environment: &str,
     workspace_id: &str,
+    directories: &[String],
     files: &[String],
 ) -> Result<(), String> {
     request_message(
+        root,
         environment,
         workspace_id,
-        WorkspaceRuntimeMessage::OpenFiles {
+        WorkspaceRuntimeMessage::OpenPaths {
+            directories: directories.to_vec(),
             files: files.to_vec(),
         },
     )
@@ -706,6 +722,100 @@ mod tests {
             blocks: false,
             custom_title: None,
         }
+    }
+
+    #[test]
+    fn system_paths_forward_from_another_process() {
+        const CHILD_ROOT: &str = "TERAX_OPEN_PATHS_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let root = PathBuf::from(root);
+            for _ in 0..100 {
+                let request = workspace_process::parse_args([
+                    root.join("project").to_string_lossy().into_owned(),
+                    root.join("file.rs").to_string_lossy().into_owned(),
+                ])
+                .unwrap();
+                assert!(matches!(
+                    workspace_process::initialize(&root, request).unwrap(),
+                    workspace_process::InitializeOutcome::ActivatedExisting
+                ));
+            }
+            return;
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let other = root.path().join("other");
+        let file = root.path().join("file.rs");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&other).unwrap();
+        fs::write(&file, b"fn main() {}").unwrap();
+        let request = workspace_process::parse_args([
+            project.to_string_lossy().into_owned(),
+            other.to_string_lossy().into_owned(),
+            file.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        let workspace_process::InitializeOutcome::Opened(state) =
+            workspace_process::initialize(root.path(), request).unwrap()
+        else {
+            panic!("cold system open must create the Local primary Workspace");
+        };
+        assert!(state.bootstrap().is_primary);
+        assert!(state.bootstrap().launch_dir.is_none());
+
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "modules::workspace_runtime::tests::system_paths_forward_from_another_process",
+            ])
+            .env(CHILD_ROOT, root.path())
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+
+        let mut document = read_document(&runtime_path(root.path())).unwrap().0;
+        let messages = take_messages(&mut document, &state.bootstrap().id, "local");
+        let project = crate::modules::fs::to_canon(fs::canonicalize(project).unwrap());
+        let other = crate::modules::fs::to_canon(fs::canonicalize(other).unwrap());
+        let file = crate::modules::fs::to_canon(fs::canonicalize(file).unwrap());
+        assert_eq!(messages.len(), 101);
+        assert_eq!(
+            messages[0],
+            WorkspaceRuntimeMessage::OpenPaths {
+                directories: vec![project.clone(), other],
+                files: vec![file.clone()]
+            }
+        );
+        let forwarded = WorkspaceRuntimeMessage::OpenPaths {
+            directories: vec![project],
+            files: vec![file],
+        };
+        assert!(messages[1..].iter().all(|message| message == &forwarded));
+        assert!(take_messages(&mut document, &state.bootstrap().id, "local").is_empty());
+    }
+
+    #[test]
+    fn system_paths_validate_the_combined_request() {
+        assert!(validate_message(&WorkspaceRuntimeMessage::OpenPaths {
+            directories: Vec::new(),
+            files: Vec::new(),
+        })
+        .is_err());
+        assert!(validate_message(&WorkspaceRuntimeMessage::OpenPaths {
+            directories: vec!["/project".to_string(); MAX_OPEN_PATHS],
+            files: vec!["/file.rs".to_string()],
+        })
+        .is_err());
+        assert!(validate_message(&WorkspaceRuntimeMessage::OpenPaths {
+            directories: vec![String::new()],
+            files: Vec::new(),
+        })
+        .is_err());
     }
 
     #[test]

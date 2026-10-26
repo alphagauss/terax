@@ -45,7 +45,6 @@ pub struct WorkspaceBootstrap {
     pub env: WorkspaceEnv,
     pub environment_key: String,
     pub launch_dir: Option<String>,
-    pub launch_files: Vec<String>,
     pub state_path: String,
     pub window_state_filename: String,
     pub window_geometry: Option<WindowGeometry>,
@@ -65,6 +64,7 @@ pub struct LaunchRequest {
     env: WorkspaceEnv,
     policy: WorkspacePolicy,
     launch_paths: Vec<PathBuf>,
+    launch_dir: Option<PathBuf>,
     window_geometry: Option<WindowGeometry>,
     temporary_id: Option<Uuid>,
 }
@@ -192,6 +192,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
                 WorkspacePolicy::Fresh
             },
             launch_paths: positional,
+            launch_dir: None,
             window_geometry: None,
             temporary_id: None,
         });
@@ -208,7 +209,8 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     Ok(LaunchRequest {
         env,
         policy,
-        launch_paths: launch_dir.into_iter().collect(),
+        launch_paths: Vec::new(),
+        launch_dir,
         window_geometry,
         temporary_id,
     })
@@ -282,22 +284,17 @@ fn parse_legacy_state_filename(name: &str) -> Option<Uuid> {
     Uuid::parse_str(raw).ok()
 }
 
-fn canonical_launch_target(paths: Vec<PathBuf>) -> Result<(Option<String>, Vec<String>), String> {
-    let mut dir = None;
+fn canonical_launch_targets(paths: Vec<PathBuf>) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut directories = Vec::new();
     let mut files = Vec::new();
     for path in paths {
         let canonical = fs::canonicalize(&path)
             .map_err(|e| format!("launch path {} is invalid: {e}", path.display()))?;
         if canonical.is_dir() {
-            if dir.is_none() {
-                dir = Some(crate::modules::fs::to_canon(&canonical));
-            }
+            directories.push(crate::modules::fs::to_canon(&canonical));
             continue;
         }
         if canonical.is_file() {
-            if dir.is_none() {
-                dir = canonical.parent().map(crate::modules::fs::to_canon);
-            }
             files.push(crate::modules::fs::to_canon(&canonical));
             continue;
         }
@@ -306,7 +303,18 @@ fn canonical_launch_target(paths: Vec<PathBuf>) -> Result<(Option<String>, Vec<S
             canonical.display()
         ));
     }
-    Ok((dir, files))
+    Ok((directories, files))
+}
+
+fn canonical_launch_directory(path: &Path) -> Result<String, String> {
+    let (directories, files) = canonical_launch_targets(vec![path.to_path_buf()])?;
+    if !files.is_empty() {
+        return Err("launch directory must be a directory".to_string());
+    }
+    Ok(directories
+        .into_iter()
+        .next()
+        .expect("launch directory was provided"))
 }
 
 fn environment_identity(env: &WorkspaceEnv) -> Result<EnvironmentIdentity, String> {
@@ -493,28 +501,30 @@ fn single_id(environment: &EnvironmentIdentity) -> Uuid {
 }
 
 fn make_state(
+    root: &Path,
     environment: &EnvironmentIdentity,
     kind: StateKind,
     lock: FileLock,
     env: WorkspaceEnv,
     launch_dir: Option<String>,
-    launch_files: Vec<String>,
     launch_geometry: Option<WindowGeometry>,
 ) -> Result<WorkspaceProcessState, String> {
+    let window_state_root =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
+    let transfer_root =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::Transfers)?;
+    // 仅在创建 Workspace 时清理过期状态，系统批量打开的派发进程不重复扫描。
+    cleanup_extra_states(root, &window_state_root, &transfer_root)?;
     let is_primary = matches!(&kind, StateKind::Single);
     let id = match kind {
         StateKind::Single => single_id(environment),
         StateKind::Extra(id) => id,
     };
-    let root =
-        crate::modules::app_data::directory(crate::modules::app_data::Directory::Workspaces)?;
     let lock_filename = lock_filename(environment, &kind);
     let state_path = root.join(state_filename(environment, &kind));
     ensure_state(&state_path)?;
     let window_state_filename = window_state_filename(environment, &kind);
-    let window_state_path =
-        crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?
-            .join(&window_state_filename);
+    let window_state_path = window_state_root.join(&window_state_filename);
     Ok(WorkspaceProcessState {
         bootstrap: WorkspaceBootstrap {
             schema_version: 3,
@@ -523,7 +533,6 @@ fn make_state(
             env,
             environment_key: environment.key.clone(),
             launch_dir,
-            launch_files,
             state_path: state_path.to_string_lossy().into_owned(),
             window_state_filename,
             window_geometry: (!window_state_path.exists())
@@ -539,16 +548,15 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     validate_environment(&request.env)?;
     let environment = environment_identity(&request.env)?;
-    let (launch_dir, launch_files) = canonical_launch_target(request.launch_paths)?;
+    let (directories, files) = canonical_launch_targets(request.launch_paths)?;
+    let launch_dir = request
+        .launch_dir
+        .map(|path| canonical_launch_directory(&path))
+        .transpose()?;
     let launch_geometry = request.window_geometry;
-    let window_state_root =
-        crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
-    let transfer_root =
-        crate::modules::app_data::directory(crate::modules::app_data::Directory::Transfers)?;
     let _registry = FileLock::acquire(&root.join(REGISTRY_LOCK), Duration::from_secs(5))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Workspace registry is busy".to_string())?;
-    cleanup_extra_states(root, &window_state_root, &transfer_root)?;
 
     let _policy = request.policy;
     if let Some(id) = request.temporary_id {
@@ -560,12 +568,12 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "temporary Workspace id is already in use".to_string())?;
         return Ok(InitializeOutcome::Opened(Box::new(make_state(
+            root,
             &environment,
             kind,
             lock,
             request.env,
             launch_dir,
-            launch_files,
             launch_geometry,
         )?)));
     }
@@ -573,20 +581,36 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     let single_kind = StateKind::Single;
     let single_lock_path = root.join(lock_filename(&environment, &single_kind));
     match FileLock::try_acquire(&single_lock_path).map_err(|error| error.to_string())? {
-        Some(lock) => Ok(InitializeOutcome::Opened(Box::new(make_state(
-            &environment,
-            single_kind,
-            lock,
-            request.env,
-            launch_dir,
-            launch_files,
-            launch_geometry,
-        )?))),
-        None if request.env == WorkspaceEnv::Local && !launch_files.is_empty() => {
-            crate::modules::workspace_runtime::request_workspace_file_open(
+        Some(lock) => {
+            let state = make_state(
+                root,
+                &environment,
+                single_kind,
+                lock,
+                request.env,
+                launch_dir,
+                launch_geometry,
+            )?;
+            if !directories.is_empty() || !files.is_empty() {
+                crate::modules::workspace_runtime::request_workspace_paths_open(
+                    root,
+                    &environment.key,
+                    &state.bootstrap.id,
+                    &directories,
+                    &files,
+                )?;
+            }
+            Ok(InitializeOutcome::Opened(Box::new(state)))
+        }
+        None if request.env == WorkspaceEnv::Local
+            && (!directories.is_empty() || !files.is_empty()) =>
+        {
+            crate::modules::workspace_runtime::request_workspace_paths_open(
+                root,
                 &environment.key,
                 &single_id(&environment).to_string(),
-                &launch_files,
+                &directories,
+                &files,
             )?;
             Ok(InitializeOutcome::ActivatedExisting)
         }
@@ -604,31 +628,30 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
                 .map_err(|error| error.to_string())?
                 .expect("new UUID lock cannot be occupied");
             Ok(InitializeOutcome::Opened(Box::new(make_state(
+                root,
                 &environment,
                 kind,
                 lock,
                 request.env,
                 launch_dir,
-                launch_files,
                 launch_geometry,
             )?)))
         }
     }
 }
 
-pub fn route_local_open_files(files: &[String]) -> Result<(), String> {
-    if files.is_empty() {
+/// macOS 的系统打开事件也经启动入口分发，Local 主窗口不存在时由新进程创建。
+pub fn route_local_open_paths(paths: Vec<PathBuf>) -> Result<(), String> {
+    if paths.is_empty() {
         return Ok(());
     }
-    let environment = EnvironmentIdentity {
-        key: "local".to_string(),
-        filename_key: "local".to_string(),
-    };
-    crate::modules::workspace_runtime::request_workspace_file_open(
-        &environment.key,
-        &single_id(&environment).to_string(),
-        files,
-    )
+    spawn_process(
+        paths
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+    )?;
+    Ok(())
 }
 
 impl WorkspaceProcessState {
@@ -741,11 +764,7 @@ fn spawn_args(
         .to_string(),
     ];
     if let Some(path) = launch_dir {
-        let (canonical, files) = canonical_launch_target(vec![PathBuf::from(path)])?;
-        if !files.is_empty() {
-            return Err("launch directory must be a directory".to_string());
-        }
-        let canonical = canonical.expect("launch directory was provided");
+        let canonical = canonical_launch_directory(Path::new(path))?;
         args.push(DIR_ARG.to_string());
         args.push(canonical);
     }
@@ -997,13 +1016,13 @@ mod tests {
     }
 
     #[test]
-    fn launch_file_uses_its_parent_and_is_preserved() {
+    fn launch_file_does_not_become_a_project_directory() {
         let root = tempfile::tempdir().unwrap();
         let file = root.path().join("example.rs");
         fs::write(&file, b"fn main() {}").unwrap();
 
-        let (dir, files) = canonical_launch_target(vec![file.clone()]).unwrap();
-        assert_eq!(dir, Some(crate::modules::fs::to_canon(root.path())));
+        let (directories, files) = canonical_launch_targets(vec![file.clone()]).unwrap();
+        assert!(directories.is_empty());
         assert_eq!(files, vec![crate::modules::fs::to_canon(&file)]);
     }
 
@@ -1026,8 +1045,9 @@ mod tests {
         fs::write(&one, b"one").unwrap();
         fs::write(&two, b"two").unwrap();
 
-        let (dir, files) = canonical_launch_target(vec![one.clone(), two.clone()]).unwrap();
-        assert_eq!(dir, Some(crate::modules::fs::to_canon(root.path())));
+        let (directories, files) =
+            canonical_launch_targets(vec![one.clone(), two.clone()]).unwrap();
+        assert!(directories.is_empty());
         assert_eq!(
             files,
             vec![
@@ -1035,6 +1055,26 @@ mod tests {
                 crate::modules::fs::to_canon(&two),
             ]
         );
+    }
+
+    #[test]
+    fn launch_paths_preserve_all_directories_and_reject_invalid_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let one = root.path().join("one");
+        let two = root.path().join("two");
+        fs::create_dir(&one).unwrap();
+        fs::create_dir(&two).unwrap();
+        let (directories, files) =
+            canonical_launch_targets(vec![one.clone(), two.clone()]).unwrap();
+        assert_eq!(
+            directories,
+            vec![
+                crate::modules::fs::to_canon(one),
+                crate::modules::fs::to_canon(two)
+            ]
+        );
+        assert!(files.is_empty());
+        assert!(canonical_launch_targets(vec![root.path().join("missing")]).is_err());
     }
 
     #[test]

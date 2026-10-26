@@ -165,7 +165,7 @@ pub fn open_with_register() -> Result<String, String> {
                 .map_err(|error| error.to_string())?;
         }
         register_context_menu(&current_user, FILE_CONTEXT_KEY, &executable, "Document")?;
-        register_context_menu(&current_user, DIRECTORY_CONTEXT_KEY, &executable, "Single")?;
+        register_context_menu(&current_user, DIRECTORY_CONTEXT_KEY, &executable, "Player")?;
         notify_association_changed();
         Ok(executable.to_string_lossy().into_owned())
     }

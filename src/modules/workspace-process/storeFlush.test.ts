@@ -45,7 +45,6 @@ describe("Workspace Store flush", () => {
       env: { kind: "local" },
       environmentKey: "local",
       launchDir: null,
-      launchFiles: [],
       statePath: "workspace-test.json",
       windowStateFilename: "workspace-test-window.json",
       windowGeometry: null,

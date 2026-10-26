@@ -35,6 +35,7 @@ vi.mock("@/i18n", () => ({ default: { t: mocks.t } }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.t }) }));
 
 vi.mock("@/lib/errors", () => ({ reportError: mocks.error }));
+vi.mock("@/lib/platform", () => ({ IS_WINDOWS: true }));
 
 import {
   prepareSpaceDirectory,
@@ -68,6 +69,64 @@ afterEach(async () => {
 });
 
 describe("Space directory actions", () => {
+  it("reuses only locked project roots, preferring the active match and then list order", async () => {
+    const store = useSpaces.getState();
+    store.setRoot(DEFAULT_SPACE_ID, "C:/work/project");
+    const unlocked = store.create({ root: "C:/work/project", name: "project" });
+    store.setRootLocked(unlocked.id, false, null);
+    const first = store.create({ root: "C:/work/project", name: "project" });
+    const second = store.create({ root: "c:/WORK/PROJECT", name: "project" });
+    store.rename(first.id, "My project");
+    store.setActive(second.id);
+
+    await act(async () => directories.openDirectories(["C:/work/project/"]));
+    expect(useSpaces.getState().activeId).toBe(second.id);
+    store.setActive(unlocked.id);
+    await act(async () => directories.openDirectories(["c:/work/PROJECT"]));
+    expect(useSpaces.getState().activeId).toBe(first.id);
+    expect(useSpaces.getState().spaces[2]).toMatchObject({
+      id: first.id,
+      name: "My project",
+    });
+    expect(mocks.createWorkbench).not.toHaveBeenCalled();
+  });
+
+  it("creates locked spaces for all new directories without reusing unlocked roots or parents", async () => {
+    const store = useSpaces.getState();
+    const unlocked = store.create({ root: "/project", name: "project" });
+    store.setRootLocked(unlocked.id, false, null);
+    const original = useSpaces.getState().spaces[1];
+
+    await act(async () =>
+      directories.openDirectories([
+        "/project",
+        "/project/child",
+        "/other",
+        "/project/",
+      ]),
+    );
+    const spaces = useSpaces.getState().spaces;
+    expect(spaces).toHaveLength(5);
+    expect(spaces[1]).toBe(original);
+    expect(spaces.slice(2)).toMatchObject([
+      { root: "/project", rootLocked: true, name: "project" },
+      { root: "/project/child", rootLocked: true, name: "child" },
+      { root: "/other", rootLocked: true, name: "other" },
+    ]);
+    expect(useSpaces.getState().activeId).toBe(spaces[2].id);
+    expect(mocks.createWorkbench.mock.calls.map(([id]) => id)).toEqual(
+      spaces.slice(2).map((space) => space.id),
+    );
+  });
+
+  it("continues opening system directories after a failed path without creating its Space", async () => {
+    mocks.authorize.mockRejectedValueOnce(new Error("Access denied"));
+    await act(async () => directories.openDirectories(["/denied", "/valid"]));
+    expect(useSpaces.getState().spaces).toHaveLength(2);
+    expect(useSpaces.getState().spaces[1].root).toBe("/valid");
+    expect(mocks.error).toHaveBeenCalledTimes(1);
+  });
+
   it("opens Default selections in a new empty workbench and edits ordinary spaces in place", async () => {
     mocks.picker.mockResolvedValue("C:\\work\\project");
     await act(async () => directories.chooseDirectory(DEFAULT_SPACE_ID));

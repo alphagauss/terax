@@ -1,6 +1,6 @@
 /** 统一当前环境中的 Space 目录选择、授权与创建，异步操作始终绑定发起时的目标。 */
 import { native } from "@/modules/ai/lib/native";
-import { documentEventPath } from "@/lib/pathIdentity";
+import { documentEventPath, documentPathIdentity } from "@/lib/pathIdentity";
 import { DEFAULT_SPACE_ID } from "@/modules/workbench/types";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
@@ -83,6 +83,37 @@ export function useSpaceDirectories(
     [createSpace, ensureWorkspaceReady, t],
   );
 
+  /** 系统打开目录只复用已锁定的项目 Space，不改变解锁 Space 的跟随状态。 */
+  const openDirectories = useCallback(
+    async (paths: string[]) => {
+      for (const path of paths) {
+        try {
+          const root = await prepareSpaceDirectory(path);
+          const store = useSpaces.getState();
+          const workspace = currentWorkspaceEnv();
+          const identity = documentPathIdentity(workspace, root);
+          const matches = store.spaces.filter(
+            (space) =>
+              space.id !== DEFAULT_SPACE_ID &&
+              space.rootLocked &&
+              space.root &&
+              documentPathIdentity(
+                workspace,
+                normalizeSpaceRoot(space.root),
+              ) === identity,
+          );
+          const existing =
+            matches.find((space) => space.id === store.activeId) ?? matches[0];
+          if (existing) store.setActive(existing.id);
+          else createSpace(root);
+        } catch (error) {
+          reportError(t("directoryFailed"), { error });
+        }
+      }
+    },
+    [createSpace, t],
+  );
+
   const chooseDirectory = useCallback(
     async (spaceId: string | null) => {
       if (currentWorkspaceEnv().kind !== "local") {
@@ -134,6 +165,7 @@ export function useSpaceDirectories(
   return {
     createSpace,
     openDirectory,
+    openDirectories,
     chooseDirectory,
     request,
     closeDialog,

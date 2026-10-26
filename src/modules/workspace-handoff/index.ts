@@ -9,7 +9,7 @@ import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { reportError } from "@/lib/errors";
@@ -31,8 +31,13 @@ export type WorkspacePage =
 
 export type WorkspaceRuntimeMessage =
   | { kind: "activate" }
-  | { kind: "openFiles"; files: string[] }
+  | { kind: "openPaths"; directories: string[]; files: string[] }
   | { kind: "copyPage"; page: WorkspacePage };
+
+export type WorkspaceOpenPaths = Extract<
+  WorkspaceRuntimeMessage,
+  { kind: "openPaths" }
+>;
 
 export type TemporaryWorkspaceWindow = {
   id: string;
@@ -189,7 +194,7 @@ type UseWorkspacePageHandoffParams = {
   ready: boolean;
   windowMode: WorkspaceWindowMode;
   getTab: (tabId: number) => Tab | undefined;
-  openFiles: (files: string[]) => void | Promise<void>;
+  openPaths: (paths: WorkspaceOpenPaths) => void | Promise<void>;
   openPage: (page: WorkspacePage) => void | Promise<void>;
 };
 
@@ -203,12 +208,14 @@ export function useWorkspacePageHandoff({
   ready,
   windowMode,
   getTab,
-  openFiles,
+  openPaths,
   openPage,
 }: UseWorkspacePageHandoffParams): WorkspacePageHandoffMenuActions | undefined {
   const { t } = useTranslation("tabs");
   const primary = currentWorkspaceBootstrap().isPrimary;
   const [targets, setTargets] = useState<TemporaryWorkspaceWindow[]>([]);
+  const handlers = useRef({ openPaths, openPage, t });
+  handlers.current = { openPaths, openPage, t };
 
   const refreshTargets = useCallback(() => {
     if (!primary || windowMode !== "multiple") {
@@ -290,18 +297,16 @@ export function useWorkspacePageHandoff({
 
       for (const message of messages) {
         if (message.kind === "activate") continue;
-        if (message.kind === "openFiles") {
-          await openFiles(
-            message.files.map((file) => file.replace(/\\/g, "/")),
-          );
+        if (message.kind === "openPaths") {
+          await handlers.current.openPaths(message);
           continue;
         }
         try {
-          await openPage(message.page);
-          toast.success(t("windowCopyReceived"));
+          await handlers.current.openPage(message.page);
+          toast.success(handlers.current.t("windowCopyReceived"));
         } catch (error) {
           console.error("[terax] copied Workspace page could not open:", error);
-          reportError(t("windowCopyReceiveFailed"), { error });
+          reportError(handlers.current.t("windowCopyReceiveFailed"), { error });
         }
       }
     }, controller.signal)
@@ -316,7 +321,7 @@ export function useWorkspacePageHandoff({
       controller.abort();
       unlisten?.();
     };
-  }, [openFiles, openPage, ready, t]);
+  }, [ready]);
 
   return useMemo(
     () =>

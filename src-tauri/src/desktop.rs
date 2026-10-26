@@ -11,7 +11,6 @@ use modules::{
     markdown_images, net, notifications, open_with, pty, python, remote, secrets, shell, transfers,
     workspace, workspace_process, workspace_runtime,
 };
-use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State};
 use tauri_plugin_window_state::StateFlags;
@@ -20,18 +19,9 @@ use tauri_plugin_window_state::StateFlags;
 #[derive(Default)]
 struct LaunchDir(Mutex<Option<String>>);
 
-/// Drained on first read so HMR / re-mounts cannot replay launch files.
-#[derive(Default)]
-struct LaunchFiles(Mutex<Vec<String>>);
-
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     state.0.lock().expect("LaunchDir mutex poisoned").take()
-}
-
-#[tauri::command]
-fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
 }
 
 /// 启动 Terax 原生进程并注册共享状态、插件和全部 IPC 命令。
@@ -73,7 +63,6 @@ pub fn run() {
         eprintln!("Terax Workspace runtime registration failed: {error}");
     }
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
-    let launch_files = workspace_process.bootstrap().launch_files.clone();
     let window_geometry = workspace_process.bootstrap().window_geometry;
     let show_loading_window =
         workspace_process::should_show_loading_window(&workspace_process.bootstrap().env);
@@ -169,15 +158,9 @@ pub fn run() {
             if let Some(ref launch_dir) = cli_dir {
                 let _ = registry.authorize(launch_dir);
             }
-            for file in &launch_files {
-                if let Some(parent) = PathBuf::from(file).parent() {
-                    let _ = registry.authorize(parent);
-                }
-            }
             registry
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
-        .manage(LaunchFiles(Mutex::new(launch_files)))
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(windows)]
@@ -348,7 +331,6 @@ pub fn run() {
             open_with::open_with_register,
             open_with::open_with_unregister,
             get_launch_dir,
-            get_launch_files,
             fullscreen::toggle_fullscreen,
             fullscreen::set_fullscreen,
             auxiliary_window::open_auxiliary_window,
@@ -443,14 +425,13 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
-                let files = urls
+                let paths = urls
                     .iter()
                     .filter_map(|url| url.to_file_path().ok())
-                    .filter_map(|path| std::fs::canonicalize(path).ok())
-                    .filter(|path| path.is_file())
-                    .map(|path| fs::to_canon(&path))
                     .collect::<Vec<_>>();
-                let _ = workspace_process::route_local_open_files(&files);
+                if let Err(error) = workspace_process::route_local_open_paths(paths) {
+                    log::warn!("could not open system paths: {error}");
+                }
             }
         });
 }
