@@ -213,8 +213,9 @@ debug = false
 debug = false
 
 [profile.release]
+incremental = true
 codegen-units = 16
-lto = "thin"
+lto = "off"
 opt-level = "s"
 panic = "abort"
 strip = true
