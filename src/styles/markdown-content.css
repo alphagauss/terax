@@ -51,6 +51,43 @@
   color: var(--muted-foreground);
 }
 
+.markdown-content-chat p {
+  margin-bottom: 8px;
+}
+
+.markdown-content-chat :is(
+  [data-streamdown="heading-1"],
+  [data-streamdown="heading-2"],
+  [data-streamdown="heading-3"],
+  [data-streamdown="heading-4"],
+  [data-streamdown="heading-5"],
+  [data-streamdown="heading-6"]
+) {
+  margin: 12px 0 6px;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.markdown-content-chat [data-streamdown="heading-1"] {
+  font-size: 20px;
+}
+
+.markdown-content-chat [data-streamdown="heading-2"] {
+  font-size: 18px;
+}
+
+.markdown-content-chat [data-streamdown="heading-3"] {
+  font-size: 16px;
+}
+
+.markdown-content-chat :is(
+  [data-streamdown="heading-4"],
+  [data-streamdown="heading-5"],
+  [data-streamdown="heading-6"]
+) {
+  font-size: 1em;
+}
+
 .markdown-content :is(
   [data-streamdown="ordered-list"],
   [data-streamdown="unordered-list"]
@@ -251,6 +288,10 @@
   border-bottom: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
 }
 
+.markdown-content-chat [data-streamdown="horizontal-rule"] {
+  margin: 12px 0;
+}
+
 .markdown-content [data-streamdown="inline-code"] {
   border-radius: 4px;
   background: color-mix(in srgb, var(--foreground) 8%, transparent);
@@ -379,6 +420,17 @@
 .markdown-content [data-markdown-mermaid-viewport] svg {
   max-width: 100%;
   height: auto;
+}
+
+/* 首尾留白由宿主拥有，普通正文与渐进挂载文档使用相同的内容边界。 */
+.markdown-content > :first-child,
+.markdown-content > [data-markdown-block-mounted]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child,
+.markdown-content > [data-markdown-block-mounted]:last-child > :last-child {
+  margin-bottom: 0;
 }
 
 @media (hover: none) {

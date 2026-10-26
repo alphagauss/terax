@@ -135,7 +135,7 @@ export const ChatMessageResponse = memo(function ChatMessageResponse({
     <ChatStreamingProvider value={streaming}>
       <Streamdown
         className={cn(
-          "markdown-content size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "markdown-content markdown-content-chat size-full space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
           className,
         )}
         animated={streaming}
