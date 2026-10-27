@@ -11,6 +11,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 嵌入的 SVG 跟随应用主题选择配色，不直接跟随操作系统偏好。 */
+.file-type-icon {
+  color-scheme: light;
+}
+
+.dark .file-type-icon {
+  color-scheme: dark;
+}
+
 html[data-sidebar-dragging="true"],
 html[data-sidebar-dragging="true"] * {
   cursor: default !important;

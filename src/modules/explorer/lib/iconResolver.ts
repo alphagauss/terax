@@ -1,3 +1,8 @@
+/**
+ * 按文件与目录名称解析 Catppuccin 图标，并缓存同时包含明暗配色的 SVG。
+ * SVG 根据宿主的 color-scheme 选择 Latte 或原始 Macchiato 配色。
+ */
+
 import catppuccinIcons from "@iconify-json/catppuccin/icons.json";
 import { EXT_TO_LANGUAGE_ID } from "./constants";
 import * as fileIconsMod from "./fileIcons";
@@ -22,6 +27,26 @@ const CAT_H = cat.height ?? 16;
 const DEFAULT_FILE = "file";
 const DEFAULT_FOLDER = "folder";
 const DEFAULT_FOLDER_OPEN = "folder-open";
+
+// 将图标内使用的 Macchiato 颜色对应到官方 Latte 调色板。
+const LATTE_COLORS: Record<string, string> = {
+  "#f4dbd6": "#dc8a78",
+  "#f0c6c6": "#dd7878",
+  "#f5bde6": "#ea76cb",
+  "#c6a0f6": "#8839ef",
+  "#ed8796": "#d20f39",
+  "#ee99a0": "#e64553",
+  "#f5a97f": "#fe640b",
+  "#eed49f": "#df8e1d",
+  "#a6da95": "#40a02b",
+  "#8bd5ca": "#179299",
+  "#91d7e3": "#04a5e5",
+  "#7dc4e4": "#209fb5",
+  "#8aadf4": "#1e66f5",
+  "#b7bdf8": "#7287fd",
+  "#cad3f5": "#4c4f69",
+  "#8087a2": "#8c8fa1",
+};
 
 const dataUrlCache = new Map<string, string>();
 
@@ -51,7 +76,14 @@ function buildDataUrl(iconName: string): string | null {
     dataUrlCache.set(iconName, "");
     return null;
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CAT_W} ${CAT_H}">${body}</svg>`;
+  const lightRules = Object.entries(LATTE_COLORS)
+    .filter(([color]) => body.includes(color))
+    .map(
+      ([color, latte]) =>
+        `[fill="${color}"]{fill:${latte}}[stroke="${color}"]{stroke:${latte}}`,
+    )
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CAT_W} ${CAT_H}"><style>@media (prefers-color-scheme: light){${lightRules}}</style>${body}</svg>`;
   const url = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   dataUrlCache.set(iconName, url);
   return url;

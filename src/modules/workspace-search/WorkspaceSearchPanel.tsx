@@ -368,7 +368,7 @@ export const WorkspaceSearchPanel = forwardRef<
                       <img
                         src={fileIconUrl(basename(group.rel))}
                         alt=""
-                        className="size-4 shrink-0"
+                        className="file-type-icon size-4 shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate">
                         {basename(group.rel)}

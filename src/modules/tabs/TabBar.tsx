@@ -795,7 +795,7 @@ export function TabIcon({ tab }: { tab: Tab }) {
       <img
         src={url}
         alt=""
-        className="size-3.5 shrink-0 object-contain"
+        className="file-type-icon size-3.5 shrink-0 object-contain"
         onError={(e) => {
           const img = e.currentTarget;
           if (img.dataset.fallback) return;

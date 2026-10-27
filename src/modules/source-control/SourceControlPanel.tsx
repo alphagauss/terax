@@ -1313,7 +1313,11 @@ const EntryRow = memo(function EntryRow({
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
               >
                 {iconUrl ? (
-                  <img src={iconUrl} alt="" className="size-4 shrink-0" />
+                  <img
+                    src={iconUrl}
+                    alt=""
+                    className="file-type-icon size-4 shrink-0"
+                  />
                 ) : (
                   <span className="size-4 shrink-0" />
                 )}

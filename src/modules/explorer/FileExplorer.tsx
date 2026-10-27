@@ -1089,7 +1089,7 @@ export const FileExplorer = memo(
                               alt=""
                               height={15}
                               width={15}
-                              className="mx-1.5"
+                              className="file-type-icon mx-1.5"
                             />
                             <span className="truncate">
                               {basename(rootPath)}

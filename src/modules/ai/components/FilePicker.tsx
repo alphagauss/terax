@@ -96,7 +96,7 @@ export function FilePickerContent({
                       <img
                         src={fileIconUrl(file.name)}
                         alt=""
-                        className="size-4 shrink-0"
+                        className="file-type-icon size-4 shrink-0"
                       />
                       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                         <span className="truncate font-medium">

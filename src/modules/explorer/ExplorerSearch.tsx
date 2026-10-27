@@ -277,7 +277,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                               <img
                                 src={url}
                                 alt=""
-                                className="size-3.5 shrink-0"
+                                className="file-type-icon size-3.5 shrink-0"
                               />
                             ) : (
                               <HugeiconsIcon

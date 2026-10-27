@@ -241,7 +241,11 @@ export function CommitFileRow({
       )}
     >
       {iconUrl ? (
-        <img src={iconUrl} alt="" className="size-3.5 shrink-0" />
+        <img
+          src={iconUrl}
+          alt=""
+          className="file-type-icon size-3.5 shrink-0"
+        />
       ) : (
         <span className="size-3.5 shrink-0" />
       )}

@@ -96,7 +96,11 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         <span className="size-3.5 shrink-0" />
         {iconUrl ? (
-          <img src={iconUrl} alt="" className="size-4 shrink-0" />
+          <img
+            src={iconUrl}
+            alt=""
+            className="file-type-icon size-4 shrink-0"
+          />
         ) : (
           <span className="size-4 shrink-0" />
         )}
@@ -157,7 +161,7 @@ function EntryRowImpl(props: EntryRowProps) {
         ) : null}
       </span>
       {iconUrl ? (
-        <img src={iconUrl} alt="" className="size-4 shrink-0" />
+        <img src={iconUrl} alt="" className="file-type-icon size-4 shrink-0" />
       ) : (
         <span className="size-4 shrink-0" />
       )}
@@ -228,7 +232,7 @@ export function PendingRow({
           kind === "dir" ? folderIconUrl("", false) : fileIconUrl("untitled")
         }
         alt=""
-        className="size-4 shrink-0 opacity-70"
+        className="file-type-icon size-4 shrink-0 opacity-70"
       />
       <InlineInput
         initial=""
