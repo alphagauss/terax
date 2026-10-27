@@ -16,7 +16,7 @@ import {
   type SearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
-import type { Text } from "@codemirror/state";
+import { EditorSelection, type Text } from "@codemirror/state";
 import type { EditorView, Panel, ViewUpdate } from "@codemirror/view";
 import { createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -312,8 +312,26 @@ class EditorFindPanel implements Panel {
       this.scope,
     );
     if (next.eq(this.query)) return;
+
+    let selection: EditorSelection | undefined;
+    if (!("replace" in patch) && next.valid) {
+      const { state } = this.view;
+      // 从选区起点重新查找，让增量输入保留当前命中，而不是跳到下一处。
+      const from = state.selection.main.from;
+      let match = next.getCursor(state, from).next();
+      if (match.done) match = next.getCursor(state).next();
+      if (!match.done) {
+        selection = EditorSelection.single(match.value.from, match.value.to);
+      }
+    }
+
     this.query = next;
-    this.view.dispatch({ effects: setSearchQuery.of(next) });
+    this.view.dispatch({
+      effects: setSearchQuery.of(next),
+      selection,
+      scrollIntoView: selection !== undefined,
+      userEvent: selection ? "select.search" : undefined,
+    });
   }
 
   private toggleScope(): void {
@@ -321,9 +339,7 @@ class EditorFindPanel implements Panel {
       ? null
       : this.scopeCandidate.map((range) => ({ ...range }));
     if (this.scope?.length === 0) this.scope = null;
-    const next = createEditorFindQuery(queryValue(this.query), this.scope);
-    this.query = next;
-    this.view.dispatch({ effects: setSearchQuery.of(next) });
+    this.updateQuery({});
     this.widgetRef.current?.focus(false);
   }
 
