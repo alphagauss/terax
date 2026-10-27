@@ -36,6 +36,7 @@ import {
   updateSidebarDrag,
   useSidebarDragSnapshot,
 } from "./dragSession";
+import { useNavigationIndicator } from "./useNavigationIndicator";
 import type {
   ActivityBarPosition,
   ActivityBarSettings,
@@ -86,17 +87,23 @@ function NavigationViewport({
   orientation,
   activeId,
   itemIds,
+  layoutKey,
   children,
   windowDragRegion,
 }: {
   orientation: "horizontal" | "vertical";
   activeId: SidebarContainerId | null;
   itemIds: readonly SidebarContainerId[];
+  layoutKey: string;
   children: ReactNode;
   windowDragRegion?: boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const itemOrder = itemIds.join("\0");
+  const { hostRef, indicatorRef } = useNavigationIndicator(
+    activeId,
+    `${orientation}:${layoutKey}:${itemOrder}`,
+  );
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -144,14 +151,22 @@ function NavigationViewport({
       )}
     >
       <div
+        ref={hostRef}
         data-tauri-drag-region={windowDragRegion || undefined}
         className={cn(
-          "flex",
+          "relative isolate flex",
           orientation === "vertical"
             ? "min-h-full w-full flex-col items-center"
             : "w-max items-center gap-1",
         )}
       >
+        <span
+          ref={indicatorRef}
+          aria-hidden="true"
+          data-sidebar-navigation-indicator
+          style={{ opacity: 0 }}
+          className="pointer-events-none invisible absolute top-0 left-0 z-10 origin-top-left rounded-md bg-activity-bar-selected"
+        />
         {children}
       </div>
     </div>
@@ -169,7 +184,7 @@ function isActivityBarSize(value: string): value is ActivityBarSize {
 function Badge({ value }: { value: number | undefined }) {
   if (!value || value <= 0) return null;
   return (
-    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-sidebar-primary px-1 text-[9px] font-semibold leading-none tabular-nums text-white">
+    <span className="relative z-20 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-sidebar-primary px-1 text-[9px] font-semibold leading-none tabular-nums text-white">
       {value > 99 ? "99+" : value}
     </span>
   );
@@ -518,7 +533,7 @@ function NavigationItems({
                 onActivate={onActivate}
                 onMove={onMove}
                 className={cn(
-                  "group relative flex cursor-pointer touch-none items-center rounded-md text-muted-foreground outline-none transition-colors duration-control focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none",
+                  "group relative flex cursor-pointer touch-none items-center rounded-md text-muted-foreground outline-none transition-colors duration-control ease-standard focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none",
                   appearance === "vertical" &&
                     (compact
                       ? "h-7 w-9 justify-center"
@@ -527,47 +542,42 @@ function NavigationItems({
                   appearance === "tabs" &&
                     "h-7 max-w-44 justify-center gap-1.5 px-2.5 text-[11px] font-medium",
                   active
-                    ? "text-foreground"
-                    : "hover:bg-interactive-hover hover:text-foreground",
+                    ? "text-activity-bar-selected-foreground"
+                    : "hover:text-foreground",
                 )}
               >
-                {active ? (
-                  <span
-                    className={cn(
-                      "absolute bg-primary",
-                      appearance === "vertical" &&
-                        "top-0 bottom-0 left-0 w-0.5",
-                      appearance === "tabs" &&
-                        barPosition === "bottom" &&
-                        "top-0.5 right-2.5 left-2.5 h-px",
-                      appearance === "tabs" &&
-                        barPosition !== "bottom" &&
-                        "right-2.5 bottom-0.5 left-2.5 h-px",
-                      appearance === "icons" &&
-                        barPosition === "bottom" &&
-                        "top-0.5 right-0.5 left-0.5 h-px",
-                      appearance === "icons" &&
-                        barPosition !== "bottom" &&
-                        "right-0.5 bottom-0.5 left-0.5 h-px",
-                    )}
-                  />
-                ) : null}
+                <span
+                  aria-hidden="true"
+                  data-sidebar-button-surface
+                  className={cn(
+                    "pointer-events-none absolute rounded-md transition-colors duration-control ease-standard motion-reduce:transition-none",
+                    // 选中反馈覆盖滑动底块，取消后悬停层退到淡出底块下方。
+                    active
+                      ? "z-10 group-hover:bg-activity-bar-selected-hover group-active:bg-activity-bar-selected-active"
+                      : "z-0 group-hover:bg-activity-bar-hover group-active:bg-activity-bar-active",
+                    appearance === "vertical"
+                      ? compact
+                        ? "inset-0.5"
+                        : "inset-1"
+                      : "inset-0",
+                  )}
+                />
                 <HugeiconsIcon
                   icon={container.icon}
                   size={appearance === "vertical" ? (compact ? 16 : 24) : 15}
                   strokeWidth={active ? 2 : 1.75}
-                  className="shrink-0"
+                  className="relative z-20 shrink-0"
                 />
                 {appearance === "tabs" ? (
                   <>
-                    <span className="min-w-0 truncate">
+                    <span className="relative z-20 min-w-0 truncate">
                       {t(container.titleKey)}
                     </span>
                     <Badge value={badges?.[container.id]} />
                   </>
                 ) : null}
                 {iconOnly ? (
-                  <span className="absolute -top-0.5 right-0.5">
+                  <span className="absolute -top-0.5 right-0.5 z-20">
                     <Badge value={badges?.[container.id]} />
                   </span>
                 ) : null}
@@ -614,6 +624,7 @@ export function SidebarActivityBar({
         orientation="vertical"
         activeId={props.activeId}
         itemIds={props.containers.map((container) => container.id)}
+        layoutKey={`${activityBar.position}:${activityBar.size}`}
       >
         <NavigationItems
           {...props}
@@ -642,6 +653,7 @@ export function SidebarActivityBar({
         orientation="horizontal"
         activeId={props.activeId}
         itemIds={props.containers.map((container) => container.id)}
+        layoutKey={`${activityBar.position}:${activityBar.size}`}
       >
         <NavigationItems
           {...props}
@@ -713,6 +725,7 @@ export function SecondarySidebarTabs({
         orientation="horizontal"
         activeId={props.activeId}
         itemIds={props.containers.map((container) => container.id)}
+        layoutKey={`${activityBar.position}:${activityBar.size}`}
       >
         <NavigationItems
           {...props}

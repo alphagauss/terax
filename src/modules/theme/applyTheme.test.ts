@@ -28,6 +28,7 @@ describe("applyTheme", () => {
           colors: {
             interactiveHover: "custom-hover",
             interactiveActive: "custom-active",
+            activityBarSelected: "custom-selected",
             layoutDivider: "#abcdef",
           },
         },
@@ -48,6 +49,9 @@ describe("applyTheme", () => {
       document.documentElement.style.getPropertyValue("--interactive-active"),
     ).toBe("custom-active");
     expect(
+      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+    ).toBe("custom-selected");
+    expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),
     ).toBe("#abcdef");
 
@@ -59,6 +63,9 @@ describe("applyTheme", () => {
     expect(
       document.documentElement.style.getPropertyValue("--interactive-active"),
     ).toBe(darkModernVariant.colors.interactiveActive);
+    expect(
+      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+    ).toBe(darkModernVariant.colors.activityBarSelected);
     expect(
       document.documentElement.style.getPropertyValue("--foreground"),
     ).toBe(darkModernVariant.colors.foreground);
@@ -73,9 +80,15 @@ describe("applyTheme", () => {
 
     applyTheme(fallback, "light");
     expect(
+      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+    ).toBe(lightModernVariant.colors.activityBarSelected);
+    expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),
     ).toBe(lightModernVariant.colors.layoutDivider);
     clearTheme();
+    expect(
+      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+    ).toBe("");
     expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),
     ).toBe("");

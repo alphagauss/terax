@@ -69,6 +69,14 @@ const lightTeraxDefaultVariant: CompleteThemeVariant = {
     sidebarPrimaryForeground: "oklch(0.987 0.002 197.1)",
     sidebarAccent: "oklch(0.963 0.002 197.1)",
     sidebarAccentForeground: "oklch(0.218 0.008 223.9)",
+    activityBarHover: "var(--interactive-hover)",
+    activityBarActive: "var(--interactive-active)",
+    activityBarSelected: "var(--sidebar-accent)",
+    activityBarSelectedHover:
+      "color-mix(in srgb, var(--sidebar-accent) 90%, var(--foreground))",
+    activityBarSelectedActive:
+      "color-mix(in srgb, var(--sidebar-accent) 85%, var(--foreground))",
+    activityBarSelectedForeground: "var(--sidebar-accent-foreground)",
     sidebarBorder: "oklch(0.925 0.005 214.3)",
     sidebarRing: "oklch(0.723 0.014 214.4)",
     scrollbarThumb: "oklch(0.82 0 0)",
@@ -154,6 +162,14 @@ const darkTeraxDefaultVariant: CompleteThemeVariant = {
     sidebarPrimaryForeground: "oklch(0.987 0.002 197.1)",
     sidebarAccent: "oklch(0.275 0.011 216.9)",
     sidebarAccentForeground: "oklch(0.987 0.002 197.1)",
+    activityBarHover: "var(--interactive-hover)",
+    activityBarActive: "var(--interactive-active)",
+    activityBarSelected: "var(--sidebar-accent)",
+    activityBarSelectedHover:
+      "color-mix(in srgb, var(--sidebar-accent) 90%, var(--foreground))",
+    activityBarSelectedActive:
+      "color-mix(in srgb, var(--sidebar-accent) 85%, var(--foreground))",
+    activityBarSelectedForeground: "var(--sidebar-accent-foreground)",
     sidebarBorder: "oklch(1 0 0 / 10%)",
     sidebarRing: "oklch(0.56 0.021 213.5)",
     scrollbarThumb: "oklch(0.48 0 0)",

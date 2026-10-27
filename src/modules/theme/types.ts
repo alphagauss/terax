@@ -49,6 +49,12 @@ export type ThemeColors = Partial<{
   sidebarPrimaryForeground: string;
   sidebarAccent: string;
   sidebarAccentForeground: string;
+  activityBarHover: string;
+  activityBarActive: string;
+  activityBarSelected: string;
+  activityBarSelectedHover: string;
+  activityBarSelectedActive: string;
+  activityBarSelectedForeground: string;
   sidebarBorder: string;
   sidebarRing: string;
   scrollbarThumb: string;

@@ -35,6 +35,12 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-accent: var(--sidebar-accent);
+    --color-activity-bar-hover: var(--activity-bar-hover);
+    --color-activity-bar-active: var(--activity-bar-active);
+    --color-activity-bar-selected: var(--activity-bar-selected);
+    --color-activity-bar-selected-hover: var(--activity-bar-selected-hover);
+    --color-activity-bar-selected-active: var(--activity-bar-selected-active);
+    --color-activity-bar-selected-foreground: var(--activity-bar-selected-foreground);
     --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
@@ -184,6 +190,12 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --sidebar-primary-foreground: #ffffff;
     --sidebar-accent: #f2f2f2;
     --sidebar-accent-foreground: #333333;
+    --activity-bar-hover: #e6e6e6;
+    --activity-bar-active: #d4d4d4;
+    --activity-bar-selected: #d6e9fa;
+    --activity-bar-selected-hover: #c1ddf5;
+    --activity-bar-selected-active: #a8ceed;
+    --activity-bar-selected-foreground: #004f9a;
     --sidebar-border: #e5e5e5;
     --sidebar-ring: #005fb8;
 }
@@ -232,6 +244,12 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --sidebar-primary-foreground: #ffffff;
     --sidebar-accent: #2b2b2b;
     --sidebar-accent-foreground: #d4d4d4;
+    --activity-bar-hover: #333333;
+    --activity-bar-active: #444444;
+    --activity-bar-selected: #173b57;
+    --activity-bar-selected-hover: #214d6e;
+    --activity-bar-selected-active: #2b5d82;
+    --activity-bar-selected-foreground: #b8e0ff;
     --sidebar-border: #2b2b2b;
     --sidebar-ring: #0078d4;
 }
