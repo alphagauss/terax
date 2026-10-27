@@ -241,10 +241,11 @@ export class BlockDecorations {
           segment.line - (buf.baseY + buf.cursorY),
         );
         if (!marker) continue;
-        const options = {
+        const options: IDecorationOptions = {
           marker,
           x: segment.col,
           width: segment.len,
+          layer: "top",
           backgroundColor,
         };
         const resource = {
@@ -277,7 +278,7 @@ export class BlockDecorations {
   private decorateSearchMatch(
     options: IDecorationOptions,
   ): IDecoration | undefined {
-    // 背景交给网格绘制，避免不透明的 DOM 覆盖层遮住原文字。
+    // 由网格在选区上方绘制背景，避免蓝色选区覆盖命中或 DOM 覆盖层遮住原文字。
     const decoration = this.term.registerDecoration(options);
     decoration?.onRender((el) => el.classList.add("bt-match"));
     return decoration;

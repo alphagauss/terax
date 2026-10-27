@@ -138,8 +138,16 @@ it("recolors existing terminal matches on mode changes without moving the curren
     await act(async () => ref.current?.open());
     await flushFrames();
     await act(async () => widget().onQueryChange("one"));
+    expect(decorate.mock.lastCall?.[0].backgroundColor).toBe(
+      modern.variants.dark?.colors?.searchCurrentMatchBackground,
+    );
+    const previousDisposed = vi.fn();
+    decorate.mock.results[decorate.mock.results.length - 1]?.value?.onDispose(
+      previousDisposed,
+    );
     await act(async () => widget().onNext?.());
     expect(selection?.start.x).toBe(8);
+    expect(previousDisposed).toHaveBeenCalledOnce();
 
     harness.mode = "light";
     applyTheme(modern, harness.mode);
@@ -153,6 +161,7 @@ it("recolors existing terminal matches on mode changes without moving the curren
     expect(colors).toMatchObject({
       matchBackground: "#ffef5a",
       activeMatchBackground: "#ffa84d",
+      activeMatchColorOverviewRuler: "#ffa84d",
     });
     expect(colors).not.toHaveProperty("matchBorder");
     expect(colors).not.toHaveProperty("activeMatchBorder");
@@ -164,7 +173,12 @@ it("recolors existing terminal matches on mode changes without moving the curren
       colors?.activeMatchBackground,
     ]);
 
+    const activeDisposed = vi.fn();
+    decorate.mock.results[decorate.mock.results.length - 1]?.value?.onDispose(
+      activeDisposed,
+    );
     await act(async () => widget().onClose());
+    expect(activeDisposed).toHaveBeenCalledOnce();
     find.mockClear();
     harness.mode = "dark";
     applyTheme(modern, harness.mode);

@@ -28,6 +28,7 @@ it("块搜索切换主题时保留随滚动移动的标记，并释放旧装饰"
     oldDecoration?.onDispose(oldDisposed);
     const marker = decorate.mock.calls[0][0].marker;
     expect(decorate.mock.calls[0][0].backgroundColor).toBe("#ce7618");
+    expect(decorate.mock.calls[0][0].layer).toBe("top");
     blocks.refreshSearchTheme();
     expect(decorate).toHaveBeenCalledOnce();
     expect(oldDisposed).not.toHaveBeenCalled();
@@ -43,6 +44,7 @@ it("块搜索切换主题时保留随滚动移动的标记，并释放旧装饰"
       marker,
       x: 0,
       width: 3,
+      layer: "top",
       backgroundColor: "#ffa84d",
     });
     expect(scroll).not.toHaveBeenCalled();
