@@ -181,11 +181,11 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --interactive-active: rgba(59, 59, 59, 0.13);
     --search-match-background: #ffef5a;
     --search-current-match-background: #ffa84d;
-    --git-modified: #895503;
-    --git-added: #587c0c;
-    --git-untracked: #007100;
-    --git-renamed: #007100;
-    --git-deleted: #ad0707;
+    --git-modified: #95661c;
+    --git-added: #698924;
+    --git-untracked: #1a7f1a;
+    --git-renamed: #1a7f1a;
+    --git-deleted: #b52020;
     --editor-git-modified: #2472c8;
     --editor-git-added: #0dbc79;
     --editor-git-deleted: #cd3131;

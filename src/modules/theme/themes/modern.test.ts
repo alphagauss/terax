@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Modern 基准主题的 UI、终端、编辑器完整性和关键语义色。
- * 锁定明暗变体可作为其他主题模板，并保持 VS Code Git decoration 配色。
+ * 锁定明暗变体可作为其他主题模板，并区分文件列表与编辑器的 Git 配色。
  */
 
 import { describe, expect, it } from "vitest";
@@ -76,13 +76,13 @@ describe("Modern reference template", () => {
 });
 
 describe("Modern Git status colors", () => {
-  it("uses the VS Code Light Modern colors", () => {
+  it("uses softer light file decorations and preserves editor Git colors", () => {
     expect(lightModernVariant.colors).toMatchObject({
-      gitModified: "#895503",
-      gitAdded: "#587C0C",
-      gitUntracked: "#007100",
-      gitRenamed: "#007100",
-      gitDeleted: "#AD0707",
+      gitModified: "#95661C",
+      gitAdded: "#698924",
+      gitUntracked: "#1A7F1A",
+      gitRenamed: "#1A7F1A",
+      gitDeleted: "#B52020",
       editorGitModified: "#2472C8",
       editorGitAdded: "#0DBC79",
       editorGitDeleted: "#CD3131",
