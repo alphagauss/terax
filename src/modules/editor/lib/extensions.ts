@@ -183,6 +183,12 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
       caretColor: "var(--foreground)",
       backgroundColor: "transparent !important",
     },
+    ".cm-searchMatch": {
+      backgroundColor: "var(--search-match-background)",
+    },
+    ".cm-searchMatch.cm-searchMatch-selected": {
+      backgroundColor: "var(--search-current-match-background)",
+    },
     ".cm-gutters": {
       backgroundColor: "var(--background) !important",
       color: "var(--muted-foreground)",

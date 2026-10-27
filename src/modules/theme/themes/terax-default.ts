@@ -4,6 +4,7 @@
  */
 
 import type { CompleteThemeVariant, Theme } from "../types";
+import { darkModernVariant, lightModernVariant } from "./modern";
 
 const terminalAnsi = [
   "#18181b",
@@ -26,6 +27,9 @@ const terminalAnsi = [
 
 const lightTeraxDefaultVariant: CompleteThemeVariant = {
   colors: {
+    searchMatchBackground: lightModernVariant.colors.searchMatchBackground,
+    searchCurrentMatchBackground:
+      lightModernVariant.colors.searchCurrentMatchBackground,
     background: "oklch(1 0 0)",
     foreground: "oklch(0.148 0.004 228.8)",
     card: "oklch(1 0 0)",
@@ -119,6 +123,9 @@ const lightTeraxDefaultVariant: CompleteThemeVariant = {
 
 const darkTeraxDefaultVariant: CompleteThemeVariant = {
   colors: {
+    searchMatchBackground: darkModernVariant.colors.searchMatchBackground,
+    searchCurrentMatchBackground:
+      darkModernVariant.colors.searchCurrentMatchBackground,
     background: "oklch(0.148 0.004 228.8)",
     foreground: "oklch(0.987 0.002 197.1)",
     card: "oklch(0.218 0.008 223.9)",

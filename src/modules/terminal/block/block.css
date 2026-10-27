@@ -103,9 +103,6 @@
 }
 
 .bt-match {
-  background: rgba(255, 193, 84, 0.5);
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(255, 193, 84, 0.7);
   pointer-events: none;
 }
 

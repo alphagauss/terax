@@ -30,6 +30,7 @@ import {
 import { useTheme } from "@/modules/theme";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { buildTerminalSearchDecorations } from "@/styles/terminalTheme";
 import type { SearchAddon } from "@xterm/addon-search";
 import {
   forwardRef,
@@ -57,13 +58,6 @@ import {
   useTerminalSession,
   whenSessionReady,
 } from "./lib/useTerminalSession";
-
-const TERM_DECORATIONS = {
-  matchBackground: "#515c6a",
-  activeMatchBackground: "#d18616",
-  matchOverviewRuler: "#d18616",
-  activeMatchColorOverviewRuler: "#d18616",
-};
 
 const DEFAULT_FIND_OPTIONS: FindOptions = {
   caseSensitive: false,
@@ -128,6 +122,10 @@ export const TerminalPane = memo(
     const [findOptions, setFindOptions] =
       useState<FindOptions>(DEFAULT_FIND_OPTIONS);
     const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
+    const [searchDecorations, setSearchDecorations] = useState(
+      buildTerminalSearchDecorations,
+    );
+    const lastSearchDecorations = useRef(searchDecorations);
     const [findResult, setFindResult] = useState<FindResult>();
     const [contextMenuHasSelection, setContextMenuHasSelection] =
       useState(false);
@@ -169,8 +167,17 @@ export const TerminalPane = memo(
     }, [terminalId, remoteWorkspace]);
 
     useEffect(() => {
-      // Defer one frame so CSS-variable token resolution sees the new class.
-      const id = requestAnimationFrame(() => session.applyTheme());
+      // 等待主题变量写入后，再同步终端与搜索装饰的实际颜色。
+      const id = requestAnimationFrame(() => {
+        session.applyTheme();
+        const next = buildTerminalSearchDecorations();
+        setSearchDecorations((current) =>
+          current.matchBackground === next.matchBackground &&
+          current.activeMatchBackground === next.activeMatchBackground
+            ? current
+            : next,
+        );
+      });
       return () => cancelAnimationFrame(id);
     }, [resolvedMode, themeId, customThemes, session]);
 
@@ -192,17 +199,28 @@ export const TerminalPane = memo(
 
     useEffect(() => {
       if (!searchAddon) return;
-      if (!query || invalidRegex) {
+      const colorsChanged = lastSearchDecorations.current !== searchDecorations;
+      lastSearchDecorations.current = searchDecorations;
+      if (!findOpen || !query || invalidRegex) {
         searchAddon.clearDecorations();
         setFindResult(query ? { total: 0 } : undefined);
         return;
       }
+      // xterm 不会因装饰颜色变化而刷新缓存；清理后从当前选区起点恢复同一命中。
+      if (colorsChanged) searchAddon.clearDecorations();
       searchAddon.findNext(query, {
         ...findOptions,
         incremental: true,
-        decorations: TERM_DECORATIONS,
+        decorations: searchDecorations,
       });
-    }, [findOptions, invalidRegex, query, searchAddon]);
+    }, [
+      findOpen,
+      findOptions,
+      invalidRegex,
+      query,
+      searchAddon,
+      searchDecorations,
+    ]);
 
     const restoreFocus = useCallback(() => {
       if (blocks && session.blockMode === "prompt")
@@ -296,14 +314,14 @@ export const TerminalPane = memo(
               if (!query || invalidRegex) return;
               searchAddon?.findPrevious(query, {
                 ...findOptions,
-                decorations: TERM_DECORATIONS,
+                decorations: searchDecorations,
               });
             }}
             onNext={() => {
               if (!query || invalidRegex) return;
               searchAddon?.findNext(query, {
                 ...findOptions,
-                decorations: TERM_DECORATIONS,
+                decorations: searchDecorations,
               });
             }}
             onClose={closeFind}

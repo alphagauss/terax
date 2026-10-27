@@ -30,6 +30,8 @@ export type ThemeColors = Partial<{
   ring: string;
   interactiveHover: string;
   interactiveActive: string;
+  searchMatchBackground: string;
+  searchCurrentMatchBackground: string;
   gitModified: string;
   gitAdded: string;
   gitUntracked: string;

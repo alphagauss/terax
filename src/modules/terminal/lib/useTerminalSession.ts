@@ -1336,6 +1336,9 @@ export function useTerminalSession({
 
   const applyTheme = useCallback(() => {
     applyPoolTheme();
+    for (const session of sessions.values()) {
+      session.blockDecorations?.refreshSearchTheme();
+    }
   }, []);
 
   const selectBlockAt = useCallback(

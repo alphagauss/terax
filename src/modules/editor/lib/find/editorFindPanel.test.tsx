@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 
+import { applyTheme, clearTheme } from "@/modules/theme/applyTheme";
+import { modern } from "@/modules/theme/themes/modern";
 import { openSearchPanel, search } from "@codemirror/search";
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { act, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildSharedExtensions } from "../extensions";
 import { createEditorFindPanel } from "./editorFindPanel";
 
 type WidgetProps = ComponentProps<
@@ -32,6 +35,7 @@ afterEach(async () => {
   document.body.replaceChildren();
   widget.props = null;
   vi.unstubAllGlobals();
+  clearTheme();
 });
 
 async function openFind(doc: string, anchor = 0, head = anchor) {
@@ -58,6 +62,34 @@ function selectedMatch() {
 }
 
 describe("editor find panel", () => {
+  it("updates match colors from the shared theme without changing the current selection", async () => {
+    await openFind("one two one");
+    await act(async () => {
+      view.dispatch({
+        effects: StateEffect.appendConfig.of(buildSharedExtensions()),
+      });
+      props().onQueryChange("one");
+    });
+    const current = selectedMatch();
+    const other = view.contentDOM.querySelector(
+      ".cm-searchMatch:not(.cm-searchMatch-selected)",
+    );
+    expect(current).not.toBeNull();
+    expect(other).not.toBeNull();
+    if (!current || !other) return;
+
+    for (const mode of ["dark", "light"] as const) {
+      applyTheme(modern, mode);
+      expect(getComputedStyle(current).backgroundColor).toBe(
+        modern.variants[mode]?.colors?.searchCurrentMatchBackground,
+      );
+      expect(getComputedStyle(other).backgroundColor).toBe(
+        modern.variants[mode]?.colors?.searchMatchBackground,
+      );
+      expect(view.state.selection.main).toMatchObject({ from: 0, to: 3 });
+    }
+  });
+
   it("highlights the current match immediately and navigates on the first click", async () => {
     await openFind("one two one");
 

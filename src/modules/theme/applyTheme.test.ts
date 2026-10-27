@@ -18,6 +18,52 @@ afterEach(() => {
 });
 
 describe("applyTheme", () => {
+  it("shares search colors across custom overrides, mode changes, and omitted fields", () => {
+    const customized: Theme = {
+      id: "search-customized",
+      name: "Search Customized",
+      variants: {
+        dark: {
+          editor: darkModernVariant.editor,
+          colors: {
+            searchMatchBackground: "#123456",
+            searchCurrentMatchBackground: "#654321",
+          },
+        },
+      },
+    };
+    const fallback: Theme = {
+      id: "search-fallback",
+      name: "Search Fallback",
+      variants: { dark: { editor: darkModernVariant.editor } },
+    };
+    const style = document.documentElement.style;
+
+    applyTheme(customized, "dark");
+    expect(style.getPropertyValue("--search-match-background")).toBe("#123456");
+    expect(style.getPropertyValue("--search-current-match-background")).toBe(
+      "#654321",
+    );
+
+    for (const [mode, variant] of [
+      ["dark", darkModernVariant],
+      ["light", lightModernVariant],
+    ] as const) {
+      applyTheme(fallback, mode);
+      expect(style.getPropertyValue("--search-match-background")).toBe(
+        variant.colors.searchMatchBackground,
+      );
+      expect(style.getPropertyValue("--search-current-match-background")).toBe(
+        variant.colors.searchCurrentMatchBackground,
+      );
+    }
+    clearTheme();
+    expect(style.getPropertyValue("--search-match-background")).toBe("");
+    expect(style.getPropertyValue("--search-current-match-background")).toBe(
+      "",
+    );
+  });
+
   it("applies optional interaction and divider colors and resets omissions to Modern", () => {
     const customized: Theme = {
       id: "interaction-customized",

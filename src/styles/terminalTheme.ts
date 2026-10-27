@@ -1,4 +1,5 @@
-import { readTerminalTokens } from "@/styles/tokens";
+import { readSearchTokens, readTerminalTokens } from "@/styles/tokens";
+import type { ISearchDecorationOptions } from "@xterm/addon-search";
 import type { ITheme } from "@xterm/xterm";
 
 export function buildTerminalTheme(): ITheme {
@@ -25,5 +26,16 @@ export function buildTerminalTheme(): ITheme {
     brightMagenta: t.ansiBrightMagenta,
     brightCyan: t.ansiBrightCyan,
     brightWhite: t.ansiBrightWhite,
+  };
+}
+
+/** 让终端查找的正文装饰和滚动概览复用共享搜索配色。 */
+export function buildTerminalSearchDecorations(): ISearchDecorationOptions {
+  const colors = readSearchTokens();
+  return {
+    matchBackground: colors.matchBackground,
+    activeMatchBackground: colors.currentMatchBackground,
+    matchOverviewRuler: colors.matchBackground,
+    activeMatchColorOverviewRuler: colors.currentMatchBackground,
   };
 }

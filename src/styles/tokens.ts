@@ -1,9 +1,12 @@
 /**
- * 本文件读取当前主题已经解析的终端 CSS token。
+ * 本文件读取当前主题已经解析的终端与搜索 CSS token。
  * 字段与变量映射由主题注册表统一提供，本模块只负责浏览器计算值读取。
  */
 
-import { TERMINAL_TOKEN_VARIABLES } from "@/modules/theme/themeRegistry";
+import {
+  TERMINAL_TOKEN_VARIABLES,
+  THEME_COLOR_VARIABLES,
+} from "@/modules/theme/themeRegistry";
 
 export type TerminalTokens = Record<
   keyof typeof TERMINAL_TOKEN_VARIABLES,
@@ -40,4 +43,16 @@ export function readTerminalTokens(): TerminalTokens {
     out[k] = resolve(el, TERMINAL_TOKEN_VARIABLES[k]);
   }
   return out;
+}
+
+/** 解析共享搜索色，让不支持 CSS 变量的终端装饰读取与正文相同的颜色。 */
+export function readSearchTokens() {
+  const el = getProbe();
+  return {
+    matchBackground: resolve(el, THEME_COLOR_VARIABLES.searchMatchBackground),
+    currentMatchBackground: resolve(
+      el,
+      THEME_COLOR_VARIABLES.searchCurrentMatchBackground,
+    ),
+  };
 }

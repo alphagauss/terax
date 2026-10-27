@@ -170,6 +170,8 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --ring: #005fb8;
     --interactive-hover: rgba(59, 59, 59, 0.09);
     --interactive-active: rgba(59, 59, 59, 0.13);
+    --search-match-background: #ffef5a;
+    --search-current-match-background: #ffa84d;
     --git-modified: #895503;
     --git-added: #587c0c;
     --git-untracked: #007100;
@@ -225,6 +227,8 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --ring: #0078d4;
     --interactive-hover: rgba(204, 204, 204, 0.09);
     --interactive-active: rgba(204, 204, 204, 0.13);
+    --search-match-background: #a88e12;
+    --search-current-match-background: #ce7618;
     --git-modified: #e2c08d;
     --git-added: #81b88b;
     --git-untracked: #73c991;

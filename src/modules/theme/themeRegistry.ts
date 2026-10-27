@@ -31,6 +31,8 @@ export const THEME_COLOR_VARIABLES = {
   ring: "--ring",
   interactiveHover: "--interactive-hover",
   interactiveActive: "--interactive-active",
+  searchMatchBackground: "--search-match-background",
+  searchCurrentMatchBackground: "--search-current-match-background",
   gitModified: "--git-modified",
   gitAdded: "--git-added",
   gitUntracked: "--git-untracked",

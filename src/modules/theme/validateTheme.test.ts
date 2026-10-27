@@ -86,6 +86,8 @@ describe("validateTheme", () => {
             colors: {
               interactiveHover: "rgba(255,255,255,0.09)",
               interactiveActive: "rgba(255,255,255,0.13)",
+              searchMatchBackground: "#3c382b",
+              searchCurrentMatchBackground: "#5b482e",
               layoutDivider: "#d7d7d7",
               success: "#73c991",
               warning: "#e2c08d",

@@ -1,9 +1,73 @@
 // @vitest-environment happy-dom
+import { applyTheme, clearTheme } from "@/modules/theme/applyTheme";
+import { modern } from "@/modules/theme/themes/modern";
 import { Terminal } from "@xterm/xterm";
 import { expect, it, vi } from "vitest";
 import conptyResize from "./__fixtures__/conpty-resize.json";
 import { BlockDecorations } from "./blockDecorations";
 import { readRangeText } from "./readBlock";
+
+it("块搜索切换主题时保留随滚动移动的标记，并释放旧装饰", async () => {
+  const term = new Terminal({
+    cols: 40,
+    rows: 3,
+    scrollback: 4,
+    allowProposedApi: true,
+  });
+  const blocks = new BlockDecorations(term);
+  const decorate = vi.spyOn(term, "registerDecoration");
+  const scroll = vi.spyOn(term, "scrollToLine");
+  const write = (text: string) =>
+    new Promise<void>((resolve) => term.write(text, resolve));
+  try {
+    applyTheme(modern, "dark");
+    await write("before\r\nbefore\r\none\r\n");
+    blocks.revealMatch({ line: 2, segments: [{ line: 2, col: 0, len: 3 }] });
+    const oldDecoration = decorate.mock.results[0].value;
+    const oldDisposed = vi.fn();
+    oldDecoration?.onDispose(oldDisposed);
+    const marker = decorate.mock.calls[0][0].marker;
+    expect(decorate.mock.calls[0][0].backgroundColor).toBe("#ce7618");
+    blocks.refreshSearchTheme();
+    expect(decorate).toHaveBeenCalledOnce();
+    expect(oldDisposed).not.toHaveBeenCalled();
+
+    await write("more\r\nmore\r\nmore\r\nmore\r\nmore\r\n");
+    expect(marker.line).toBeLessThan(2);
+    expect(marker.isDisposed).toBe(false);
+    scroll.mockClear();
+    applyTheme(modern, "light");
+    blocks.refreshSearchTheme();
+    expect(oldDisposed).toHaveBeenCalledOnce();
+    expect(decorate.mock.lastCall?.[0]).toMatchObject({
+      marker,
+      x: 0,
+      width: 3,
+      backgroundColor: "#ffa84d",
+    });
+    expect(scroll).not.toHaveBeenCalled();
+    expect(
+      term.buffer.active.getLine(marker.line)?.translateToString(true),
+    ).toBe("one");
+
+    const currentDisposed = vi.fn();
+    decorate.mock.results[1].value?.onDispose(currentDisposed);
+    blocks.refreshSearchTheme();
+    expect(decorate).toHaveBeenCalledTimes(2);
+    expect(currentDisposed).not.toHaveBeenCalled();
+    blocks.clearSearch();
+    expect(currentDisposed).toHaveBeenCalledOnce();
+    expect(marker.isDisposed).toBe(true);
+    decorate.mockClear();
+    blocks.refreshSearchTheme();
+    expect(decorate).not.toHaveBeenCalled();
+  } finally {
+    blocks.dispose();
+    term.dispose();
+    clearTheme();
+    vi.restoreAllMocks();
+  }
+});
 
 it("真实 xterm 中多行与软换行输出在缩放后仍共用边界", async () => {
   const term = new Terminal({ cols: 40, rows: 20, allowProposedApi: true });

@@ -3,7 +3,13 @@ import {
   createShellIntegrationState,
   registerCwdHandler,
 } from "@/modules/terminal/lib/osc-handlers";
-import type { IDecoration, IMarker, Terminal } from "@xterm/xterm";
+import { readSearchTokens } from "@/styles/tokens";
+import type {
+  IDecoration,
+  IDecorationOptions,
+  IMarker,
+  Terminal,
+} from "@xterm/xterm";
 import { blockIndexAt, computeRange, type LineRange } from "./blockRange";
 import {
   type BlockMode,
@@ -89,7 +95,10 @@ export class BlockDecorations {
   private cwd = "";
   private idSeq = 0;
   private selectedId: string | null = null;
-  private searchResources: { dispose(): void }[] = [];
+  private searchResources: {
+    options: IDecorationOptions;
+    decoration: IDecoration | undefined;
+  }[] = [];
   private promptMarker: IMarker | null = null;
   private promptReady = false;
   private discardCurrentCommand = false;
@@ -223,6 +232,7 @@ export class BlockDecorations {
     this.clearSearch();
     try {
       const buf = this.term.buffer.active;
+      const backgroundColor = readSearchTokens().currentMatchBackground;
       this.term.scrollToLine(
         Math.max(0, m.line - Math.floor(this.term.rows / 2)),
       );
@@ -231,22 +241,53 @@ export class BlockDecorations {
           segment.line - (buf.baseY + buf.cursorY),
         );
         if (!marker) continue;
-        this.searchResources.push(marker);
-        const deco = this.term.registerDecoration({
+        const options = {
           marker,
           x: segment.col,
           width: segment.len,
-        });
-        if (deco) {
-          this.searchResources.push(deco);
-          deco.onRender((el) => el.classList.add("bt-match"));
-        }
+          backgroundColor,
+        };
+        const resource = {
+          options,
+          decoration: undefined as IDecoration | undefined,
+        };
+        this.searchResources.push(resource);
+        resource.decoration = this.decorateSearchMatch(options);
       }
     } catch {}
   }
 
+  /** 主题切换时重建当前命中的背景，不滚动或改变块搜索位置。 */
+  refreshSearchTheme(): void {
+    if (this.searchResources.length === 0) return;
+    const backgroundColor = readSearchTokens().currentMatchBackground;
+    for (const resource of this.searchResources) {
+      // 复用随缓冲区裁剪移动的 marker，不能按初次搜索的行号重新定位。
+      if (
+        resource.options.marker.isDisposed ||
+        resource.options.backgroundColor === backgroundColor
+      )
+        continue;
+      resource.decoration?.dispose();
+      resource.options = { ...resource.options, backgroundColor };
+      resource.decoration = this.decorateSearchMatch(resource.options);
+    }
+  }
+
+  private decorateSearchMatch(
+    options: IDecorationOptions,
+  ): IDecoration | undefined {
+    // 背景交给网格绘制，避免不透明的 DOM 覆盖层遮住原文字。
+    const decoration = this.term.registerDecoration(options);
+    decoration?.onRender((el) => el.classList.add("bt-match"));
+    return decoration;
+  }
+
   clearSearch(): void {
-    for (const resource of this.searchResources.reverse()) resource.dispose();
+    for (const resource of this.searchResources) {
+      resource.decoration?.dispose();
+      resource.options.marker.dispose();
+    }
     this.searchResources = [];
   }
 
