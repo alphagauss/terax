@@ -54,6 +54,7 @@ import {
   copyToClipboard,
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
+import { explorerGitTextClass } from "@/modules/explorer/lib/gitStatusColor";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -137,23 +138,6 @@ function upstreamBadgeLabel(
 ): string {
   if (!upstream) return noUpstreamLabel;
   return upstream;
-}
-
-function statusAccent(code: string): string {
-  switch (code) {
-    case "A":
-      return "bg-success";
-    case "U":
-      return "bg-teal-500/85";
-    case "M":
-      return "bg-warning";
-    case "D":
-      return "bg-destructive";
-    case "R":
-      return "bg-info";
-    default:
-      return "bg-muted-foreground/40";
-  }
 }
 
 function BranchDropdown({
@@ -1288,6 +1272,7 @@ const EntryRow = memo(function EntryRow({
   const fileName = basename(entry.path);
   const iconUrl = fileIconUrl(fileName);
   const pathLabel = entryPathLabel(entry);
+  const isDeleted = entry.statusCode === "D";
   const showDiscard = entry.side === "worktree";
   const isStageBusy =
     actionBusy === `stage:${entry.path}` ||
@@ -1313,18 +1298,10 @@ const EntryRow = memo(function EntryRow({
           tabIndex={-1}
           onMouseDown={() => onFocusRow(entry.key)}
           className={cn(
-            "group relative flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
+            "group flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
             focused ? "bg-interactive-active" : "hover:bg-interactive-hover",
           )}
         >
-          <span
-            className={cn(
-              "pointer-events-none absolute inset-y-1 left-0 w-[2px] rounded-full transition-opacity",
-              statusAccent(entry.statusCode),
-              focused ? "opacity-100" : "opacity-55 group-hover:opacity-95",
-            )}
-            aria-hidden
-          />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1348,12 +1325,18 @@ const EntryRow = memo(function EntryRow({
                         ? "font-semibold text-foreground"
                         : "font-medium text-foreground",
                       "min-w-0 shrink",
+                      isDeleted && "line-through",
                     )}
                   >
                     {fileName}
                   </span>
                   {pathLabel ? (
-                    <span className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground">
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground",
+                        isDeleted && "line-through",
+                      )}
+                    >
                       {pathLabel}
                     </span>
                   ) : null}
@@ -1416,6 +1399,14 @@ const EntryRow = memo(function EntryRow({
               )}
             </IconActionButton>
           </div>
+          <span
+            className={cn(
+              "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
+              explorerGitTextClass(entry.statusCode),
+            )}
+          >
+            {entry.statusCode}
+          </span>
         </div>
       </ContextMenuTrigger>
 

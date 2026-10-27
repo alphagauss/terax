@@ -9,6 +9,7 @@ import { Hint } from "@/components/controls/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitCommitFileChange, GitLogEntry } from "@/modules/ai/lib/native";
+import { explorerGitTextClass } from "@/modules/explorer/lib/gitStatusColor";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
@@ -52,22 +53,6 @@ function commitBody(commit: GitLogEntry, message: string): string {
   return firstLine === commit.subject
     ? normalized.slice(firstBreak + 1).trim()
     : normalized;
-}
-
-function statusBadgeClass(status: string): string {
-  switch (status.toUpperCase()) {
-    case "A":
-      return "text-success";
-    case "M":
-      return "text-warning";
-    case "D":
-      return "text-destructive";
-    case "R":
-    case "C":
-      return "text-info";
-    default:
-      return "text-muted-foreground";
-  }
 }
 
 /**
@@ -240,6 +225,8 @@ export function CommitFileRow({
     ? `${file.originalPath} → ${file.path}`
     : dirname(file.path);
   const iconUrl = fileIconUrl(name);
+  const statusCode = file.status.toUpperCase();
+  const isDeleted = statusCode === "D";
   return (
     <button
       type="button"
@@ -259,9 +246,21 @@ export function CommitFileRow({
         <span className="size-3.5 shrink-0" />
       )}
       <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
-        <span className="truncate text-[11.5px] font-medium">{name}</span>
+        <span
+          className={cn(
+            "truncate text-[11.5px] font-medium",
+            isDeleted && "line-through",
+          )}
+        >
+          {name}
+        </span>
         {pathLabel ? (
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-[10px] text-muted-foreground",
+              isDeleted && "line-through",
+            )}
+          >
             {pathLabel}
           </span>
         ) : null}
@@ -269,11 +268,11 @@ export function CommitFileRow({
       <Hint content={file.statusLabel}>
         <span
           className={cn(
-            "inline-flex size-4 shrink-0 items-center justify-center text-[9px] font-bold",
-            statusBadgeClass(file.status),
+            "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
+            explorerGitTextClass(statusCode),
           )}
         >
-          {file.status.toUpperCase()}
+          {statusCode}
         </span>
       </Hint>
       {showStats ? (

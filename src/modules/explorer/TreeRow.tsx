@@ -173,7 +173,7 @@ function EntryRowImpl(props: EntryRowProps) {
         <span
           aria-hidden="true"
           className={cn(
-            "w-3 shrink-0 text-right font-mono text-[10px]",
+            "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
             explorerGitTextClass(gitStatusCode),
           )}
         >

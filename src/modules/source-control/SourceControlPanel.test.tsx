@@ -571,18 +571,32 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
       ...controller.status,
       changedFiles: controller.status.changedFiles.map((file) => ({
         ...file,
+        path: "src/a.ts",
+        originalPath: null,
         indexStatus: "M",
         worktreeStatus: "D",
         unstaged: true,
       })),
     };
     await render();
+    const indexRow = document.getElementById("scm-row-index:src/a.ts");
+    const worktreeRow = document.getElementById("scm-row-worktree:src/a.ts");
+    expect(indexRow?.lastElementChild?.textContent).toBe("M");
+    expect(indexRow?.querySelectorAll(".line-through")).toHaveLength(0);
+    expect(worktreeRow?.lastElementChild?.textContent).toBe("D");
     expect(
-      row("index")?.querySelector('[aria-label="menu.openFile"]'),
-    ).toBeNull();
+      [...(worktreeRow?.querySelectorAll(".line-through") ?? [])].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["a.ts", "src"]);
+    expect(indexRow?.querySelector('[aria-label="menu.openFile"]')).toBeNull();
     expect(
-      row("worktree")?.querySelector('[aria-label="menu.openFile"]'),
+      worktreeRow?.querySelector('[aria-label="menu.openFile"]'),
     ).toBeNull();
+    await click(worktreeRow?.querySelector("button"));
+    expect(onOpenDiff).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "src/a.ts", side: "worktree" }),
+    );
     controller.status = { ...controller.status, changedFiles: [] };
     controller.changedCount = 0;
     await render();
