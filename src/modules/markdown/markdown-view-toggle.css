@@ -17,7 +17,7 @@
 
   position: absolute;
   z-index: 20;
-  top: 16px;
+  top: 48px;
   right: 16px;
   display: inline-grid;
   grid-template-columns: repeat(2, 24px);
