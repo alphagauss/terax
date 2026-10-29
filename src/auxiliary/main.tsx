@@ -6,7 +6,6 @@
 import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
 import { PageContextMenu } from "@/components/menu/PageContextMenu";
 import { installEditableClipboard } from "@/lib/editableClipboard";
-import { installWindowChrome } from "@/lib/windowChrome";
 import { TooltipProvider } from "@/components/controls/tooltip";
 import {
   AuxiliaryWindowErrorBoundary,
@@ -30,9 +29,6 @@ if (import.meta.hot) import.meta.hot.dispose(disposeEditableClipboard);
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
-
-const disposeWindowChrome = await installWindowChrome();
-if (import.meta.hot) import.meta.hot.dispose(disposeWindowChrome);
 
 void preloadEn();
 

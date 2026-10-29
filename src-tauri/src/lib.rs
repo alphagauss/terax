@@ -9,8 +9,6 @@ mod fullscreen;
 #[cfg(feature = "desktop")]
 pub mod menu;
 pub mod modules;
-#[cfg(all(feature = "desktop", windows))]
-mod window_chrome;
 #[cfg(feature = "desktop")]
 pub use desktop::run;
 pub mod adapters;

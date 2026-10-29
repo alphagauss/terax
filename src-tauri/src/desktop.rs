@@ -82,8 +82,6 @@ pub fn run() {
     workspace::init_launch_cwd(cli_dir.as_deref());
 
     let builder = tauri::Builder::default();
-    #[cfg(windows)]
-    let builder = builder.plugin(crate::window_chrome::init());
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
