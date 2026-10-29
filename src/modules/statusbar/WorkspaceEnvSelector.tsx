@@ -142,7 +142,7 @@ export function WorkspaceEnvSelector({
                   </span>
                 </>
               ) : null}
-              <span className="max-w-36 truncate">{label}</span>
+              <span className="whitespace-nowrap">{label}</span>
             </button>
           </Hint>
         </DropdownMenuTrigger>
