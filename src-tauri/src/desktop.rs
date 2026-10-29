@@ -222,6 +222,7 @@ pub fn run() {
             commands::tree::list_subdirs,
             commands::tree::fs_read_dir,
             commands::files::fs_read_file,
+            commands::files::fs_sync_file,
             commands::files::fs_read_binary,
             commands::files::fs_file_version,
             commands::files::fs_write_file,

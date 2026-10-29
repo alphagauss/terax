@@ -15,6 +15,27 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+// 文档协调测试隔离字节协议；检查点与完整性校验由 fileSync.test.ts 覆盖。
+vi.mock("./fileSync", () => ({
+  FileSyncReader: class {
+    clear() {}
+    read(
+      path: string,
+      workspace: unknown,
+      force: boolean,
+      verify: boolean,
+      contentRequired: boolean,
+    ) {
+      return mocks.invoke("fs_sync_file", {
+        path,
+        workspace,
+        force,
+        verify,
+        contentRequired,
+      });
+    }
+  },
+}));
 vi.mock("@/modules/lsp", () => ({
   notifyDocumentSaved: mocks.notifyDocumentSaved,
 }));
@@ -82,10 +103,7 @@ describe("shared document model", () => {
     });
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") return text("one\n");
-        if (command === "fs_stat") {
-          return { kind: "file", size: 4, mtime: 1 };
-        }
+        if (command === "fs_sync_file") return text("one\n");
         if (command === "fs_write_file_checked") {
           return written(args?.content ?? "");
         }
@@ -144,7 +162,7 @@ describe("shared document model", () => {
       expect(first.getSnapshot().doc.status).toBe("ready"),
     );
     expect(
-      mocks.invoke.mock.calls.filter(([command]) => command === "fs_read_file"),
+      mocks.invoke.mock.calls.filter(([command]) => command === "fs_sync_file"),
     ).toHaveLength(1);
     first.onChange("two\n");
 
@@ -167,7 +185,7 @@ describe("shared document model", () => {
 
   it("loads one shared HEAD baseline and preserves an empty new-file baseline", async () => {
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return text("new\n");
+      if (command === "fs_sync_file") return text("new\n");
       if (command === "git_quick_diff_baseline") {
         return {
           kind: "text",
@@ -196,7 +214,7 @@ describe("shared document model", () => {
 
   it("reloads the baseline when the repository changes at the same HEAD", async () => {
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return text("current\n");
+      if (command === "fs_sync_file") return text("current\n");
       if (command === "git_quick_diff_baseline") {
         const callCount = mocks.invoke.mock.calls.filter(
           ([name]) => name === "git_quick_diff_baseline",
@@ -235,7 +253,7 @@ describe("shared document model", () => {
   it("retries an unsupported baseline because a new worktree file can become text", async () => {
     let baselineReads = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return text("current\n");
+      if (command === "fs_sync_file") return text("current\n");
       if (command === "git_quick_diff_baseline") {
         baselineReads += 1;
         return baselineReads === 1
@@ -281,7 +299,7 @@ describe("shared document model", () => {
         content: string;
       }>();
       mocks.invoke.mockImplementation(async (command: string) => {
-        if (command === "fs_read_file") return text("current\n");
+        if (command === "fs_sync_file") return text("current\n");
         if (command === "git_quick_diff_baseline") {
           const baselineReads = mocks.invoke.mock.calls.filter(
             ([name]) => name === "git_quick_diff_baseline",
@@ -343,7 +361,7 @@ describe("shared document model", () => {
     let releaseReload: (() => void) | undefined;
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command !== "fs_read_file") {
+      if (command !== "fs_sync_file") {
         throw new Error(`unexpected command: ${command}`);
       }
       readCount += 1;
@@ -372,17 +390,14 @@ describe("shared document model", () => {
     unsubscribeSecond();
   });
 
-  it("reads the file only after a watcher probe finds new content", async () => {
+  it("采用监听事件检查到的外部变化", async () => {
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
+      if (command === "fs_sync_file") {
         readCount += 1;
         return readCount === 1
           ? text("base\n", "base", 1)
           : text("external\n", "external", 2);
-      }
-      if (command === "fs_file_version") {
-        return { revision: "external", size: 9, mtime: 2 };
       }
       throw new Error(`unexpected command: ${command}`);
     });
@@ -406,7 +421,7 @@ describe("shared document model", () => {
     let readCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") {
+        if (command === "fs_sync_file") {
           readCount += 1;
           return text("one\n", "same-content", readCount);
         }
@@ -432,6 +447,38 @@ describe("shared document model", () => {
     unsubscribe();
   });
 
+  it("撤销本地修改退出二进制冲突时，即使检查点未变也恢复磁盘视图", async () => {
+    let reads = 0;
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { contentRequired?: boolean }) => {
+        if (command !== "fs_sync_file")
+          throw new Error(`unexpected command: ${command}`);
+        reads++;
+        if (reads === 1) return text("one\n");
+        return reads === 2 || args?.contentRequired
+          ? { kind: "binary", size: 2, mtime: 2 }
+          : { kind: "unchanged", revision: "binary", size: 2, mtime: 2 };
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+    model.checkForChanges();
+    await vi.waitFor(() => expect(mocks.warning).toHaveBeenCalledOnce());
+    expect(model.getSnapshot().doc).toMatchObject({ content: "local\n" });
+    model.onChange("one\n");
+    await vi.waitFor(() =>
+      expect(model.getSnapshot()).toMatchObject({
+        dirty: false,
+        doc: { status: "binary", size: 2 },
+      }),
+    );
+    unsubscribe();
+  });
+
   it("merges an external line-ending rewrite into the local save", async () => {
     let readCount = 0;
     let writeCount = 0;
@@ -443,7 +490,7 @@ describe("shared document model", () => {
           condition?: { type?: string; version?: { revision?: string } };
         },
       ) => {
-        if (command === "fs_read_file") {
+        if (command === "fs_sync_file") {
           readCount += 1;
           return readCount === 1
             ? text("base\n", "base", 1)
@@ -479,7 +526,7 @@ describe("shared document model", () => {
   it("retains local text and enters conflict when both sides changed", async () => {
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command !== "fs_read_file") {
+      if (command !== "fs_sync_file") {
         throw new Error(`unexpected command: ${command}`);
       }
       readCount += 1;
@@ -511,7 +558,7 @@ describe("shared document model", () => {
   it("treats a matching external version as convergence instead of conflict", async () => {
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") return text("base\n", "base");
+        if (command === "fs_sync_file") return text("base\n", "base");
         if (command === "fs_write_file_checked") {
           return written(args?.content ?? "");
         }
@@ -539,7 +586,7 @@ describe("shared document model", () => {
         command: string,
         args?: { content?: string; condition?: { type?: string } },
       ) => {
-        if (command === "fs_read_file") {
+        if (command === "fs_sync_file") {
           readCount += 1;
           return readCount === 1
             ? text("base\n", "base")
@@ -588,7 +635,7 @@ describe("shared document model", () => {
     let writeCount = 0;
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
+      if (command === "fs_sync_file") {
         readCount += 1;
         return readCount === 1
           ? text("base\n", "base")
@@ -626,7 +673,7 @@ describe("shared document model", () => {
     let readCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { condition?: { type?: string } }) => {
-        if (command === "fs_read_file") {
+        if (command === "fs_sync_file") {
           readCount += 1;
           if (readCount === 1) return text("base\n", "base");
           throw new Error("not found");
@@ -726,7 +773,7 @@ describe("shared document model", () => {
     });
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command !== "fs_read_file") {
+      if (command !== "fs_sync_file") {
         throw new Error(`unexpected command: ${command}`);
       }
       readCount += 1;
@@ -759,23 +806,14 @@ describe("shared document model", () => {
     vi.useFakeTimers();
     let readCount = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
-        readCount += 1;
-        return text("base\n", "base", 1);
+      if (command === "fs_sync_file") {
+        readCount++;
+        if (readCount === 1) return text("base\n", "base", 1);
+        if (readCount === 2) return text("external\n", "external", 2);
+        return { kind: "unchanged", revision: "external", size: 9, mtime: 2 };
       }
-      if (command === "fs_write_file_checked") {
-        return {
-          status: "conflict",
-          current: observed("external\n", 2),
-        };
-      }
-      if (command === "fs_stat") {
-        return {
-          kind: "file",
-          size: new TextEncoder().encode("external\n").byteLength,
-          mtime: 2,
-        };
-      }
+      if (command === "fs_write_file_checked")
+        return { status: "conflict", current: observed("external\n", 2) };
       throw new Error(`unexpected command: ${command}`);
     });
     const model = getSharedDocumentModel(
@@ -790,19 +828,18 @@ describe("shared document model", () => {
     );
     model.onChange("local\n");
     await expect(model.save()).resolves.toBe(false);
-    expect(readCount).toBe(1);
-
     await vi.advanceTimersByTimeAsync(30_000);
-
-    expect(readCount).toBe(1);
+    expect(readCount).toBe(11);
+    expect(model.getSnapshot()).toMatchObject({
+      dirty: true,
+      doc: { content: "local\n" },
+    });
+    expect(mocks.warning).toHaveBeenCalledOnce();
     expect(
-      mocks.invoke.mock.calls.filter(([command]) => command === "fs_stat"),
-    ).toHaveLength(10);
-    expect(
-      mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_file_version",
+      mocks.invoke.mock.calls.some(
+        ([command]) => command === "fs_stat" || command === "fs_file_version",
       ),
-    ).toHaveLength(0);
+    ).toBe(false);
     model.clearRemotePollingOwner(owner);
     unsubscribe();
   });
@@ -831,16 +868,39 @@ describe("shared document model", () => {
     unsubscribeSecond();
   });
 
+  it("slow SSH synchronization does not queue another download every three seconds", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof text>>();
+    let calls = 0;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command !== "fs_sync_file")
+        throw new Error(`unexpected command: ${command}`);
+      calls++;
+      return calls === 1 ? Promise.resolve(text("base\n")) : pending.promise;
+    });
+    const model = getSharedDocumentModel(
+      { kind: "ssh", profileId: "slow" },
+      "/work/file.log",
+    );
+    const unsubscribe = model.subscribe(() => {});
+    const owner = Symbol("foreground");
+    model.setRemotePollingActive(owner, true);
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(calls).toBe(2);
+    pending.resolve(text("appended\n"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(model.getSnapshot().doc).toMatchObject({ content: "appended\n" });
+    model.clearRemotePollingOwner(owner);
+    unsubscribe();
+  });
+
   it("periodically verifies unchanged SSH metadata with a digest", async () => {
     vi.useFakeTimers();
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return text("one\n");
-      if (command === "fs_stat") {
-        return { kind: "file", size: 4, mtime: 1 };
-      }
-      if (command === "fs_file_version") {
-        return { revision: "revision:one\n", size: 4, mtime: 1 };
-      }
+      if (command === "fs_sync_file") return text("one\n");
       throw new Error(`unexpected command: ${command}`);
     });
     const model = getSharedDocumentModel(
@@ -853,17 +913,15 @@ describe("shared document model", () => {
     await vi.waitFor(() =>
       expect(model.getSnapshot().doc.status).toBe("ready"),
     );
-
     await vi.advanceTimersByTimeAsync(30_000);
-
-    expect(
-      mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_file_version",
-      ),
-    ).toHaveLength(1);
-    expect(
-      mocks.invoke.mock.calls.filter(([command]) => command === "fs_read_file"),
-    ).toHaveLength(1);
+    const checks = mocks.invoke.mock.calls.filter(
+      ([command]) => command === "fs_sync_file",
+    );
+    expect(checks).toHaveLength(11);
+    expect(checks.slice(1, 10).every(([, args]) => args.verify === false)).toBe(
+      true,
+    );
+    expect(checks[10]?.[1].verify).toBe(true);
     model.clearRemotePollingOwner(owner);
     unsubscribe();
   });
@@ -900,7 +958,7 @@ describe("shared document model", () => {
     let writeCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") return text("one\n");
+        if (command === "fs_sync_file") return text("one\n");
         if (command === "fs_write_file_checked") {
           writeCount += 1;
           if (writeCount === 1) {
@@ -955,7 +1013,7 @@ describe("shared document model", () => {
     let writeCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") return text("one\n");
+        if (command === "fs_sync_file") return text("one\n");
         if (command === "fs_write_file_checked") {
           writeCount += 1;
           if (writeCount === 1) {
@@ -988,27 +1046,22 @@ describe("shared document model", () => {
     unsubscribe();
   });
 
-  it("probes a watcher event after saving without reading the file back", async () => {
+  it("synchronizes a watcher event after saving while preserving later edits", async () => {
     let releaseWrite: (() => void) | undefined;
     let readCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") {
+        if (command === "fs_sync_file") {
           readCount += 1;
-          return text("base\n", "base", 1);
+          return readCount === 1
+            ? text("base\n", "base", 1)
+            : text("first\n", "revision:first\n", 2);
         }
         if (command === "fs_write_file_checked") {
           await new Promise<void>((resolve) => {
             releaseWrite = resolve;
           });
           return written(args?.content ?? "", 2);
-        }
-        if (command === "fs_file_version") {
-          return {
-            revision: "revision:first\n",
-            size: 6,
-            mtime: 2,
-          };
         }
         throw new Error(`unexpected command: ${command}`);
       },
@@ -1029,12 +1082,12 @@ describe("shared document model", () => {
     await expect(saving).resolves.toBe(true);
     await vi.waitFor(() =>
       expect(
-        mocks.invoke.mock.calls.some(
-          ([command]) => command === "fs_file_version",
-        ),
+        mocks.invoke.mock.calls.filter(
+          ([command]) => command === "fs_sync_file",
+        ).length === 2,
       ).toBe(true),
     );
-    expect(readCount).toBe(1);
+    expect(readCount).toBe(2);
     expect(model.getSnapshot()).toMatchObject({
       dirty: true,
       doc: { status: "ready", content: "second\n" },

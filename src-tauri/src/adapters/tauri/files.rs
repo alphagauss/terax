@@ -7,6 +7,18 @@ use crate::modules::workspace::WorkspaceEnv;
 use serde::Serialize;
 use tauri::Emitter;
 
+/// 统一检查 Local、WSL 与 SSH 文件，只返回与上一检查点不同的字节区间。
+#[tauri::command]
+pub async fn fs_sync_file(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    checkpoint: Option<crate::modules::fs::sync::FileCheckpoint>,
+    force: bool,
+    verify: bool,
+) -> Result<crate::modules::fs::sync::FileSyncResult, String> {
+    crate::modules::fs::sync::sync_file(path, workspace, checkpoint, force, verify).await
+}
+
 /// 读取文件并为文本内容返回基于原始字节的稳定版本。
 #[tauri::command]
 pub async fn fs_read_file(

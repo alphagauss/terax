@@ -715,6 +715,81 @@ async fn read_file_pipelined(
     read_file_range_pipelined(session, handle, 0, size, chunk_len, FILE_READ_PIPELINE).await
 }
 
+/// 共享一个 handle 读取合并后的变化区间；所有区间合计保持有界流水线并校验每块摘要。
+pub(crate) async fn read_sync_ranges(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    ranges: &[(u64, u64)],
+    hashes: &[String],
+) -> Result<Vec<crate::modules::fs::sync::SyncChunk>, String> {
+    if ranges.is_empty() {
+        return Ok(Vec::new());
+    }
+    let read = read_session(workspace).await?;
+    let session = read.session.clone();
+    let (chunk_len, opened) = tokio::join!(
+        file_read_chunk_len(&read),
+        session.open(path.to_string(), OpenFlags::READ, FileAttributes::empty())
+    );
+    let handle = match opened {
+        Ok(value) => value.handle,
+        Err(error) => {
+            if should_fail_transport(&error) {
+                workspace.report_transport_failure();
+            }
+            if should_invalidate_session(&error) {
+                invalidate_read_session(workspace, &read).await;
+            }
+            return Err(error.to_string());
+        }
+    };
+    let per_range = (FILE_READ_PIPELINE / ranges.len().min(FILE_READ_PIPELINE)).max(1);
+    let result = futures_util::stream::iter(ranges.iter().copied())
+        .map(|(offset, len)| {
+            let session = session.clone();
+            let handle = handle.clone();
+            async move {
+                let bytes =
+                    read_file_range_pipelined(session, handle, offset, len, chunk_len, per_range)
+                        .await?;
+                Ok((offset, bytes))
+            }
+        })
+        .buffer_unordered(FILE_READ_PIPELINE)
+        .collect::<Vec<_>>()
+        .await;
+    close_read_handle(session, handle);
+    let result = result.into_iter().collect::<Result<Vec<_>, _>>();
+    if let Err(error) = &result {
+        if should_fail_transport(error) {
+            workspace.report_transport_failure();
+        }
+        if should_invalidate_session(error) {
+            invalidate_read_session(workspace, &read).await;
+        }
+    }
+    // 内容在读取期间变化属于同步失败，不能使其他文档共用的 SFTP session 失效。
+    result
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(offset, bytes)| verified_sync_chunk(offset, &bytes, hashes))
+        .collect()
+}
+
+fn verified_sync_chunk(
+    offset: u64,
+    bytes: &[u8],
+    hashes: &[String],
+) -> Result<crate::modules::fs::sync::SyncChunk, String> {
+    use crate::modules::fs::sync::{chunk, hash, BLOCK_SIZE};
+    for (index, data) in bytes.chunks(BLOCK_SIZE).enumerate() {
+        if hashes.get(offset as usize / BLOCK_SIZE + index) != Some(&hash(data)) {
+            return Err("file changed during synchronization".into());
+        }
+    }
+    Ok(chunk(offset, bytes))
+}
+
 /// 在单个 handle 上流水线读取绝对 offset 对应的有界区间。
 async fn read_file_range_pipelined(
     session: Arc<russh_sftp::client::RawSftpSession>,
@@ -1446,8 +1521,8 @@ mod tests {
     use super::{
         existing_write_target, permission_attributes, plan_file_read_chunks,
         plan_file_read_range_chunks, remote_parent_name, sanitize_local_name,
-        should_fail_transport, should_invalidate_session, FileReadChunk, DEFAULT_FILE_READ_CHUNK,
-        FILE_READ_PIPELINE,
+        should_fail_transport, should_invalidate_session, verified_sync_chunk, FileReadChunk,
+        DEFAULT_FILE_READ_CHUNK, FILE_READ_PIPELINE,
     };
 
     #[test]
@@ -1496,6 +1571,24 @@ mod tests {
                     len: 2,
                 },
             ])
+        );
+    }
+
+    #[test]
+    fn verifies_every_block_of_a_sync_range_as_a_content_error() {
+        use crate::modules::fs::sync::{hash, BLOCK_SIZE};
+        let bytes = vec![b'a'; BLOCK_SIZE + 3];
+        let hashes = vec![
+            hash(b"retained"),
+            hash(&bytes[..BLOCK_SIZE]),
+            hash(&bytes[BLOCK_SIZE..]),
+        ];
+        assert!(verified_sync_chunk(BLOCK_SIZE as u64, &bytes, &hashes).is_ok());
+        let mut rewritten = bytes;
+        rewritten[BLOCK_SIZE] = b'b';
+        assert_eq!(
+            verified_sync_chunk(BLOCK_SIZE as u64, &rewritten, &hashes).unwrap_err(),
+            "file changed during synchronization"
         );
     }
 

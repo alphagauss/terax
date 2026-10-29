@@ -19,6 +19,7 @@ use super::session::{ExecOutput, RemoteWorkspace};
 pub(crate) mod capability_probe;
 pub(crate) mod create_directory;
 pub(crate) mod delete;
+pub(crate) mod file_sync;
 pub(crate) mod file_version;
 pub(crate) mod file_write;
 pub(crate) mod grep;
@@ -52,6 +53,8 @@ pub(crate) enum TaskKind {
     GrepContent,
     /// 稳定文件版本读取。
     FileVersion,
+    /// 文件元数据与分块摘要检查。
+    FileSync,
     /// 递归创建目录。
     CreateDirectory,
     /// 递归删除目录。
@@ -80,6 +83,7 @@ impl TaskKind {
             Self::RipgrepFiles => "ripgrep_files",
             Self::GrepContent => "grep_content",
             Self::FileVersion => "file_version",
+            Self::FileSync => "file_sync",
             Self::CreateDirectory => "create_directory",
             Self::RecursiveDelete => "recursive_delete",
             Self::SftpHash => "sftp_hash",

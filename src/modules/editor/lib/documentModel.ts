@@ -13,19 +13,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { reportError } from "@/lib/errors";
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
+import { type FileReadResult, FileSyncReader } from "./fileSync";
 
-type TextReadResult = {
-  kind: "text";
-  content: string;
-  size: number;
-  mtime: number;
-  revision: string;
-};
-
-type ReadResult =
-  | TextReadResult
-  | { kind: "binary"; size: number; mtime: number }
-  | { kind: "toolarge"; size: number; limit: number; mtime: number };
+type ReadResult = FileReadResult;
+type TextReadResult = Extract<ReadResult, { kind: "text" }>;
 
 type FileVersion = {
   revision: string;
@@ -45,8 +36,6 @@ type CheckedWriteResult =
 type WriteCondition =
   | { type: "match"; version: FileVersion }
   | { type: "overwrite" };
-
-type FileStat = { size: number; mtime: number; kind: string };
 
 type DiskText = {
   content: string;
@@ -90,7 +79,7 @@ type GitBaselineResult =
   | { kind: "unsupported" };
 
 type Listener = () => void;
-type ReloadMode = "none" | "probe" | "full";
+type ReloadMode = "none" | "poll" | "probe" | "full";
 
 const REMOTE_POLL_MS = 3000;
 const REMOTE_DIGEST_POLL_MS = 30_000;
@@ -222,7 +211,6 @@ class SharedDocumentModel {
   private buffer = "";
   private eol: Eol = "\n";
   private base: FileVersion | null = null;
-  private observed: ObservedMetadata | null = null;
   // undefined 表示无冲突，null 表示磁盘内容无法作为文本协调。
   private conflictDisk: DiskText | null | undefined;
   private forceRead = false;
@@ -231,7 +219,8 @@ class SharedDocumentModel {
   private disposeTimer: ReturnType<typeof setTimeout> | null = null;
   private savePromise: Promise<boolean> | null = null;
   private reloadPromise: Promise<void> | null = null;
-  private unchangedRemotePolls = 0;
+  private readonly syncReader = new FileSyncReader();
+  private remotePolls = 0;
   private lastRemotePollAt = 0;
   private activationCheckPending = false;
   private readonly remotePollOwners = new Map<symbol, boolean>();
@@ -337,7 +326,11 @@ class SharedDocumentModel {
 
   /** 合并并串行执行协调请求，完整读取优先于仅探测版本。 */
   private requestReload(mode: Exclude<ReloadMode, "none">): void {
-    if (mode === "full" || this.reloadRequested === "none") {
+    if (
+      mode === "full" ||
+      this.reloadRequested === "none" ||
+      (mode === "probe" && this.reloadRequested === "poll")
+    ) {
       this.reloadRequested = mode;
     }
     if (this.reloadPromise || this.savePromise) return;
@@ -402,7 +395,6 @@ class SharedDocumentModel {
     };
     this.eol = disk.eol;
     this.base = disk;
-    this.observed = disk;
     this.savedBuffer = disk.content;
     this.resolveConflict();
     const doc =
@@ -429,6 +421,7 @@ class SharedDocumentModel {
     if (this.disposeTimer) clearTimeout(this.disposeTimer);
     this.disposeTimer = null;
     this.readGeneration += 1;
+    this.syncReader.clear();
     this.gitBaselineGeneration += 1;
     this.reloadRequested = "none";
     if (this.conflictDisk !== undefined) toast.dismiss(this.conflictToastId());
@@ -503,7 +496,9 @@ class SharedDocumentModel {
     try {
       const result = await this.readDisk();
       if (generation !== this.readGeneration) return;
-      this.adoptInitialRead(result);
+      if (!result) throw new Error(i18n.t("editor:fileMissing"));
+      if (result.kind === "unchanged") this.adoptBaseVersion(result);
+      else this.adoptInitialRead(result);
     } catch (error) {
       if (generation !== this.readGeneration) return;
       this.publish({
@@ -520,47 +515,41 @@ class SharedDocumentModel {
   }
 
   private async runReloads(): Promise<void> {
-    do {
+    while (this.reloadRequested !== "none") {
       const mode = this.reloadRequested;
       this.reloadRequested = "none";
       const generation = ++this.readGeneration;
       try {
-        if (mode === "probe") {
-          const version = await this.readVersion().catch(() => undefined);
-          if (generation !== this.readGeneration) continue;
-          if (version && this.base?.revision === version.revision) {
-            this.adoptBaseVersion(version);
-            continue;
-          }
-          if (version === null && this.snapshot.dirty) {
-            this.observed = null;
-            this.enterConflict(null);
-            continue;
-          }
-        }
-        const result = await this.readDisk();
-        if (generation === this.readGeneration) this.reconcileRead(result);
+        const result = await this.readDisk(mode);
+        if (generation !== this.readGeneration) continue;
+        if (!result) {
+          if (this.snapshot.dirty) this.enterConflict(null);
+          else throw new Error(i18n.t("editor:fileMissing"));
+        } else if (result.kind === "unchanged") {
+          if (
+            this.base?.revision === result.revision &&
+            (this.base.size !== result.size ||
+              this.base.mtime !== result.mtime ||
+              this.conflictDisk !== undefined)
+          )
+            this.adoptBaseVersion(result);
+        } else this.reconcileRead(result);
       } catch (error) {
         if (generation === this.readGeneration) {
           console.warn("[editor] reload failed", this.path, error);
         }
       }
-    } while (this.reloadRequested !== "none");
+    }
   }
 
-  private readVersion(): Promise<FileVersion | null> {
-    return invoke<FileVersion | null>("fs_file_version", {
-      path: this.path,
-      workspace: this.workspace,
-    });
-  }
-
-  private readDisk(): Promise<ReadResult> {
-    return invoke<ReadResult>("fs_read_file", {
-      path: this.path,
-      workspace: this.workspace,
-      force: this.forceRead,
-    });
+  private readDisk(mode: Exclude<ReloadMode, "none"> = "full") {
+    return this.syncReader.read(
+      this.path,
+      this.workspace,
+      this.forceRead,
+      mode !== "poll",
+      mode === "full",
+    );
   }
 
   /** 以 base、local、disk 三方关系协调磁盘读取结果。 */
@@ -570,7 +559,6 @@ class SharedDocumentModel {
       return;
     }
     if (result.kind !== "text") {
-      this.observed = result;
       if (this.buffer === this.savedBuffer) this.adoptNonText(result);
       else this.enterConflict(null);
       return;
@@ -584,7 +572,6 @@ class SharedDocumentModel {
     if (disk.content === this.savedBuffer) {
       this.eol = disk.eol;
       this.base = disk;
-      this.observed = disk;
       this.resolveConflict();
       const doc =
         this.snapshot.doc.status === "ready"
@@ -607,7 +594,6 @@ class SharedDocumentModel {
 
   private adoptBaseVersion(version: FileVersion): void {
     this.base = version;
-    this.observed = version;
     this.resolveConflict();
     const doc =
       this.snapshot.doc.status === "ready"
@@ -632,7 +618,6 @@ class SharedDocumentModel {
   private adoptDisk(disk: DiskText): void {
     this.eol = disk.eol;
     this.base = disk;
-    this.observed = disk;
     this.savedBuffer = disk.content;
     this.buffer = disk.content;
     this.resolveConflict();
@@ -646,7 +631,6 @@ class SharedDocumentModel {
 
   private adoptNonText(result: Exclude<ReadResult, TextReadResult>): void {
     this.base = null;
-    this.observed = result;
     this.resolveConflict();
     this.clearAutoSaveTimer();
     this.publish({
@@ -696,7 +680,6 @@ class SharedDocumentModel {
     });
     if (result.status === "conflict") {
       const wasConflicted = this.conflictDisk !== undefined;
-      this.observed = result.current;
       if (wasConflicted) this.showConflict();
       else this.enterConflict(null);
       return false;
@@ -704,7 +687,6 @@ class SharedDocumentModel {
 
     this.eol = detectEol(diskContent);
     this.base = result;
-    this.observed = result;
     this.savedBuffer = content;
     this.resolveConflict();
     const dirty = this.buffer !== content;
@@ -726,9 +708,6 @@ class SharedDocumentModel {
   private enterConflict(disk: DiskText | null): void {
     const wasConflicted = this.conflictDisk !== undefined;
     this.conflictDisk = disk;
-    if (disk) {
-      this.observed = disk;
-    }
     this.clearAutoSaveTimer();
     if (!wasConflicted) this.showConflict();
   }
@@ -794,29 +773,15 @@ class SharedDocumentModel {
     return now - this.lastRemotePollAt >= REMOTE_POLL_MS;
   }
 
-  /** 使用元数据快路径轮询远端，并以低频摘要兜底秒级时间戳碰撞。 */
+  /** 一次原生调用完成元数据快路径和增量读取，低频强制摘要校验补足时间戳碰撞。 */
   async pollRemote(): Promise<void> {
     this.lastRemotePollAt = Date.now();
-    const stat = await invoke<FileStat>("fs_stat", {
-      path: this.path,
-      workspace: this.workspace,
-    }).catch(() => null);
-    if (!stat) return;
-    const unchanged =
-      this.observed &&
-      stat.mtime === this.observed.mtime &&
-      stat.size === this.observed.size;
-    if (unchanged) {
-      if (this.conflictDisk !== undefined) {
-        this.unchangedRemotePolls = 0;
-        return;
-      }
-      this.unchangedRemotePolls += 1;
-      if (this.unchangedRemotePolls < REMOTE_DIGEST_POLL_COUNT) return;
-    }
-    this.unchangedRemotePolls = 0;
-    if (unchanged) this.checkForChanges();
-    else this.reload();
+    if (this.snapshot.doc.status === "loading") return;
+    this.remotePolls += 1;
+    const verify = this.remotePolls >= REMOTE_DIGEST_POLL_COUNT;
+    if (verify) this.remotePolls = 0;
+    this.requestReload(verify ? "probe" : "poll");
+    await this.reloadPromise;
   }
 
   private scheduleAutoSave(): void {

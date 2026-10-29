@@ -56,6 +56,7 @@ import {
   vimCompartment,
   wrapCompartment,
 } from "./lib/extensions";
+import { externalChanges } from "./lib/externalChanges";
 import {
   applyFormattedContent,
   readFileText,
@@ -492,6 +493,7 @@ export const EditorCore = memo(
           close: () => onCloseRef.current?.(),
         })),
         ...buildSharedExtensions(),
+        externalChanges,
         gitChangeGutter,
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),

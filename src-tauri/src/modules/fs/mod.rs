@@ -10,6 +10,7 @@ pub mod mutate;
 pub mod properties;
 #[cfg(feature = "desktop")]
 pub mod search;
+pub mod sync;
 pub mod tree;
 #[cfg(feature = "desktop")]
 pub mod watch;

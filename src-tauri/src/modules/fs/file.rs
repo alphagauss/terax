@@ -14,9 +14,9 @@ use tempfile::NamedTempFile;
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
-const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+pub(super) const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// 显式强制打开的上限，与前端 `FORCE_READ_LIMIT` 保持一致。
-const FORCE_MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
+pub(super) const FORCE_MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
 /// 在指定根内逐级创建真实目录；相对路径不能通过链接、设备名或父路径改变归属。
@@ -229,7 +229,7 @@ pub struct BinaryReadResult {
     pub size: u64,
 }
 
-fn mtime_millis(meta: &fs::Metadata) -> u64 {
+pub(super) fn mtime_millis(meta: &fs::Metadata) -> u64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())

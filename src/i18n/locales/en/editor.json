@@ -1,4 +1,5 @@
 {
+  "fileMissing": "The file no longer exists.",
   "newFile": "New file",
   "newFileDescription": "Filename (relative to workspace root). The extension determines the language mode.",
   "newFilePlaceholder": "example.ts",

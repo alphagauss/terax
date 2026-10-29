@@ -3,6 +3,9 @@
 //! Tauri 文件命令只通过本模块读取版本化快照和提交文件。正文读取固定使用 SFTP；
 //! 版本读取与写入优先通过 Bash 合并远端阶段，并在本层完成安全回退和耗时记录。
 
+use crate::modules::fs::sync::{
+    changed_ranges, from_bytes, validate, FileCheckpoint, FileProbe, FileSyncResult,
+};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -316,6 +319,58 @@ fn record_file_write_fallback(
             error.may_have_committed
         );
     }
+}
+
+/// 在一次检查后复用有界 SFTP 流水线同步变化区间，不在服务器保存副本。
+pub(crate) async fn sync_file(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    previous: Option<&FileCheckpoint>,
+    limit: u64,
+    verify: bool,
+) -> Result<FileSyncResult, String> {
+    use crate::modules::remote::{sftp, tasks::file_sync};
+    let probe = file_sync::probe(workspace, path, previous, limit, verify).await?;
+    let next = match probe {
+        Some(FileProbe::Changed(value)) => value,
+        Some(FileProbe::Unchanged(checkpoint)) => {
+            return Ok(FileSyncResult::Unchanged { checkpoint })
+        }
+        Some(FileProbe::Missing) => return Ok(FileSyncResult::Missing),
+        Some(FileProbe::TooLarge { size, mtime }) => {
+            return Ok(FileSyncResult::TooLarge { size, limit, mtime })
+        }
+        None => {
+            if !verify {
+                let metadata = sftp::stat(workspace, path).await?;
+                if let Some(checkpoint) =
+                    previous.filter(|old| old.size == metadata.size && old.mtime == metadata.mtime)
+                {
+                    return Ok(FileSyncResult::Unchanged {
+                        checkpoint: checkpoint.clone(),
+                    });
+                }
+            }
+            return match sftp::read_file_snapshot(workspace, path, limit).await? {
+                RemoteFileRead::Content { bytes, mtime, .. } => {
+                    Ok(from_bytes(bytes, mtime, previous))
+                }
+                RemoteFileRead::TooLarge { size, mtime } => {
+                    Ok(FileSyncResult::TooLarge { size, limit, mtime })
+                }
+            };
+        }
+    };
+    validate(&next)?;
+    if previous.is_some_and(|old| old.revision == next.revision) {
+        return Ok(FileSyncResult::Unchanged { checkpoint: next });
+    }
+    let ranges = changed_ranges(&next, previous);
+    let chunks = sftp::read_sync_ranges(workspace, path, &ranges, &next.blocks).await?;
+    Ok(FileSyncResult::Changed {
+        checkpoint: next,
+        chunks,
+    })
 }
 
 #[cfg(test)]

@@ -18,6 +18,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+// 文档协调测试隔离字节协议；检查点与完整性校验由 fileSync.test.ts 覆盖。
+vi.mock("./fileSync", () => ({
+  FileSyncReader: class {
+    clear() {}
+    read(path: string, workspace: unknown, force: boolean, verify: boolean) {
+      return mocks.invoke("fs_sync_file", { path, workspace, force, verify });
+    }
+  },
+}));
 vi.mock("@/modules/filesystem", () => ({
   subscribeActiveFile: vi.fn(
     (_workspace: unknown, _path: string, listener: () => void) => {
@@ -98,7 +107,7 @@ describe("useDocument", () => {
     let ignored = true;
     let reads = 0;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
+      if (command === "fs_sync_file") {
         return {
           kind: "text",
           content: "log\n",
@@ -106,9 +115,6 @@ describe("useDocument", () => {
           mtime: 1,
           revision: "disk",
         };
-      }
-      if (command === "fs_file_version") {
-        return { revision: "disk", size: 4, mtime: 1 };
       }
       if (command === "git_quick_diff_baseline") {
         reads += 1;
@@ -196,7 +202,7 @@ describe("useDocument", () => {
 
   it("publishes the repository HEAD baseline after loading a text document", async () => {
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
+      if (command === "fs_sync_file") {
         return {
           kind: "text",
           content: "current\n",
@@ -204,9 +210,6 @@ describe("useDocument", () => {
           mtime: 1,
           revision: "disk",
         };
-      }
-      if (command === "fs_file_version") {
-        return { revision: "disk", size: 8, mtime: 1 };
       }
       if (command === "git_quick_diff_baseline") {
         return {
@@ -253,14 +256,7 @@ describe("useDocument", () => {
       revision: "before",
     };
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return disk;
-      if (command === "fs_file_version") {
-        return {
-          size: disk.size,
-          mtime: disk.mtime,
-          revision: disk.revision,
-        };
-      }
+      if (command === "fs_sync_file") return disk;
       if (command === "git_quick_diff_baseline") {
         return { kind: "unsupported" };
       }
@@ -309,14 +305,7 @@ describe("useDocument", () => {
       revision: "before",
     };
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") return disk;
-      if (command === "fs_file_version") {
-        return {
-          size: disk.size,
-          mtime: disk.mtime,
-          revision: disk.revision,
-        };
-      }
+      if (command === "fs_sync_file") return disk;
       if (command === "git_quick_diff_baseline") {
         return { kind: "unsupported" };
       }

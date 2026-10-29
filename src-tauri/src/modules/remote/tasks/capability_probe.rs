@@ -347,6 +347,11 @@ fn apply_task_capabilities(workspace: &RemoteWorkspace, snapshot: &SshCapability
         "missing file-version dependencies",
     );
     set(
+        TaskKind::FileSync,
+        all(&["readlink", "stat", "dd", "sha256"]),
+        "missing file synchronization dependencies",
+    );
+    set(
         TaskKind::TreeList,
         all(&["find", "readlink"]),
         "missing GNU find or readlink",

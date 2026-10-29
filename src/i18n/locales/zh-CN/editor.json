@@ -1,4 +1,5 @@
 {
+  "fileMissing": "文件已不存在。",
   "newFile": "新建文件",
   "newFileDescription": "文件名（相对于工作区根目录）。扩展名决定语言模式。",
   "newFilePlaceholder": "example.ts",
