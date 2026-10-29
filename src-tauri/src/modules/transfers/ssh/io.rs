@@ -18,7 +18,7 @@ use super::super::errors::TransferErrorCode;
 use super::super::manager::{TaskControl, TransferRunError};
 use super::super::models::TransferEntryKind;
 
-const REMOTE_IO_TIMEOUT: Duration = Duration::from_secs(15);
+pub(super) const REMOTE_IO_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_REMOTE_PROBES: usize = 32;
 
 /// 将 SFTP 协议错误和远端文件流 I/O 错误归一化为传输错误码。
@@ -38,9 +38,8 @@ impl RemoteOperationError for SftpError {
                 _ => TransferErrorCode::IoFailed,
             },
             Self::Limited(_) => TransferErrorCode::ResourceLimit,
-            Self::Timeout | Self::IO(_) | Self::UnexpectedBehavior(_) => {
-                TransferErrorCode::ConnectionLost
-            }
+            Self::Timeout => TransferErrorCode::RequestTimeout,
+            Self::IO(_) | Self::UnexpectedBehavior(_) => TransferErrorCode::ConnectionLost,
             Self::UnexpectedPacket => TransferErrorCode::IoFailed,
         }
     }
@@ -48,6 +47,15 @@ impl RemoteOperationError for SftpError {
 
 impl RemoteOperationError for std::io::Error {
     fn code(&self) -> TransferErrorCode {
+        if self.kind() == std::io::ErrorKind::TimedOut {
+            return TransferErrorCode::RequestTimeout;
+        }
+        if let Some(error) = self
+            .get_ref()
+            .and_then(|error| error.downcast_ref::<SftpError>())
+        {
+            return error.code();
+        }
         super::super::errors::io_failure("remote operation", self).code
     }
 }
@@ -68,8 +76,11 @@ where
             format!("{operation}: {error}"),
         )),
         Err(_) => Err(TransferRunError::failed(
-            TransferErrorCode::ConnectionLost,
-            format!("{operation} timed out"),
+            TransferErrorCode::RequestTimeout,
+            format!(
+                "{operation} timed out after {}s",
+                REMOTE_IO_TIMEOUT.as_secs()
+            ),
         )),
     }
 }
@@ -77,7 +88,7 @@ where
 /// 执行可被任务取消立即中断等待的远端操作。
 ///
 /// 取消时丢弃仍在等待的 SFTP future，由任务关闭专用会话并清理 staging。这样高
-/// RTT 链路不必等到单次 15 秒 I/O 超时才把任务从 Canceling 推进到 Canceled。
+/// RTT 链路不必等到单次 60 秒 I/O 超时才把任务从 Canceling 推进到 Canceled。
 pub(crate) async fn run_cancellable<T, E>(
     operation: impl Into<String>,
     future: impl Future<Output = Result<T, E>>,
@@ -86,21 +97,39 @@ pub(crate) async fn run_cancellable<T, E>(
 where
     E: RemoteOperationError,
 {
-    let operation = operation.into();
     tokio::select! {
+        biased;
         _ = control.cancelled() => Err(TransferRunError::Canceled),
-        result = tokio::time::timeout(REMOTE_IO_TIMEOUT, future) => match result {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => Err(TransferRunError::failed(
-                error.code(),
-                format!("{operation}: {error}"),
-            )),
-            Err(_) => Err(TransferRunError::failed(
-                TransferErrorCode::ConnectionLost,
-                format!("{operation} timed out"),
-            )),
-        },
+        result = run(operation, future) => result,
     }
+}
+
+/// 仅用于按固定偏移读取，不允许复用到写入、重命名或提交操作。
+pub(crate) async fn retry_read<T, F, Fut>(
+    operation: &str,
+    mut read: F,
+) -> Result<T, TransferRunError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, SftpError>>,
+{
+    for attempt in 0..3 {
+        let started = std::time::Instant::now();
+        let result = run(operation, read()).await;
+        match result {
+            Err(TransferRunError::Failed(ref failure))
+                if failure.code == TransferErrorCode::RequestTimeout && attempt < 2 =>
+            {
+                log::warn!(
+                    "TRANSFER event=read_retry operation={operation} attempt={} elapsed_ms={}",
+                    attempt + 1,
+                    started.elapsed().as_millis()
+                );
+            }
+            result => return result,
+        }
+    }
+    unreachable!()
 }
 
 /// 按父目录批量读取 SSH 目标类型，目录列表不可用时回退到有界并发逐项探测。
@@ -202,6 +231,45 @@ fn remote_parent(path: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn only_read_timeouts_retry_and_attempts_are_bounded() {
+        let mut attempts = 0;
+        let value = retry_read("read offset=32", || {
+            attempts += 1;
+            std::future::ready(if attempts < 3 {
+                Err(SftpError::Timeout)
+            } else {
+                Ok(42)
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!((value, attempts), (42, 3));
+        attempts = 0;
+        let error = retry_read("read stalled", || {
+            attempts += 1;
+            std::future::ready(Err::<(), _>(SftpError::Timeout))
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            error.failure().unwrap().code,
+            TransferErrorCode::RequestTimeout
+        );
+        attempts = 0;
+        let _ = retry_read("read disconnected", || {
+            attempts += 1;
+            std::future::ready(Err::<(), _>(SftpError::UnexpectedBehavior("closed".into())))
+        })
+        .await;
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            std::io::Error::other(SftpError::Timeout).code(),
+            TransferErrorCode::RequestTimeout
+        );
+    }
 
     #[tokio::test]
     async fn remote_errors_keep_a_stable_retryable_code() {

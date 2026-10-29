@@ -1243,7 +1243,7 @@ fn local_backup_is_owned(path: &Path, task_id: &str) -> bool {
 }
 
 /// 删除一组已经验证的本地任务临时路径并返回仍需重试的项。
-async fn remove_local_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+pub(crate) async fn remove_local_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     if paths.is_empty() {
         return Vec::new();
     }

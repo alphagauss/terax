@@ -77,11 +77,11 @@ function TransferStatusPanel() {
   useTransferBridge();
   const tasks = useMemo(
     () =>
-      Object.values(taskMap).sort((left, right) => {
-        const activeOrder =
-          Number(isActiveTransfer(right)) - Number(isActiveTransfer(left));
-        return activeOrder || right.createdAt - left.createdAt;
-      }),
+      Object.values(taskMap).sort(
+        // 状态更新不能改变行位置；同毫秒创建的任务也使用固定次序。
+        (left, right) =>
+          right.createdAt - left.createdAt || left.id.localeCompare(right.id),
+      ),
     [taskMap],
   );
   const active = tasks.filter(isActiveTransfer);

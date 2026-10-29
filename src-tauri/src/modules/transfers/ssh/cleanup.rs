@@ -65,7 +65,7 @@ done
 ///
 /// 相邻 staging 只能位于规划阶段得到的规范目标父目录，名称必须携带同一任务 ID。
 /// SSH Archive 下载使用的 `/tmp` 目录另按 `mktemp` 固定格式校验。
-#[derive(Clone)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct RemoteCleanupScope {
     profile_id: String,
     endpoint_host: String,

@@ -18,6 +18,7 @@ mod metadata;
 pub mod models;
 mod planner;
 mod progress;
+mod resume;
 mod scheduler;
 mod source;
 mod ssh;

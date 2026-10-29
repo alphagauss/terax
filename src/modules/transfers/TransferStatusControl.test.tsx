@@ -159,6 +159,30 @@ describe("transfer phase feedback", () => {
     updatedAt: 2,
   };
 
+  it("任务排队、失败和续传时保持创建顺序", () => {
+    mocks.tasks = {
+      old: { ...task, id: "old", name: "old-task", createdAt: 1 },
+      newer: { ...task, id: "newer", name: "new-task", createdAt: 2 },
+    };
+    const view = render(createElement(TransferStatusControl));
+    for (const status of [
+      "queued",
+      "failed",
+      "running",
+      "completed",
+    ] as const) {
+      mocks.tasks = {
+        ...mocks.tasks,
+        newer: { ...mocks.tasks.newer, status, updatedAt: 100 },
+      };
+      act(() => view.root.render(createElement(TransferStatusControl)));
+      const text = view.container.textContent ?? "";
+      expect(text.indexOf("new-task")).toBeGreaterThanOrEqual(0);
+      expect(text.indexOf("new-task")).toBeLessThan(text.indexOf("old-task"));
+    }
+    act(() => view.root.unmount());
+  });
+
   it.each([
     ["transferring", "transfers.finishingTransfer"],
     ["verifying", "transfers.verifyingAndExtracting"],

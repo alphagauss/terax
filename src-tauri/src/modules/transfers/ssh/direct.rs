@@ -65,6 +65,7 @@ impl OrderedSha256 {
             .then(|| format!("{:x}", self.digest.finalize()))
     }
 
+    #[cfg(test)]
     fn buffered_chunks(&self) -> usize {
         self.pending.len()
     }
@@ -78,9 +79,28 @@ pub(crate) async fn download_file(
     expected_size: u64,
     context: &mut ExecutionContext,
 ) -> Result<(), TransferRunError> {
+    let existing = tokio::fs::symlink_metadata(local).await.ok();
+    if existing
+        .as_ref()
+        .is_some_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(crate::modules::transfers::resume::changed());
+    }
+    if existing
+        .as_ref()
+        .is_some_and(|metadata| metadata.len() == expected_size)
+        && context
+            .resume
+            .as_ref()
+            .is_some_and(|state| state.files.get(remote) == Some(&expected_size))
+    {
+        context.report_bytes(expected_size).await;
+        return Ok(());
+    }
     let mut writer = match tokio::fs::OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create_new(existing.is_none() || context.resume.is_none())
         .open(local)
         .await
     {
@@ -94,7 +114,7 @@ pub(crate) async fn download_file(
     };
 
     let result = download_file_into(session, remote, &mut writer, expected_size, context).await;
-    if result.is_err() {
+    if result.is_err() && !context.retains_partial(&result) {
         drop(writer);
         let _ = tokio::fs::remove_file(local).await;
     }
@@ -151,15 +171,48 @@ async fn download_file_into_inner(
     )
     .await?
     .handle;
-    let mut next_offset = 0u64;
-    let mut completed = 0u64;
+    let saved = context.resume_offset(remote);
+    let actual = writer
+        .metadata()
+        .await
+        .map_err(|error| io_failure("stat partial download", &error))?
+        .len();
+    let saved = crate::modules::transfers::resume::validated_offset(saved, actual, expected_size)?;
+    writer
+        .set_len(saved)
+        .await
+        .map_err(|error| io_failure("truncate unconfirmed download tail", &error))?;
+    let mut next_offset = saved;
+    let mut completed = saved;
+    let mut prefix = crate::modules::transfers::resume::ConfirmedPrefix::new(saved);
+    context.report_bytes(saved).await;
     let mut canceled = false;
     let mut failure = None;
     let mut inflight = FuturesUnordered::new();
     let mut digest = hash_download.then(OrderedSha256::new);
+    if let Some(digest) = digest.as_mut() {
+        writer
+            .seek(std::io::SeekFrom::Start(0))
+            .await
+            .map_err(|error| io_failure("seek partial archive", &error))?;
+        let mut remaining = saved;
+        let mut buffer = vec![0; COPY_BUFFER_BYTES];
+        while remaining > 0 {
+            context.checkpoint().await?;
+            let length = remaining.min(buffer.len() as u64) as usize;
+            writer
+                .read_exact(&mut buffer[..length])
+                .await
+                .map_err(|error| io_failure("hash partial archive", &error))?;
+            digest.digest.update(&buffer[..length]);
+            remaining -= length as u64;
+        }
+        digest.hashed_until = saved;
+    }
 
     while next_offset < expected_size || !inflight.is_empty() {
-        if !canceled && failure.is_none() {
+        // 暂停先收完已发出的有限窗口，避免暂停时间计入请求超时。
+        if !canceled && failure.is_none() && (!control.is_paused() || inflight.is_empty()) {
             match context.checkpoint().await {
                 Ok(()) => {}
                 Err(TransferRunError::Canceled) => canceled = true,
@@ -168,23 +221,27 @@ async fn download_file_into_inner(
         }
         while !canceled
             && failure.is_none()
+            && !control.is_paused()
             && next_offset < expected_size
-            && inflight.len() + digest.as_ref().map_or(0, OrderedSha256::buffered_chunks)
-                < MAX_INFLIGHT_READS
+            && inflight.len() + prefix.pending() < MAX_INFLIGHT_READS
         {
             let offset = next_offset;
             let length = ((expected_size - offset) as usize).min(DOWNLOAD_CHUNK_BYTES);
             next_offset += length as u64;
             let session = session.clone();
             let handle = handle.clone();
+            let task = context.task_id().to_string();
             inflight.push(async move {
                 let mut data = Vec::with_capacity(length);
                 let mut cursor = offset;
                 let end = offset + length as u64;
                 while cursor < end {
-                    let chunk = super::io::run(
-                        format!("read remote source {remote}"),
-                        session.read(handle.clone(), cursor, (end - cursor) as u32),
+                    let chunk = super::io::retry_read(
+                        &format!(
+                            "read remote source {remote} task={task} offset={cursor} length={}",
+                            end - cursor
+                        ),
+                        || session.read(handle.clone(), cursor, (end - cursor) as u32),
                     )
                     .await?;
                     if chunk.data.is_empty() {
@@ -212,7 +269,7 @@ async fn download_file_into_inner(
         }
         match result {
             Ok((offset, data)) => {
-                if data.is_empty() {
+                if data.len() as u64 != (expected_size - offset).min(DOWNLOAD_CHUNK_BYTES as u64) {
                     failure = Some(source_changed(format!(
                         "remote source ended before {expected_size} bytes: {remote}"
                     )));
@@ -239,6 +296,16 @@ async fn download_file_into_inner(
                         }
                     }
                     completed = completed.saturating_add(data_len);
+                    let confirmed = prefix.complete(offset, data_len);
+                    if confirmed.saturating_sub(context.resume_offset(remote))
+                        >= crate::modules::transfers::resume::CHECKPOINT_BYTES
+                    {
+                        writer
+                            .sync_data()
+                            .await
+                            .map_err(|error| io_failure("sync download checkpoint", &error))?;
+                        context.save_offset(remote, confirmed).await?;
+                    }
                     context.report_bytes(data_len).await;
                 }
             }
@@ -276,6 +343,7 @@ async fn download_file_into_inner(
             &error,
         ))
     })?;
+    context.save_offset(remote, expected_size).await?;
     digest
         .map(|digest| {
             digest.finish(expected_size).ok_or_else(|| {
@@ -290,6 +358,11 @@ pub(crate) async fn execute_upload(
     plan: RemoteUploadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    context
+        .prepare_resume(crate::modules::transfers::resume::ResumeState::upload(
+            &plan,
+        ))
+        .await?;
     context.set_stage(TransferStage::Transferring).await;
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
         &plan.workspace,
@@ -301,11 +374,26 @@ pub(crate) async fn execute_upload(
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
-            super::io::run(
-                format!("create remote directory {}", directory.destination),
-                plan.session.create_dir(directory.destination.clone()),
+            match super::io::run_cancellable(
+                format!("inspect remote staging directory {}", directory.destination),
+                plan.session.symlink_metadata(&directory.destination),
+                &context.control(),
             )
-            .await?;
+            .await
+            {
+                Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => {}
+                Ok(_) => return Err(crate::modules::transfers::resume::changed()),
+                Err(TransferRunError::Failed(failure))
+                    if failure.code == TransferErrorCode::SourceUnavailable =>
+                {
+                    super::io::run(
+                        format!("create remote directory {}", directory.destination),
+                        plan.session.create_dir(directory.destination.clone()),
+                    )
+                    .await?;
+                }
+                Err(error) => return Err(error),
+            }
         }
         let mut successful = vec![true; plan.files.len()];
         for (index, file) in plan.files.iter().enumerate() {
@@ -313,6 +401,7 @@ pub(crate) async fn execute_upload(
                 record_remote_upload_failure(&plan, file, error, context).await?;
                 successful[index] = false;
                 remove_remote_partial_file(&plan.session, &file.destination).await?;
+                context.save_offset(&file.destination, 0).await?;
             }
         }
         context.set_stage(TransferStage::Verifying).await;
@@ -327,6 +416,7 @@ pub(crate) async fn execute_upload(
                     record_remote_upload_failure(&plan, file, error, context).await?;
                     successful[index] = false;
                     remove_remote_partial_file(&plan.session, &file.destination).await?;
+                    context.save_offset(&file.destination, 0).await?;
                 }
             }
         }
@@ -362,7 +452,7 @@ pub(crate) async fn execute_upload(
     }
     .await;
     let mut pending = pending_cleanup;
-    if result.is_err() {
+    if result.is_err() && !context.retains_partial(&result) {
         pending.extend(plan.roots.iter().map(|root| root.stage.clone()));
     }
     if !pending.is_empty() && !super::cleanup::should_defer(&result) {
@@ -378,19 +468,28 @@ pub(crate) async fn execute_download(
     plan: RemoteDownloadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    context
+        .prepare_resume(crate::modules::transfers::resume::ResumeState::download(
+            &plan,
+        ))
+        .await?;
     context.set_stage(TransferStage::Transferring).await;
     let raw_session = super::session::open_raw(&plan.workspace).await?;
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
-            tokio::fs::create_dir(&directory.destination)
-                .await
-                .map_err(|error| {
-                    TransferRunError::Failed(io_failure(
-                        format!("create directory {}", directory.destination.display()),
-                        &error,
-                    ))
-                })?;
+            match tokio::fs::symlink_metadata(&directory.destination).await {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                Ok(_) => return Err(crate::modules::transfers::resume::changed()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    tokio::fs::create_dir(&directory.destination)
+                        .await
+                        .map_err(|error| io_failure("create download staging directory", &error))?;
+                }
+                Err(error) => {
+                    return Err(io_failure("inspect download staging directory", &error).into())
+                }
+            }
         }
         let mut successful = vec![true; plan.files.len()];
         for (index, file) in plan.files.iter().enumerate() {
@@ -427,6 +526,7 @@ pub(crate) async fn execute_download(
                     record_remote_download_failure(&plan, file, error, context).await?;
                     successful[index] = false;
                     remove_local_partial_file(&file.destination).await?;
+                    context.save_offset(&file.source, 0).await?;
                 }
             }
         }
@@ -440,6 +540,7 @@ pub(crate) async fn execute_download(
                 record_remote_download_failure(&plan, file, error, context).await?;
                 successful[index] = false;
                 remove_local_partial_file(&file.destination).await?;
+                context.save_offset(&file.source, 0).await?;
             }
         }
         for directory in plan.directories.iter().rev() {
@@ -468,7 +569,7 @@ pub(crate) async fn execute_download(
         Ok(())
     }
     .await;
-    if result.is_err() {
+    if result.is_err() && !context.retains_partial(&result) {
         cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     let _ = raw_session.close_session();
@@ -492,30 +593,7 @@ async fn copy_remote_upload_file(
         file.metadata.modified(),
     )
     .await?;
-    let mut writer = super::io::run(
-        format!("create remote file {}", file.destination),
-        session.open_with_flags(
-            file.destination.clone(),
-            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
-        ),
-    )
-    .await?;
-    copy_stream(&mut reader, &mut writer, context).await?;
-    super::io::run(
-        format!("flush remote file {}", file.destination),
-        writer.flush(),
-    )
-    .await?;
-    super::io::run(
-        format!("sync remote file {}", file.destination),
-        writer.sync_all(),
-    )
-    .await?;
-    super::io::run(
-        format!("close remote file {}", file.destination),
-        writer.shutdown(),
-    )
-    .await?;
+    upload_stream(session, &mut reader, &file.destination, file.size, context).await?;
     crate::modules::transfers::source::verify_opened_file(
         &reader,
         &file.source,
@@ -628,32 +706,128 @@ async fn remove_local_partial_file(path: &Path) -> RunResult<()> {
     }
 }
 
-/// 以固定大小块复制异步流，每个块之间响应暂停和取消并汇总进度。
-async fn copy_stream<R, W>(
-    reader: &mut R,
-    writer: &mut W,
+/// 上传只在全部 WRITE 确认并同步后推进偏移；失败后重新打开文件，不重放 write_all。
+pub(crate) async fn upload_stream(
+    session: &Arc<SftpSession>,
+    reader: &mut tokio::fs::File,
+    remote: &str,
+    size: u64,
     context: &mut ExecutionContext,
-) -> RunResult<()>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
-    loop {
-        context.checkpoint().await?;
-        let read = reader.read(&mut buffer).await.map_err(|error| {
-            TransferRunError::Failed(io_failure("read transfer source", &error))
-        })?;
-        if read == 0 {
-            return Ok(());
+) -> RunResult<()> {
+    let control = context.control();
+    let saved = context.resume_offset(remote);
+    let known = context
+        .resume
+        .as_ref()
+        .is_some_and(|state| state.files.contains_key(remote));
+    let (flags, truncate) = if !known {
+        // 新文件直接排他创建，避免每个小文件额外一次远端 stat。
+        context.save_offset(remote, 0).await?;
+        (
+            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+            false,
+        )
+    } else {
+        let existing = super::io::run_cancellable(
+            "inspect partial upload",
+            session.symlink_metadata(remote),
+            &control,
+        )
+        .await;
+        match existing {
+            Ok(metadata) if metadata.is_regular() => {
+                crate::modules::transfers::resume::validated_offset(
+                    saved,
+                    metadata.size.unwrap_or(0),
+                    size,
+                )?;
+                if saved == size && metadata.size == Some(size) {
+                    context.report_bytes(size).await;
+                    return Ok(());
+                }
+                (OpenFlags::WRITE, true)
+            }
+            Err(TransferRunError::Failed(failure))
+                if failure.code == TransferErrorCode::SourceUnavailable && saved == 0 =>
+            {
+                (
+                    OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+                    false,
+                )
+            }
+            Err(error) => return Err(error),
+            _ => return Err(crate::modules::transfers::resume::changed()),
         }
-        super::io::run(
-            "write remote transfer destination",
-            writer.write_all(&buffer[..read]),
+    };
+    let mut writer = super::io::run_cancellable(
+        "open partial upload",
+        session.open_with_flags(remote, flags),
+        &control,
+    )
+    .await?;
+    if truncate {
+        super::io::run_cancellable(
+            "truncate unconfirmed upload tail",
+            writer.set_metadata(FileAttributes {
+                size: Some(saved),
+                ..Default::default()
+            }),
+            &control,
         )
         .await?;
-        context.report_bytes(read as u64).await;
     }
+    reader
+        .seek(std::io::SeekFrom::Start(saved))
+        .await
+        .map_err(|error| io_failure("seek upload source", &error))?;
+    super::io::run_cancellable(
+        "seek partial upload",
+        writer.seek(std::io::SeekFrom::Start(saved)),
+        &control,
+    )
+    .await?;
+    context.report_bytes(saved).await;
+    let mut offset = saved;
+    let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
+    while offset < size {
+        context.checkpoint().await?;
+        let length = (size - offset).min(buffer.len() as u64) as usize;
+        let read = reader
+            .read(&mut buffer[..length])
+            .await
+            .map_err(|error| io_failure("read upload source", &error))?;
+        if read == 0 {
+            return Err(crate::modules::transfers::resume::changed());
+        }
+        super::io::run_cancellable(
+            format!("write remote destination {remote} offset={offset}"),
+            writer.write_all(&buffer[..read]),
+            &control,
+        )
+        .await?;
+        offset += read as u64;
+        context.report_bytes(read as u64).await;
+        if offset == size
+            || offset.saturating_sub(context.resume_offset(remote))
+                >= crate::modules::transfers::resume::CHECKPOINT_BYTES
+        {
+            super::io::run_cancellable("flush upload checkpoint", writer.flush(), &control).await?;
+            super::io::run_cancellable("sync upload checkpoint", writer.sync_all(), &control)
+                .await?;
+            context.save_offset(remote, offset).await?;
+        }
+    }
+    if saved == size {
+        super::io::run_cancellable(
+            "sync empty or truncated upload",
+            writer.sync_all(),
+            &control,
+        )
+        .await?;
+        context.save_offset(remote, size).await?;
+    }
+    super::io::run_cancellable("close remote destination", writer.shutdown(), &control).await?;
+    Ok(())
 }
 
 /// 校验远端来源在 raw SFTP 下载期间没有改变长度、类型或修改时间。

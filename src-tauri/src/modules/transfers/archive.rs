@@ -179,10 +179,21 @@ async fn build_archive(
     context
         .set_stage(super::models::TransferStage::Archiving)
         .await;
+    // SSH 可续传归档与 Journal 同盘，打包完成后可直接保留，不再整包复制。
+    let directory = if context.resume.is_some() {
+        context
+            .archive_path()
+            .await?
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    } else {
+        std::env::temp_dir()
+    };
     let temporary = tempfile::Builder::new()
         .prefix("terax-archive-")
         .suffix(".tar.gz")
-        .tempfile()
+        .tempfile_in(directory)
         .map_err(|error| TransferRunError::Failed(io_failure("create local archive", &error)))?;
     let path = temporary.into_temp_path();
     let excluded_path = std::fs::canonicalize(&path).map_err(|error| {

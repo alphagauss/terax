@@ -24,10 +24,7 @@ use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadPlan};
 use crate::modules::transfers::progress::ExecutionContext;
 use russh::{ChannelMsg, Sig};
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const COPY_BUFFER_BYTES: usize = 256 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const COMMAND_OUTPUT_LIMIT: usize = 1024 * 1024;
 
@@ -38,6 +35,18 @@ pub(crate) async fn execute_upload(
     plan: RemoteUploadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    context
+        .prepare_resume(crate::modules::transfers::resume::ResumeState::upload(
+            &plan,
+        ))
+        .await?;
+    if context
+        .resume
+        .as_ref()
+        .is_some_and(|state| state.archive.is_none())
+    {
+        context.end_resumable_bytes().await?;
+    }
     let _timer = PhaseTimer::new(context.task_id(), "ssh_upload_total");
     let remote_parent = common_remote_parent(
         plan.roots
@@ -56,19 +65,66 @@ pub(crate) async fn execute_upload(
     let mut pending_cleanup = Vec::new();
     let result = async {
         ensure_archive_capability(&plan.workspace, context, false).await?;
-        let archive = build_upload_archive(&plan, &remote_parent, context).await?;
+        let archive = if let Some(archive) = context
+            .resume
+            .as_ref()
+            .and_then(|state| state.archive.clone())
+        {
+            archive
+        } else {
+            let built = build_upload_archive(&plan, &remote_parent, context).await?;
+            let local = context.archive_path().await?;
+            let work_dir = join_remote(&remote_parent, &format!(".terax-archive-{}", plan.task_id));
+            let archive = crate::modules::transfers::resume::ArchiveCheckpoint {
+                local: local.clone(),
+                remote: join_remote(&work_dir, "payload.tar.gz"),
+                work_dir,
+                size: built.size,
+                sha256: built.sha256.clone(),
+                file_count: built.file_count,
+            };
+            let mut state = context.resume.clone().unwrap();
+            state.local_paths.push(local.clone());
+            state.remote_paths.push(archive.work_dir.clone());
+            context.store_resume(state.clone()).await?;
+            tokio::task::spawn_blocking(move || built.path.persist_noclobber(local))
+                .await
+                .map_err(|error| internal(format!("retain archive task: {error}")))?
+                .map_err(|error| io_failure("retain upload archive", &error.error))?;
+            state.archive = Some(archive.clone());
+            state.discarded = false;
+            context.store_resume(state).await?;
+            archive
+        };
         context.set_archive_size(archive.size).await?;
         context.set_archive_file_count(archive.file_count).await?;
-
-        let work_dir = join_remote(&remote_parent, &format!(".terax-archive-{}", plan.task_id));
-        ensure_remote_target_available(&plan.session, &work_dir).await?;
-        let command = format!("umask 077; mkdir -- {}", shell_quote(&work_dir));
-        run_checked(&plan.workspace, &command, context).await?;
+        let work_dir = archive.work_dir.clone();
+        let archive_path = archive.remote.clone();
         remote_work = Some(work_dir.clone());
-        verify_private_work_dir(&plan.session, &work_dir).await?;
-
-        let archive_path = join_remote(&work_dir, "payload.tar.gz");
-        upload_archive(&plan.session, &archive.path, &archive_path, context).await?;
+        match super::io::run(
+            "inspect archive work directory",
+            plan.session.symlink_metadata(&work_dir),
+        )
+        .await
+        {
+            Ok(_) => verify_private_work_dir(&plan.session, &work_dir).await?,
+            Err(TransferRunError::Failed(failure))
+                if failure.code == TransferErrorCode::SourceUnavailable =>
+            {
+                let command = format!("umask 077; mkdir -- {}", shell_quote(&work_dir));
+                run_checked(&plan.workspace, &command, context).await?;
+            }
+            Err(error) => return Err(error),
+        }
+        upload_archive(
+            &plan.session,
+            &archive.local,
+            &archive_path,
+            archive.size,
+            context,
+        )
+        .await?;
+        context.end_resumable_bytes().await?;
 
         context.set_stage(TransferStage::Verifying).await;
         verify_and_extract_remote_archive(
@@ -114,7 +170,7 @@ pub(crate) async fn execute_upload(
         Ok(())
     }
     .await;
-    if result.is_err() {
+    if result.is_err() && !context.retains_partial(&result) {
         pending_cleanup.extend(remote_work);
         pending_cleanup.extend(plan.roots.iter().map(|root| root.stage.clone()));
     }
@@ -137,6 +193,18 @@ pub(crate) async fn execute_download(
     plan: RemoteDownloadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    context
+        .prepare_resume(crate::modules::transfers::resume::ResumeState::download(
+            &plan,
+        ))
+        .await?;
+    if context
+        .resume
+        .as_ref()
+        .is_some_and(|state| state.archive.is_none())
+    {
+        context.end_resumable_bytes().await?;
+    }
     let _timer = PhaseTimer::new(context.task_id(), "ssh_download_total");
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_download(
         &plan.workspace,
@@ -147,55 +215,92 @@ pub(crate) async fn execute_download(
     let mut pending_cleanup = Vec::new();
     let result = async {
         ensure_archive_capability(&plan.workspace, context, true).await?;
-        context.set_stage(TransferStage::Archiving).await;
-        let work_dir = create_remote_work_dir(&plan.workspace, &plan.task_id, context).await?;
-        remote_work = Some(work_dir.clone());
-        let archive_path = join_remote(&work_dir, "payload.tar.gz");
-        let sources = download_root_sources(&plan)?;
-        let mut command = format!("tar -czf {} -C / --", shell_quote(&archive_path));
-        for source in sources {
-            let relative = source
-                .strip_prefix('/')
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| invalid(format!("invalid remote archive source: {source}")))?;
-            command.push(' ');
-            command.push_str(&shell_quote(&format!("./{relative}")));
-        }
-        let (archive_size, archive_sha256) = if let Some(selection) = &plan.sync {
-            let mut script = selection.pack_script(&plan.roots[0].source_path, &archive_path);
-            script.push_str(&format!(
-                "wc -c < {}; {}\n",
-                shell_quote(&archive_path),
-                remote_checksum_command(&shell_quote(&archive_path))
-            ));
-            let output = run_sync_script(
-                &plan.workspace,
-                script,
-                context.control(),
-                COMMAND_OUTPUT_LIMIT,
-            )
-            .await?;
-            parse_remote_archive_info(&output)?
+        let archive = if let Some(archive) = context
+            .resume
+            .as_ref()
+            .and_then(|state| state.archive.clone())
+        {
+            verify_private_work_dir(&plan.session, &archive.work_dir).await?;
+            archive
         } else {
-            create_remote_archive(&plan.workspace, &command, &archive_path, context).await?
+            context.set_stage(TransferStage::Archiving).await;
+            let work_dir = create_remote_work_dir(&plan.workspace, &plan.task_id, context).await?;
+            remote_work = Some(work_dir.clone());
+            let archive_path = join_remote(&work_dir, "payload.tar.gz");
+            let mut state = context.resume.clone().unwrap();
+            state.remote_paths.push(work_dir.clone());
+            context.store_resume(state.clone()).await?;
+            let sources = download_root_sources(&plan)?;
+            let mut command = format!("tar -czf {} -C / --", shell_quote(&archive_path));
+            for source in sources {
+                let relative = source
+                    .strip_prefix('/')
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| invalid(format!("invalid remote archive source: {source}")))?;
+                command.push(' ');
+                command.push_str(&shell_quote(&format!("./{relative}")));
+            }
+            let (archive_size, archive_sha256) = if let Some(selection) = &plan.sync {
+                let mut script = selection.pack_script(&plan.roots[0].source_path, &archive_path);
+                script.push_str(&format!(
+                    "wc -c < {}; {}\n",
+                    shell_quote(&archive_path),
+                    remote_checksum_command(&shell_quote(&archive_path))
+                ));
+                let output = run_sync_script(
+                    &plan.workspace,
+                    script,
+                    context.control(),
+                    COMMAND_OUTPUT_LIMIT,
+                )
+                .await?;
+                parse_remote_archive_info(&output)?
+            } else {
+                create_remote_archive(&plan.workspace, &command, &archive_path, context).await?
+            };
+            context.set_stage(TransferStage::Verifying).await;
+            verify_remote_download_sources(&plan, context).await?;
+            let local = crate::modules::transfers::commit::local_stage_path(
+                &plan.roots[0].final_path,
+                &plan.task_id,
+                usize::MAX,
+            )?;
+            let archive = crate::modules::transfers::resume::ArchiveCheckpoint {
+                local: local.clone(),
+                remote: archive_path,
+                work_dir,
+                size: archive_size,
+                sha256: archive_sha256,
+                file_count: 0,
+            };
+            state.local_paths.push(local);
+            state.archive = Some(archive.clone());
+            state.discarded = false;
+            context.store_resume(state).await?;
+            archive
         };
-        context.set_stage(TransferStage::Verifying).await;
-        verify_remote_download_sources(&plan, context).await?;
+        let work_dir = archive.work_dir.clone();
+        let archive_path = archive.remote.clone();
+        let archive_local_path = archive.local.clone();
+        let archive_size = archive.size;
+        let archive_sha256 = archive.sha256;
+        remote_work = Some(work_dir.clone());
         context.set_archive_size(archive_size).await?;
         context.set_stage(TransferStage::Transferring).await;
-
-        let temporary = tempfile::Builder::new()
-            .prefix("terax-archive-")
-            .suffix(".tar.gz")
-            .tempfile()
-            .map_err(|error| {
-                TransferRunError::Failed(io_failure("create local archive", &error))
-            })?;
-        let archive_local_path = temporary.path().to_path_buf();
-        let output = temporary
-            .reopen()
-            .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
-        let mut output = tokio::fs::File::from_std(output);
+        let existing = tokio::fs::symlink_metadata(&archive_local_path).await.ok();
+        if existing
+            .as_ref()
+            .is_some_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
+        {
+            return Err(crate::modules::transfers::resume::changed());
+        }
+        let mut output = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(existing.is_none())
+            .open(&archive_local_path)
+            .await
+            .map_err(|error| io_failure("open partial archive", &error))?;
         let raw = super::session::open_raw(&plan.workspace).await?;
         let transfer_timer =
             PhaseTimer::new(context.task_id(), "ssh_download_stream_including_sync_hash");
@@ -213,6 +318,8 @@ pub(crate) async fn execute_download(
         if local_sha256 != archive_sha256 {
             return Err(integrity("downloaded archive checksum mismatch"));
         }
+        drop(output);
+        context.end_resumable_bytes().await?;
         pending_cleanup.extend(
             super::cleanup::remove_now(
                 &plan.workspace,
@@ -240,10 +347,8 @@ pub(crate) async fn execute_download(
         Ok(())
     }
     .await;
-    if result.is_err() {
+    if result.is_err() && !context.retains_partial(&result) {
         pending_cleanup.extend(remote_work);
-    }
-    if result.is_err() {
         cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
@@ -264,44 +369,21 @@ async fn upload_archive(
     session: &Arc<SftpSession>,
     local: &Path,
     remote: &str,
+    size: u64,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     let _timer = PhaseTimer::new(context.task_id(), "ssh_upload_stream_including_sync");
     context.set_stage(TransferStage::Transferring).await;
-    let control = context.control();
+    let metadata = tokio::fs::symlink_metadata(local)
+        .await
+        .map_err(|error| io_failure("stat retained archive", &error))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != size {
+        return Err(crate::modules::transfers::resume::changed());
+    }
     let mut reader = tokio::fs::File::open(local)
         .await
-        .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
-    let mut writer = super::io::run_cancellable(
-        "create remote archive",
-        session.open_with_flags(
-            remote.to_string(),
-            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
-        ),
-        control.as_ref(),
-    )
-    .await?;
-    let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
-    loop {
-        context.checkpoint().await?;
-        let read = reader
-            .read(&mut buffer)
-            .await
-            .map_err(|error| TransferRunError::Failed(io_failure("read local archive", &error)))?;
-        if read == 0 {
-            break;
-        }
-        super::io::run_cancellable(
-            "write remote archive",
-            writer.write_all(&buffer[..read]),
-            control.as_ref(),
-        )
-        .await?;
-        context.report_bytes(read as u64).await;
-    }
-    super::io::run_cancellable("flush remote archive", writer.flush(), control.as_ref()).await?;
-    super::io::run_cancellable("sync remote archive", writer.sync_all(), control.as_ref()).await?;
-    super::io::run_cancellable("close remote archive", writer.shutdown(), control.as_ref()).await
+        .map_err(|error| io_failure("open retained archive", &error))?;
+    super::direct::upload_stream(session, &mut reader, remote, size, context).await
 }
 
 async fn ensure_archive_capability(

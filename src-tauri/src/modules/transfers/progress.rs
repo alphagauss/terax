@@ -19,6 +19,7 @@ const FILE_FAILURE_BATCH_SIZE: usize = 64;
 
 /// 执行器共享的任务控制和节流进度上下文。
 pub(crate) struct ExecutionContext {
+    pub(crate) resume: Option<super::resume::ResumeState>,
     manager: Arc<TransferManager>,
     app: AppHandle,
     task_id: String,
@@ -41,6 +42,7 @@ impl ExecutionContext {
         control: Arc<TaskControl>,
     ) -> Self {
         Self {
+            resume: None,
             manager,
             app,
             task_id,
@@ -53,6 +55,93 @@ impl ExecutionContext {
             sample_started: Instant::now(),
             failure_batch_started: Instant::now(),
         }
+    }
+
+    pub(crate) async fn archive_path(&self) -> Result<std::path::PathBuf, TransferRunError> {
+        let journal = self.manager.journal_path(&self.task_id).await?;
+        super::commit::local_stage_path(&journal, &self.task_id, usize::MAX)
+    }
+
+    pub(crate) async fn end_resumable_bytes(&mut self) -> Result<(), TransferRunError> {
+        if let Some(mut state) = self.resume.clone().filter(|state| !state.discarded) {
+            state.discarded = true;
+            self.store_resume(state).await?;
+        }
+        Ok(())
+    }
+
+    /// 在 I/O 开始前保存资源归属，已有状态只允许用于同一来源计划与端点。
+    pub(crate) async fn prepare_resume(
+        &mut self,
+        state: super::resume::ResumeState,
+    ) -> Result<(), TransferRunError> {
+        if self.file_retry {
+            return Ok(());
+        }
+        if let Some(previous) = &self.resume {
+            if previous.discarded || previous.manifest != state.manifest {
+                return Err(super::resume::changed());
+            }
+            log::info!(
+                "TRANSFER event=resuming task={} files={} confirmed_bytes={}",
+                self.task_id,
+                previous.files.len(),
+                previous.files.values().sum::<u64>()
+            );
+            return Ok(());
+        }
+        self.store_resume(state).await
+    }
+
+    pub(crate) async fn store_resume(
+        &mut self,
+        state: super::resume::ResumeState,
+    ) -> Result<(), TransferRunError> {
+        self.manager
+            .save_resume(&self.task_id, Some(state.clone()))
+            .await?;
+        self.resume = Some(state);
+        Ok(())
+    }
+
+    pub(crate) fn resume_offset(&self, file: &str) -> u64 {
+        self.resume
+            .as_ref()
+            .and_then(|state| state.files.get(file))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// 以有界字节窗口持久化，调用方必须先同步数据再推进确认前缀。
+    pub(crate) async fn save_offset(
+        &mut self,
+        file: &str,
+        offset: u64,
+    ) -> Result<(), TransferRunError> {
+        if self.resume.is_none() {
+            return Ok(());
+        }
+        self.manager
+            .save_resume_offset(&self.task_id, file, offset)
+            .await?;
+        self.resume
+            .as_mut()
+            .unwrap()
+            .files
+            .insert(file.into(), offset);
+        log::debug!(
+            "TRANSFER event=checkpoint task={} file={file} confirmed={offset}",
+            self.task_id
+        );
+        Ok(())
+    }
+
+    pub(crate) fn retains_partial(&self, result: &Result<(), TransferRunError>) -> bool {
+        self.resume.as_ref().is_some_and(|state| !state.discarded)
+            && result
+                .as_ref()
+                .err()
+                .is_some_and(super::resume::recoverable)
     }
 
     /// 创建复用原文件夹任务行的单文件重试上下文。
@@ -141,6 +230,7 @@ impl ExecutionContext {
     pub(crate) async fn begin_finalizing(&mut self) -> Result<(), TransferRunError> {
         self.flush_progress().await;
         self.flush_file_failures().await?;
+        self.end_resumable_bytes().await?;
         self.manager
             .begin_finalizing(&self.app, &self.task_id)
             .await

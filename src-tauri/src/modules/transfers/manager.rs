@@ -109,6 +109,10 @@ impl From<String> for TransferRunError {
         }
         let code = if value.contains(crate::modules::remote::channels::RESOURCE_BUSY) {
             TransferErrorCode::SessionBusy
+        } else if value.contains("SSH transport closed")
+            || value.contains("SSH transfer transport changed")
+        {
+            TransferErrorCode::ConnectionLost
         } else {
             TransferErrorCode::Internal
         };
@@ -342,6 +346,7 @@ pub(crate) struct TransferManager {
 }
 
 struct ManagedTask {
+    resume: Option<super::resume::ResumeState>,
     snapshot: TransferTaskSnapshot,
     request: EnqueueTransferRequest,
     journal_path: PathBuf,
@@ -374,7 +379,9 @@ impl TransferManager {
             self.ssh_scheduler
                 .run(control, async {
                     let manager = crate::modules::remote::manager::global_manager()?;
-                    let remote = manager.workspace(profile_id).await?;
+                    let remote = manager.workspace(profile_id).await.map_err(|error| {
+                        TransferRunError::failed(TransferErrorCode::ConnectionLost, error)
+                    })?;
                     let result = remote
                         .channels
                         .transfer_scope(&remote, id.to_string(), &control.cancellation, work)
@@ -388,6 +395,64 @@ impl TransferManager {
         } else {
             work.await
         }
+    }
+
+    pub(crate) async fn resume_state(&self, id: &str) -> Option<super::resume::ResumeState> {
+        self.tasks
+            .read()
+            .await
+            .get(id)
+            .and_then(|task| task.resume.clone())
+    }
+
+    pub(crate) async fn save_resume(
+        &self,
+        id: &str,
+        state: Option<super::resume::ResumeState>,
+    ) -> Result<(), TransferRunError> {
+        let path = self.journal_path(id).await?;
+        journal::append_resume(&path, state.as_ref()).await?;
+        self.tasks
+            .write()
+            .await
+            .get_mut(id)
+            .ok_or_else(|| task_not_found(id))?
+            .resume = state;
+        Ok(())
+    }
+
+    pub(crate) async fn save_resume_offset(
+        &self,
+        id: &str,
+        file: &str,
+        offset: u64,
+    ) -> Result<(), TransferRunError> {
+        let path = self.journal_path(id).await?;
+        journal::append_resume_offset(&path, file, offset).await?;
+        if let Some(state) = self
+            .tasks
+            .write()
+            .await
+            .get_mut(id)
+            .and_then(|task| task.resume.as_mut())
+        {
+            state.files.insert(file.into(), offset);
+        }
+        Ok(())
+    }
+
+    /// 放弃续传先持久化清理意图；清理失败时不删除历史及其精确路径授权。
+    async fn discard_resume(&self, id: &str) -> Result<bool, TransferRunError> {
+        let Some(mut state) = self.resume_state(id).await else {
+            return Ok(true);
+        };
+        state.discarded = true;
+        self.save_resume(id, Some(state.clone())).await?;
+        if !super::resume::cleanup(id, &state).await {
+            return Ok(false);
+        }
+        self.save_resume(id, None).await?;
+        Ok(true)
     }
 
     /// 创建具有固定并发上限的进程内任务管理器。
@@ -460,6 +525,7 @@ impl TransferManager {
             tasks.insert(
                 id.clone(),
                 ManagedTask {
+                    resume: None,
                     snapshot: snapshot.clone(),
                     request: request.clone(),
                     journal_path,
@@ -768,6 +834,16 @@ impl TransferManager {
             }
             task.journal_path.clone()
         };
+        if !self
+            .discard_resume(id)
+            .await
+            .map_err(|error| error.failure().unwrap())?
+        {
+            return Err(TransferFailure::new(
+                TransferErrorCode::InvalidTaskState,
+                "transfer resume data cleanup is still pending",
+            ));
+        }
         journal::remove(&journal_path).await?;
         let mut tasks = self.tasks.write().await;
         tasks.remove(id);
@@ -809,6 +885,9 @@ impl TransferManager {
         };
         let mut removed = Vec::new();
         for (id, path) in candidates {
+            if !matches!(self.discard_resume(&id).await, Ok(true)) {
+                continue;
+            }
             match journal::remove(&path).await {
                 Ok(()) => {
                     self.tasks.write().await.remove(&id);
@@ -825,7 +904,7 @@ impl TransferManager {
         removed
     }
 
-    /// 使用终态任务保留的原始请求创建一个全新的重试任务。
+    /// 有字节检查点时重新排队原任务，否则按原始请求创建全新任务。
     pub(crate) async fn retry(
         self: &Arc<Self>,
         app: AppHandle,
@@ -851,6 +930,45 @@ impl TransferManager {
             }
             task.request.clone()
         };
+        if self
+            .resume_state(id)
+            .await
+            .is_some_and(|state| !state.discarded)
+        {
+            let _enqueue = self.enqueue_operations.lock().await;
+            let control = Arc::new(TaskControl::new());
+            let (snapshot, previous) = {
+                let mut tasks = self.tasks.write().await;
+                ensure_active_capacity(&tasks)?;
+                let task = tasks.get_mut(id).ok_or_else(|| task_not_found(id))?;
+                if task.control.is_some() || !task.snapshot.status.is_terminal() {
+                    return Err(TransferFailure::new(
+                        TransferErrorCode::InvalidTaskState,
+                        "transfer is already running",
+                    ));
+                }
+                let previous = task.snapshot.clone();
+                let snapshot = &mut task.snapshot;
+                reset_for_resume(snapshot);
+                snapshot.updated_at = next_updated_at(snapshot.updated_at);
+                task.control = Some(control.clone());
+                (snapshot.clone(), previous)
+            };
+            if let Err(error) = self.persist_snapshot(id, &snapshot).await {
+                let mut tasks = self.tasks.write().await;
+                let task = tasks.get_mut(id).unwrap();
+                task.control = None;
+                task.snapshot = previous;
+                return Err(error);
+            }
+            emit_snapshot(&app, &snapshot);
+            let manager = self.clone();
+            let id = id.to_string();
+            tauri::async_runtime::spawn(async move {
+                manager.run_task(app, workspace, request, id, control).await;
+            });
+            return Ok(snapshot);
+        }
         self.enqueue(app, workspace, workspace_id, request).await
     }
 
@@ -868,47 +986,65 @@ impl TransferManager {
             return;
         }
 
-        let mut context =
-            ExecutionContext::new(self.clone(), app.clone(), id.clone(), control.clone());
-        let work = async {
-            self.set_stage(&app, &id, TransferStage::Scanning).await;
-            let mut prepared =
-                planner::prepare(&workspace, &request, &id, request.strategy, &mut context).await?;
-            let _reservation = self.scheduler.reserve(prepared.target_keys())?;
-            if request.sync.is_none()
-                && conflicts::resolve(&mut prepared, request.strategy, &mut context).await?
-            {
-                prepared.publish_totals(&mut context).await?;
-            }
-            let _permit = if matches!(workspace, WorkspaceEnv::Ssh { .. }) {
-                None
-            } else {
-                Some(self.scheduler.acquire(&control).await?)
+        // 原会话退出后最多重新排队一次，重新规划与校验，不无限重连。
+        for attempt in 0..2 {
+            let mut context =
+                ExecutionContext::new(self.clone(), app.clone(), id.clone(), control.clone());
+            context.resume = self.resume_state(&id).await;
+            let work = async {
+                self.set_stage(&app, &id, TransferStage::Scanning).await;
+                let mut prepared =
+                    planner::prepare(&workspace, &request, &id, request.strategy, &mut context)
+                        .await?;
+                let _reservation = self.scheduler.reserve(prepared.target_keys())?;
+                if request.sync.is_none()
+                    && conflicts::resolve(&mut prepared, request.strategy, &mut context).await?
+                {
+                    prepared.publish_totals(&mut context).await?;
+                }
+                let _permit = if matches!(workspace, WorkspaceEnv::Ssh { .. }) {
+                    None
+                } else {
+                    Some(self.scheduler.acquire(&control).await?)
+                };
+                match request.strategy {
+                    TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
+                    TransferStrategy::Archive => archive::execute(prepared, &mut context).await,
+                }
             };
-            match request.strategy {
-                TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
-                TransferStrategy::Archive => archive::execute(prepared, &mut context).await,
+            let mut result = self.run_queued(&workspace, &id, &control, work).await;
+            if let Err(error) = context.flush_pending().await {
+                if result.is_ok() {
+                    result = Err(error);
+                }
             }
-        };
-        let mut result = self.run_queued(&workspace, &id, &control, work).await;
-        if let Err(error) = context.flush_pending().await {
-            if result.is_ok() {
-                result = Err(error);
+            let retry = attempt == 0
+                && !control.is_cancelled()
+                && context.retains_partial(&result)
+                && matches!(&result, Err(TransferRunError::Failed(failure)) if matches!(failure.code, TransferErrorCode::RequestTimeout | TransferErrorCode::ConnectionLost));
+            if retry {
+                log::warn!("TRANSFER event=session_retry task={id} error={result:?}");
+                if let Err(error) = self.mutate_and_persist(&app, &id, reset_for_resume).await {
+                    self.finish_task(&app, &id, Err(error)).await;
+                    break;
+                }
+                continue;
             }
+            if should_emit_fs_changed(
+                request.direction,
+                result.is_ok(),
+                context.has_committed_roots(),
+            ) {
+                let _ = app.emit(
+                    "fs:changed",
+                    FsChangedPayload {
+                        paths: vec![request.destination.clone()],
+                    },
+                );
+            }
+            self.finish_task(&app, &id, result).await;
+            break;
         }
-        if should_emit_fs_changed(
-            request.direction,
-            result.is_ok(),
-            context.has_committed_roots(),
-        ) {
-            let _ = app.emit(
-                "fs:changed",
-                FsChangedPayload {
-                    paths: vec![request.destination.clone()],
-                },
-            );
-        }
-        self.finish_task(&app, &id, result).await;
     }
 
     /// 复用原文件夹任务执行一次 Direct 单文件重试，并把结果合并回原失败项。
@@ -1020,7 +1156,23 @@ impl TransferManager {
                 .and_then(TransferRunError::failure)
                 .map(|failure| failure.code)
         );
+        if let Err(error) = &result {
+            log::warn!("TRANSFER event=failed task={id} error={error:?}");
+        }
         let operation = self.history_operations.lock().await;
+        let preserve = result
+            .as_ref()
+            .err()
+            .is_some_and(super::resume::recoverable)
+            && self
+                .resume_state(id)
+                .await
+                .is_some_and(|state| !state.discarded);
+        if !preserve {
+            if let Err(error) = self.discard_resume(id).await {
+                log::warn!("TRANSFER event=resume_cleanup_failed task={id} error={error:?}");
+            }
+        }
         let snapshot = self
             .mutate_task(app, id, |task| {
                 task.stage = TransferStage::Finished;
@@ -1342,6 +1494,7 @@ impl TransferManager {
             let tasks = self.tasks.read().await;
             history_prune_ids(&tasks, MAX_HISTORY_TASKS)
                 .into_iter()
+                .filter(|id| tasks.get(id).is_some_and(|task| task.resume.is_none()))
                 .filter(|id| !has_deferred_cleanup(id))
                 .filter_map(|id| tasks.get(&id).map(|task| (id, task.journal_path.clone())))
                 .collect::<Vec<_>>()
@@ -1389,6 +1542,7 @@ impl TransferManager {
             tasks
                 .entry(task.snapshot.id.clone())
                 .or_insert(ManagedTask {
+                    resume: task.resume,
                     snapshot: task.snapshot,
                     request: task.request,
                     journal_path: task.path,
@@ -1414,7 +1568,7 @@ impl TransferManager {
     }
 
     /// 读取任务创建时固定的 Journal 路径。
-    async fn journal_path(&self, id: &str) -> Result<PathBuf, TransferFailure> {
+    pub(crate) async fn journal_path(&self, id: &str) -> Result<PathBuf, TransferFailure> {
         self.tasks
             .read()
             .await
@@ -1689,12 +1843,29 @@ fn should_emit_fs_changed(
     direction == TransferDirection::Upload && (succeeded || has_committed_roots)
 }
 
+/// 同一任务重新排队时保留身份和创建时间，清除上次执行的计数与展示状态。
+fn reset_for_resume(task: &mut TransferTaskSnapshot) {
+    task.status = TransferStatus::Queued;
+    task.stage = TransferStage::Queued;
+    task.failure = None;
+    task.conflict = None;
+    task.current_file = None;
+    task.file_failures.clear();
+    task.failed_files = 0;
+    task.transferred_bytes = 0;
+    task.completed_files = 0;
+    task.committed_roots = 0;
+    task.unprocessed_files = 0;
+    task.speed_bytes_per_second = 0;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn managed_task(id: &str, status: TransferStatus, created_at: u64) -> ManagedTask {
         ManagedTask {
+            resume: None,
             snapshot: TransferTaskSnapshot {
                 id: id.into(),
                 direction: TransferDirection::Upload,
@@ -1732,6 +1903,43 @@ mod tests {
             journal_path: PathBuf::from(format!("{id}.jsonl")),
             control: None,
         }
+    }
+
+    #[test]
+    fn resume_requeue_keeps_identity_and_clears_previous_attempt() {
+        let mut task = managed_task("original", TransferStatus::Failed, 42).snapshot;
+        task.failure = Some(TransferFailure::new(
+            TransferErrorCode::RequestTimeout,
+            "timeout",
+        ));
+        task.current_file = Some("previous-file".into());
+        task.transferred_bytes = 64;
+        task.unprocessed_files = 3;
+        task.speed_bytes_per_second = 128;
+        task.file_failures.push(TransferFileFailure {
+            id: "failure".into(),
+            source_path: "source".into(),
+            destination_path: "destination".into(),
+            failure: TransferFailure::new(TransferErrorCode::SourceUnavailable, "missing"),
+            attempts: 1,
+            ignored: false,
+        });
+        task.failed_files = 1;
+        reset_for_resume(&mut task);
+        assert_eq!((task.id.as_str(), task.created_at), ("original", 42));
+        assert_eq!(task.status, TransferStatus::Queued);
+        assert_eq!(task.stage, TransferStage::Queued);
+        assert!(task.failure.is_none() && task.current_file.is_none());
+        assert!(task.file_failures.is_empty());
+        assert_eq!(
+            (
+                task.transferred_bytes,
+                task.failed_files,
+                task.unprocessed_files,
+                task.speed_bytes_per_second
+            ),
+            (0, 0, 0, 0)
+        );
     }
 
     #[tokio::test]

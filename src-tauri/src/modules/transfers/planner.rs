@@ -715,7 +715,13 @@ async fn plan_remote_upload(
             join_remote(&destination_parent, &name)
         };
         let stage = remote_stage_path(&final_path, task.staging_id, root_index)?;
-        ensure_remote_target_available(&plan.session, &stage).await?;
+        if !context
+            .resume
+            .as_ref()
+            .is_some_and(|state| !state.discarded && state.remote_paths.contains(&stage))
+        {
+            ensure_remote_target_available(&plan.session, &stage).await?;
+        }
         plan.roots.push(RemoteRoot {
             source_path: source.to_string_lossy().into_owned(),
             stage: stage.clone(),
@@ -925,7 +931,13 @@ async fn plan_remote_download(
             destination_parent.join(destination_name)
         };
         let stage = local_stage_path(&final_path, task.staging_id, root_index)?;
-        ensure_local_target_available(&stage).await?;
+        if !context
+            .resume
+            .as_ref()
+            .is_some_and(|state| !state.discarded && state.local_paths.contains(&stage))
+        {
+            ensure_local_target_available(&stage).await?;
+        }
         plan.roots.push(LocalRoot {
             source_path: source.clone(),
             stage: stage.clone(),

@@ -30,6 +30,13 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "record", rename_all = "snake_case")]
 enum JournalRecord {
+    Resume {
+        state: Option<super::resume::ResumeState>,
+    },
+    ResumeOffset {
+        file: String,
+        offset: u64,
+    },
     Created {
         request: EnqueueTransferRequest,
         snapshot: TransferTaskSnapshot,
@@ -55,10 +62,41 @@ enum JournalRecord {
 
 /// 从 Journal 恢复的任务及其原始请求。
 pub(crate) struct LoadedTask {
+    pub(crate) resume: Option<super::resume::ResumeState>,
     pub(crate) request: EnqueueTransferRequest,
     pub(crate) snapshot: TransferTaskSnapshot,
     pub(crate) path: PathBuf,
     pub(crate) cleanup_tickets: Vec<CleanupTicket>,
+}
+
+pub(crate) async fn append_resume(
+    path: &Path,
+    state: Option<&super::resume::ResumeState>,
+) -> Result<(), TransferFailure> {
+    append_record(
+        path,
+        &JournalRecord::Resume {
+            state: state.cloned(),
+        },
+        "save transfer resume",
+    )
+    .await
+}
+
+pub(crate) async fn append_resume_offset(
+    path: &Path,
+    file: &str,
+    offset: u64,
+) -> Result<(), TransferFailure> {
+    append_record(
+        path,
+        &JournalRecord::ResumeOffset {
+            file: file.into(),
+            offset,
+        },
+        "save transfer offset",
+    )
+    .await
 }
 
 /// 追加一条 recovery 或 disposable 清理票据。
@@ -249,6 +287,13 @@ fn remove_workspace_files_blocking(root: &Path, workspace_id: Uuid) -> std::io::
             continue;
         };
         if Uuid::parse_str(task_id).is_ok() {
+            if read_task(&path)
+                .ok()
+                .flatten()
+                .is_some_and(|task| task.resume.is_some())
+            {
+                continue;
+            }
             fs::remove_file(path)?;
         }
     }
@@ -303,6 +348,7 @@ fn load_blocking(root: &Path, prefix: &str) -> std::io::Result<Vec<LoadedTask>> 
 
 fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
     let data = fs::read(path).map_err(|error| error.to_string())?;
+    let mut resume = None;
     let mut request = None;
     let mut snapshot = None;
     let mut cleanup_tickets = HashMap::new();
@@ -329,6 +375,12 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
             Err(error) => return Err(error.to_string()),
         };
         match record {
+            JournalRecord::Resume { state } => resume = state,
+            JournalRecord::ResumeOffset { file, offset } => {
+                if let Some(state) = resume.as_mut() {
+                    state.files.insert(file, offset);
+                }
+            }
             JournalRecord::Created {
                 request: created_request,
                 snapshot: created_snapshot,
@@ -377,6 +429,7 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
     }
     match (request, snapshot) {
         (Some(request), Some(snapshot)) => Ok(Some(LoadedTask {
+            resume,
             request,
             snapshot,
             path: path.to_path_buf(),
@@ -502,6 +555,62 @@ mod tests {
             created_at: 1,
             updated_at,
         }
+    }
+
+    #[test]
+    fn checkpoint_replay_keeps_original_archive_and_latest_confirmed_offset() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("resume.jsonl");
+        std::fs::File::create(&path).unwrap();
+        let request = EnqueueTransferRequest {
+            sync: None,
+            destination_name: None,
+            direction: TransferDirection::Download,
+            strategy: TransferStrategy::Archive,
+            sources: vec!["/models".into()],
+            destination: "models".into(),
+        };
+        append_blocking(
+            &path,
+            &JournalRecord::Created {
+                request,
+                snapshot: snapshot(TransferStatus::Running, 1),
+            },
+        )
+        .unwrap();
+        let archive = super::super::resume::ArchiveCheckpoint {
+            local: directory.path().join("partial"),
+            remote: "/tmp/original/payload.tar.gz".into(),
+            work_dir: "/tmp/original".into(),
+            size: 1024,
+            sha256: "original-digest".into(),
+            file_count: 4,
+        };
+        append_blocking(
+            &path,
+            &JournalRecord::Resume {
+                state: Some(super::super::resume::ResumeState {
+                    archive: Some(archive),
+                    ..Default::default()
+                }),
+            },
+        )
+        .unwrap();
+        for offset in [128, 512] {
+            append_blocking(
+                &path,
+                &JournalRecord::ResumeOffset {
+                    file: "archive".into(),
+                    offset,
+                },
+            )
+            .unwrap();
+        }
+        let recovered = read_task(&path).unwrap().unwrap().resume.unwrap();
+        assert_eq!(recovered.files["archive"], 512);
+        assert_eq!(recovered.archive.unwrap().sha256, "original-digest");
+        append_blocking(&path, &JournalRecord::Resume { state: None }).unwrap();
+        assert!(read_task(&path).unwrap().unwrap().resume.is_none());
     }
 
     #[test]

@@ -93,3 +93,5 @@ AI 性能验证同时记录 renderer 私有内存、JS 堆、Performance 记录�
 排查会话额度问题先检查正常原生日志的 `SSH_SESSION` 与 `TRANSFER` 记录。`connection` 标识一条 transport，`epoch` 对应运行时连接代次，`request` 关联一次申请，`channel` 对应已建立会话，传输另带 `task`。记录包括建立、等待、额度试探、服务端拒绝码及描述、占用摘要、回收与关闭确认；正常高频 SFTP 请求不逐次记录。
 
 `opened` 不等于新建网络连接，`closed` 表示服务端已确认 channel 关闭；本地发出关闭请求与确认之间仍计入占用。`server_rejected` 的原始原因与申请侧用途日志共同判断故障，不把所有 `ConnectFailed` 都当作额度不足。终端回收记录 PTY ID，页面同时说明原 Shell 已结束。日志不记录凭据、正文或完整命令。
+
+传输读取超时记录 `read_retry`，带任务、来源、偏移、长度、请求耗时及重试次数；`session_retry` 表示旧会话释放后重新排队，`resuming` 汇总恢复的连续确认字节。`request_timeout` 不代表已经确认 transport 断开，失败细节和 SSH 连接日志应结合判断。检查点逐次写入仅用 debug 日志，避免大文件正常传输刷屏。
