@@ -33,6 +33,32 @@ describe("统一终端关闭保护", () => {
     });
   });
 
+  it("只回收明确空闲且没有未提交输入的终端，关闭后不再写入", async () => {
+    const pty = await openPty(80, 24, { onData: vi.fn() });
+    expect(pty.isKnownIdle()).toBe(false);
+    report("idle", "?");
+    expect(pty.isKnownIdle()).toBe(false);
+    report("idle", "20");
+    expect(pty.isKnownIdle()).toBe(false);
+    report("idle");
+    expect(pty.isKnownIdle()).toBe(true);
+    await pty.write("echo pending");
+    report("idle");
+    expect(pty.isKnownIdle()).toBe(false);
+    await pty.write("\r", true);
+    report("running");
+    report("idle");
+    expect(pty.isKnownIdle()).toBe(true);
+    const close = pty.close(true);
+    expect(pty.isKnownIdle()).toBe(false);
+    await pty.write("must not be sent");
+    await close;
+    expect(native.invoke).toHaveBeenLastCalledWith("pty_close", {
+      id: 1,
+      reclaimed: true,
+    });
+  });
+
   it("空闲 WSL/SSH 无作业时不查询包装进程，运行内置命令时也保护", async () => {
     const pty = await openPty(80, 24, { onData: vi.fn() });
     report("idle");

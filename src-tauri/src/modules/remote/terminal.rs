@@ -89,8 +89,7 @@ pub async fn open(
     on_exit: Channel<i32>,
 ) -> Result<RemoteTerminalHandle, String> {
     let channel = workspace
-        .handle
-        .channel_open_session()
+        .open_session("terminal")
         .await
         .map_err(|e| format!("open remote terminal channel: {e}"))?;
     channel
@@ -124,8 +123,7 @@ pub(crate) async fn prepare(
         validate_remote_path(cwd)?;
     }
     let channel = workspace
-        .handle
-        .channel_open_session()
+        .open_session("terminal_prepared")
         .await
         .map_err(|error| format!("open prepared terminal channel: {error}"))?;
     channel

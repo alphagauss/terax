@@ -18,6 +18,16 @@ pub(crate) struct TransferScheduler {
 }
 
 impl TransferScheduler {
+    /// 先排队再轮询业务 future，保证扫描和会话申请不会在等待期间提前执行。
+    pub(crate) async fn run<T>(
+        &self,
+        control: &TaskControl,
+        work: impl std::future::Future<Output = Result<T, TransferRunError>>,
+    ) -> Result<T, TransferRunError> {
+        let _permit = self.acquire(control).await?;
+        work.await
+    }
+
     /// 创建具有固定运行上限的调度器。
     pub(crate) fn new(concurrency: usize) -> Self {
         Self {
@@ -126,6 +136,41 @@ impl Drop for TargetReservation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn queued_transfer_does_not_scan_or_open_sessions_and_cancel_wakes_it() {
+        let scheduler = Arc::new(TransferScheduler::new(1));
+        let running = TaskControl::new();
+        let permit = scheduler.acquire(&running).await.unwrap();
+        let queued = Arc::new(TaskControl::new());
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waiter = tokio::spawn({
+            let scheduler = scheduler.clone();
+            let queued = queued.clone();
+            let started = started.clone();
+            async move {
+                scheduler
+                    .run(&queued, async {
+                        started.store(true, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(!started.load(std::sync::atomic::Ordering::SeqCst));
+        queued.cancel();
+        assert!(matches!(
+            waiter.await.unwrap(),
+            Err(TransferRunError::Canceled)
+        ));
+        drop(permit);
+        assert!(!started.load(std::sync::atomic::Ordering::SeqCst));
+        scheduler
+            .run(&TaskControl::new(), async { Ok(()) })
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn paused_queued_task_does_not_hold_a_permit() {

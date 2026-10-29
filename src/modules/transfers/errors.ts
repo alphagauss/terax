@@ -19,6 +19,7 @@ const TRANSFER_ERROR_CODES = new Set<TransferErrorCode>([
   "connection_lost",
   "storage_full",
   "resource_limit",
+  "session_busy",
   "task_not_found",
   "invalid_task_state",
   "io_failed",

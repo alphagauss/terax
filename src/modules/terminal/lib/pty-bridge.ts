@@ -14,7 +14,8 @@ export type PtySession = {
   id: number;
   write: (data: string, commandSubmitted?: boolean) => Promise<void>;
   resize: (cols: number, rows: number) => Promise<void>;
-  close: () => Promise<void>;
+  close: (reclaimed?: boolean) => Promise<void>;
+  isKnownIdle: () => boolean;
   needsCloseConfirmation: () => Promise<boolean>;
 };
 
@@ -34,6 +35,7 @@ export async function openPty(
   let released = false;
   let openedId: number | null = null;
   let exitReceived = false;
+  let hasUnsubmittedInput = false;
   const noop = () => {};
   const releaseHandlers = () => {
     if (released) return;
@@ -44,7 +46,15 @@ export async function openPty(
 
   onData.onmessage = (buf) => {
     const bytes = new Uint8Array(buf);
+    const previous = activity.current;
     activity.feed(bytes);
+    if (
+      previous?.running &&
+      activity.current !== previous &&
+      !activity.current?.running
+    ) {
+      hasUnsubmittedInput = false;
+    }
     handlers.onData(bytes);
   };
   onExit.onmessage = (code) => {
@@ -83,6 +93,11 @@ export async function openPty(
 
   return {
     id,
+    isKnownIdle: () =>
+      !closed &&
+      !exitReceived &&
+      !hasUnsubmittedInput &&
+      knownCloseState() === false,
     needsCloseConfirmation: async () => {
       // 查询期间作业变化时重查一次；持续变化则保留确认，不无限等待。
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -106,6 +121,8 @@ export async function openPty(
     },
     // Raw bytes + id header: no JSON round-trip on the per-keystroke path.
     write: async (data, commandSubmitted = false) => {
+      if (closed || exitReceived) return;
+      if (data) hasUnsubmittedInput = true;
       const snapshot = activity.current;
       pendingWrites++;
       try {
@@ -121,11 +138,11 @@ export async function openPty(
       }
     },
     resize: (c, r) => invoke("pty_resize", { id, cols: c, rows: r }),
-    close: async () => {
+    close: async (reclaimed = false) => {
       if (closed) return;
       closed = true;
       try {
-        await invoke("pty_close", { id });
+        await invoke("pty_close", reclaimed ? { id, reclaimed: true } : { id });
       } finally {
         releaseHandlers();
       }

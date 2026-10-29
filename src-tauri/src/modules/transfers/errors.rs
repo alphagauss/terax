@@ -24,6 +24,7 @@ pub enum TransferErrorCode {
     ConnectionLost,
     StorageFull,
     ResourceLimit,
+    SessionBusy,
     TaskNotFound,
     InvalidTaskState,
     IoFailed,
@@ -52,6 +53,7 @@ impl TransferFailure {
                     | TransferErrorCode::DestinationBusy
                     | TransferErrorCode::ConnectionLost
                     | TransferErrorCode::StorageFull
+                    | TransferErrorCode::SessionBusy
                     | TransferErrorCode::IoFailed
                     | TransferErrorCode::Internal
             ),

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{oneshot, Mutex, Notify};
 
@@ -25,6 +25,8 @@ struct DirectoryKey {
 pub struct RemoteFs {
     pub(crate) session: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     pub(crate) read_session: Mutex<Option<Arc<sftp::RemoteReadSession>>>,
+    file_last_used: std::sync::Mutex<Option<Instant>>,
+    read_last_used: std::sync::Mutex<Option<Instant>>,
     directory_reads: Mutex<HashMap<DirectoryKey, Vec<oneshot::Sender<DirectoryResult>>>>,
     file_warmup_started: AtomicBool,
     first_directory_ready: AtomicBool,
@@ -32,6 +34,66 @@ pub struct RemoteFs {
 }
 
 impl RemoteFs {
+    pub(crate) fn touch_file(&self) {
+        *self.file_last_used.lock().unwrap() = Some(Instant::now());
+    }
+
+    pub(crate) fn touch_read(&self) {
+        *self.read_last_used.lock().unwrap() = Some(Instant::now());
+    }
+
+    /// 复用现有连接维护周期，后台文件资源不会永久占用空闲 SFTP。
+    pub(crate) async fn expire_idle(&self) {
+        self.reclaim(Duration::from_secs(30)).await;
+    }
+
+    /// 仅回收缓存自身持有的空闲会话，活跃请求的 Arc 保证不会被中途关闭。
+    pub(crate) async fn reclaim_idle(&self) -> bool {
+        self.reclaim(Duration::ZERO).await
+    }
+
+    async fn reclaim(&self, idle: Duration) -> bool {
+        let session = self.session.try_lock().ok().and_then(|mut slot| {
+            if slot
+                .as_ref()
+                .is_some_and(|session| Arc::strong_count(session) == 1)
+                && self
+                    .file_last_used
+                    .lock()
+                    .unwrap()
+                    .is_none_or(|used| used.elapsed() >= idle)
+            {
+                slot.take()
+            } else {
+                None
+            }
+        });
+        let read = self.read_session.try_lock().ok().and_then(|mut slot| {
+            if slot.as_ref().is_some_and(|session| {
+                Arc::strong_count(session) == 1 && Arc::strong_count(&session.session) == 1
+            }) && self
+                .read_last_used
+                .lock()
+                .unwrap()
+                .is_none_or(|used| used.elapsed() >= idle)
+            {
+                slot.take()
+            } else {
+                None
+            }
+        });
+        let reclaimed = session.is_some() || read.is_some();
+        if let Some(session) = session {
+            log::info!("SSH_SESSION event=reclaim purpose=file_metadata");
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), session.close()).await;
+        }
+        if let Some(read) = read {
+            log::info!("SSH_SESSION event=reclaim purpose=file_read");
+            let _ = read.session.close_session();
+        }
+        reclaimed
+    }
+
     /// 读取目录并合并相同的并发请求。
     pub async fn read_dir(
         &self,

@@ -1,15 +1,13 @@
 //! SSH 内部封闭任务的连接级运行时。
 //!
-//! 本模块集中管理任务 capability 与高 RTT 预开 channel。具体脚本、协议解析、业务
+//! 本模块集中管理任务 capability 与按需申请的 channel。具体脚本、协议解析、业务
 //! 回退和结果收敛仍由所属 service 负责，运行时不会接受来自前端的任意命令。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use russh::client::Msg;
-use russh::Channel;
+use super::channels::SessionChannel;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -28,8 +26,6 @@ pub(crate) mod sftp_fallback;
 pub(crate) mod tree_list;
 pub(crate) mod tree_summary;
 
-/// 高 RTT 连接才维持一个内部任务预开 channel，避免低延迟连接长期占用服务端资源。
-pub(crate) const TASK_PREHEAT_RTT_MS: u64 = 100;
 pub(crate) const TASK_OUTPUT_LIMIT: usize = 1024;
 
 /// 允许通过封闭任务运行时执行的内部操作。
@@ -121,14 +117,12 @@ enum Capability {
     Unavailable(String),
 }
 
-/// 当前 SSH epoch 的封闭任务 capability 与共享预热资源。
+/// 当前 SSH epoch 的封闭任务 capability。
 #[derive(Default)]
 pub(crate) struct RemoteTaskRuntime {
     capabilities: Mutex<HashMap<TaskKind, Capability>>,
     capability_snapshot: Mutex<SshCapabilitySnapshot>,
-    prepared_channel: AsyncMutex<Option<Channel<Msg>>>,
     pub(super) probe_lock: AsyncMutex<()>,
-    channel_preparing: AtomicBool,
 }
 
 impl RemoteTaskRuntime {
@@ -183,7 +177,11 @@ impl RemoteTaskRuntime {
         max_output: usize,
         cancellation: &CancellationToken,
     ) -> Result<ExecOutput, String> {
-        let channel = self.take_channel(workspace, task).await?;
+        let channel = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(super::session::EXEC_CANCELLED_ERROR.into()),
+            result = self.take_channel(workspace, task) => result?,
+        };
         workspace
             .exec_task_on_channel_cancellable(
                 channel,
@@ -298,81 +296,16 @@ impl RemoteTaskRuntime {
             .unwrap_or_default()
     }
 
-    /// 取得一个内部任务 channel，并在高 RTT 时异步补充单槽预热资源。
+    /// 任务开始时申请额度，命令结束即关闭，不维持空闲预热 channel。
     async fn take_channel(
         self: &Arc<Self>,
         workspace: &Arc<RemoteWorkspace>,
         task: TaskKind,
-    ) -> Result<Channel<Msg>, String> {
+    ) -> Result<SessionChannel, String> {
         if !self.should_attempt(task) {
             return Err("remote Bash task is unavailable".into());
         }
-        let prepared = self.prepared_channel.lock().await.take();
-        if !self.should_attempt(task) {
-            if let Some(channel) = prepared {
-                let _ = channel.close().await;
-            }
-            return Err("remote Bash task is unavailable".into());
-        }
-        if let Some(channel) = prepared {
-            self.prepare_channel(workspace);
-            return Ok(channel);
-        }
-        let channel = workspace.open_exec_channel().await?;
-        if !self.should_attempt(task) {
-            let _ = channel.close().await;
-            return Err("remote Bash task is unavailable".into());
-        }
-        self.prepare_channel(workspace);
-        Ok(channel)
-    }
-
-    /// 根据已有 RTT 样本后台维持一个内部任务预开 channel。
-    pub(crate) fn prepare_channel(self: &Arc<Self>, workspace: &Arc<RemoteWorkspace>) {
-        let runtime = self.clone();
-        let workspace = workspace.clone();
-        tauri::async_runtime::spawn(async move {
-            if !workspace.task_preheat_eligible() {
-                let channel = runtime.prepared_channel.lock().await.take();
-                if let Some(channel) = channel {
-                    let _ = channel.close().await;
-                }
-                return;
-            }
-            if runtime.prepared_channel.lock().await.is_some() {
-                return;
-            }
-            if runtime.channel_preparing.swap(true, Ordering::AcqRel) {
-                return;
-            }
-            let opened = workspace.open_exec_channel().await;
-            runtime.channel_preparing.store(false, Ordering::Release);
-            if let Ok(channel) = opened {
-                if workspace.task_preheat_eligible() {
-                    let close = {
-                        let mut slot = runtime.prepared_channel.lock().await;
-                        if slot.is_none() {
-                            *slot = Some(channel);
-                            None
-                        } else {
-                            Some(channel)
-                        }
-                    };
-                    if let Some(channel) = close {
-                        let _ = channel.close().await;
-                    }
-                } else {
-                    let _ = channel.close().await;
-                }
-            }
-        });
-    }
-
-    /// 关闭当前连接拥有的预热 channel。
-    pub(crate) async fn close(&self) {
-        if let Some(channel) = self.prepared_channel.lock().await.take() {
-            let _ = channel.close().await;
-        }
+        workspace.open_session(task.name()).await
     }
 }
 

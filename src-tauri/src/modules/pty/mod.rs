@@ -222,10 +222,18 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
-pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
+pub fn pty_close(
+    state: tauri::State<PtyState>,
+    id: u32,
+    reclaimed: Option<bool>,
+) -> Result<(), String> {
     if let Some(remote) = state.remote_sessions.write().unwrap().remove(&id) {
         remote.close();
-        log::info!("remote PTY closed id={id}");
+        log::info!(
+            "SSH_SESSION event=terminal_close epoch={} pty={id} reclaimed={}",
+            remote.workspace.epoch(),
+            reclaimed.unwrap_or(false)
+        );
         return Ok(());
     }
     let session = state.sessions.write().unwrap().remove(&id);

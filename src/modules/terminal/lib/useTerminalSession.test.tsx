@@ -38,6 +38,9 @@ vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: Object.assign(() => undefined, { getState: () => ({}) }),
 }));
 vi.mock("./pty-bridge", () => ({ openPty: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async () => vi.fn()),
+}));
 vi.mock("./agentActivity", () => ({
   ensureAgentActivityListener: vi.fn(),
   isAgentActivePty: () => false,
@@ -52,7 +55,11 @@ import {
   getLiveSlotForTerminal,
   type Slot,
 } from "./rendererPool";
-import { disposeSession, useTerminalSession } from "./useTerminalSession";
+import {
+  disposeSession,
+  reclaimIdleRemoteTerminal,
+  useTerminalSession,
+} from "./useTerminalSession";
 
 beforeAll(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -60,6 +67,52 @@ beforeAll(() => {
     configurable: true,
     value: { ready: Promise.resolve() },
   });
+});
+
+it("资源回收跳过前台和忙碌终端，旧 epoch 不生效，显示时才重建 Shell", async () => {
+  remote.enabled = true;
+  remote.phase = "connected";
+  const close = vi.fn(async () => {});
+  let idle = false;
+  vi.mocked(openPty).mockClear();
+  vi.mocked(openPty).mockResolvedValue({
+    close,
+    isKnownIdle: () => idle,
+    resize: vi.fn(),
+  } as never);
+  const container = { current: document.createElement("div") };
+  function Harness({ visible }: { visible: boolean }) {
+    useTerminalSession({ terminalId: 81, container, visible });
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(<Harness visible={true} />));
+    idle = true;
+    expect(reclaimIdleRemoteTerminal(remote.epoch)).toBe(false);
+    await act(async () => root.render(<Harness visible={false} />));
+    idle = false;
+    expect(reclaimIdleRemoteTerminal(remote.epoch)).toBe(false);
+    idle = true;
+    expect(reclaimIdleRemoteTerminal(remote.epoch - 1)).toBe(false);
+    expect(reclaimIdleRemoteTerminal(remote.epoch)).toBe(true);
+    expect(close).toHaveBeenCalledWith(true);
+    expect(reclaimIdleRemoteTerminal(remote.epoch)).toBe(false);
+    const opened = vi.mocked(openPty).mock.calls.length;
+    await act(async () => root.render(<Harness visible={false} />));
+    expect(openPty).toHaveBeenCalledTimes(opened);
+    remote.phase = "disconnected";
+    await act(async () => root.render(<Harness visible={true} />));
+    expect(openPty).toHaveBeenCalledTimes(opened);
+    remote.phase = "connected";
+    remote.epoch += 1;
+    await act(async () => root.render(<Harness visible={true} />));
+    expect(openPty).toHaveBeenCalledTimes(opened + 1);
+  } finally {
+    await act(async () => root.unmount());
+    disposeSession(81);
+    remote.enabled = false;
+  }
 });
 
 it("SSH 结果提示附带本机时间，重连过程不加时间且不重复刷屏", async () => {

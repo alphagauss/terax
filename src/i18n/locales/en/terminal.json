@@ -32,6 +32,9 @@
     "paste": "Paste"
   },
   "runtime": {
+    "sessionWaiting": "Waiting for an available SSH session. Existing tasks continue running.",
+    "sessionReclaimed": "This idle terminal released its SSH session. Showing this page starts a new shell; shell-local state is not preserved.",
+    "sessionBusy": "SSH sessions are busy. Close an idle terminal or wait for current operations to finish.",
     "shellStartFailed": "failed to start shell: {{detail}}",
     "pressEnterToRetry": "press Enter to retry"
   }

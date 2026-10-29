@@ -463,6 +463,7 @@ impl RemoteManager {
                         .await;
                     return;
                 }
+                workspace.remote_fs.expire_idle().await;
                 if !workspace.health_probe_due(IDLE_PROBE_AGE, MAX_RTT_AGE) {
                     continue;
                 }
@@ -474,7 +475,6 @@ impl RemoteManager {
                     TransportProbeOutcome::Sampled => {
                         if manager.is_current(&workspace, epoch, lifecycle.id).await {
                             Self::emit_health(&app, workspace.health_snapshot(epoch));
-                            workspace.prepare_task_channel();
                         }
                     }
                     TransportProbeOutcome::Failed => {
@@ -807,7 +807,6 @@ impl RemoteManager {
             TransportProbeOutcome::Sampled => {
                 if self.is_current(&workspace, epoch, lifecycle.id).await {
                     Self::emit_health(app, workspace.health_snapshot(epoch));
-                    workspace.prepare_task_channel();
                 }
             }
             TransportProbeOutcome::Failed => {

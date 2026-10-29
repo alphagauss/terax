@@ -166,6 +166,7 @@ pub(crate) async fn walk_cancellable(
 pub async fn session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
+    workspace.remote_fs.touch_file();
     let mut cached = workspace.remote_fs.session.lock().await;
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
@@ -187,13 +188,13 @@ pub async fn warm_file_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), S
 
 /// 返回目录和文件正文读取共享的 raw SFTP session。
 async fn read_session(workspace: &Arc<RemoteWorkspace>) -> Result<Arc<RemoteReadSession>, String> {
+    workspace.remote_fs.touch_read();
     let mut cached = workspace.remote_fs.read_session.lock().await;
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
     }
     let channel = workspace
-        .handle
-        .channel_open_session()
+        .open_session("file_read")
         .await
         .map_err(|error| format!("open directory SFTP channel: {error}"))?;
     channel
@@ -236,8 +237,7 @@ async fn open_cached_session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
     let channel = workspace
-        .handle
-        .channel_open_session()
+        .open_session("file_metadata")
         .await
         .map_err(|error| format!("open SFTP channel: {error}"))?;
     channel
@@ -1190,7 +1190,7 @@ async fn stage_remote_write_and_open_commit(
     target: &str,
     permissions: Option<u32>,
     content: &[u8],
-) -> Result<(String, russh::Channel<russh::client::Msg>), String> {
+) -> Result<(String, crate::modules::remote::channels::SessionChannel), String> {
     let temporary = temporary_sibling(target)?;
     let (stage_result, channel_result) = tokio::join!(
         stage_remote_write(workspace, sftp, &temporary, permissions, content),
@@ -1275,7 +1275,7 @@ async fn stage_remote_write(
 async fn replace_remote_file(
     workspace: &Arc<RemoteWorkspace>,
     sftp: &Arc<russh_sftp::client::SftpSession>,
-    channel: russh::Channel<russh::client::Msg>,
+    channel: crate::modules::remote::channels::SessionChannel,
     temporary: &str,
     target: &str,
 ) -> Result<Option<RemoteObservedVersion>, String> {

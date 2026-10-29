@@ -12,6 +12,7 @@ import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -123,11 +124,86 @@ type Session = {
   remoteEpoch: number | null;
   remoteSuspended: boolean;
   remoteNotice: RemoteNotice | null;
+  resourceReclaimed: boolean;
+  hiddenSince: number;
+  waitingNoticeGeneration: number;
 };
 
 type RemoteNotice = "closed" | "connecting" | "reconnecting" | "disconnected";
 
 const sessions = new Map<number, Session>();
+let pressureListenerBound = false;
+
+/** 压力下仅回收一个隐藏且明确空闲的 Shell；判定与冻结之间不让出事件循环。 */
+export function reclaimIdleRemoteTerminal(epoch: number): boolean {
+  if (currentRemoteEpoch() !== epoch) return false;
+  const candidates = [...sessions.entries()].sort(
+    (a, b) => a[1].hiddenSince - b[1].hiddenSince,
+  );
+  for (const [terminalId, s] of candidates) {
+    if (
+      s.disposed ||
+      s.visibleNow ||
+      s.ptyOpening ||
+      s.shellExited ||
+      s.remoteEpoch !== epoch ||
+      s.pendingInput ||
+      s.inputDraft ||
+      s.inputActive ||
+      s.submissionPending ||
+      s.submittedCommand ||
+      terminalBusy(s) ||
+      s.altScreenAtRelease ||
+      isTerminalAltScreen(terminalId) ||
+      !s.pty?.isKnownIdle?.()
+    )
+      continue;
+    const pty = s.pty;
+    s.spawnGeneration += 1;
+    s.pty = null;
+    s.shellExited = true;
+    s.resourceReclaimed = true;
+    s.pendingExit = null;
+    setTerminalCommandState(terminalId, "unavailable");
+    void pty
+      .close(true)
+      .catch((error) =>
+        console.error("[terax] reclaim terminal failed", terminalId, error),
+      );
+    deliverPtyBytes(
+      terminalId,
+      new TextEncoder().encode(
+        `\r\n[terax] ${i18n.t("terminal:runtime.sessionReclaimed")}\r\n`,
+      ),
+    );
+    scheduleHiddenRelease(terminalId, s);
+    return true;
+  }
+  return false;
+}
+
+function ensurePressureListener(): void {
+  if (pressureListenerBound || currentWorkspaceEnv().kind !== "ssh") return;
+  pressureListenerBound = true;
+  void listen<number>("terax://ssh-session-pressure", ({ payload }) => {
+    if (currentRemoteEpoch() !== payload) return;
+    for (const [terminalId, s] of sessions) {
+      if (s.ptyOpening && s.waitingNoticeGeneration !== s.spawnGeneration) {
+        s.waitingNoticeGeneration = s.spawnGeneration;
+        deliverPtyBytes(
+          terminalId,
+          new TextEncoder().encode(
+            `\r\n[terax] ${i18n.t("terminal:runtime.sessionWaiting")}\r\n`,
+          ),
+        );
+      }
+    }
+    reclaimIdleRemoteTerminal(payload);
+  }).catch((error) => {
+    pressureListenerBound = false;
+    console.error("[terax] SSH session pressure listener failed", error);
+  });
+}
 
 /** 返回当前 SSH Workspace 已连接的 Runtime epoch。 */
 function currentRemoteEpoch(): number | null {
@@ -615,6 +691,9 @@ function ensureSession(
     commandRunning: false,
     hiddenReleaseTimer: null,
     spawnFailed: false,
+    resourceReclaimed: false,
+    hiddenSince: Date.now(),
+    waitingNoticeGeneration: 0,
     spawnGeneration: 0,
     remoteEpoch,
     remoteSuspended,
@@ -654,6 +733,7 @@ async function openPtyWithRetry(
   try {
     return await openPtyForSession(terminalId, s, cwd, generation);
   } catch (e) {
+    if (String(e).includes("ssh_session_capacity_busy")) throw e;
     console.error("[terax] openPty failed, retrying once:", e);
     await new Promise((r) => setTimeout(r, SPAWN_RETRY_DELAY_MS));
     if (s.disposed || s.spawnGeneration !== generation) throw e;
@@ -668,7 +748,11 @@ function surfaceSpawnFailure(terminalId: number, s: Session, e: unknown): void {
   s.shellExited = true;
   s.spawnFailed = true;
   setTerminalCommandState(terminalId, "unavailable");
-  const detail = String(e)
+  const detail = (
+    String(e).includes("ssh_session_capacity_busy")
+      ? i18n.t("terminal:runtime.sessionBusy")
+      : String(e)
+  )
     .replace(/[\x00-\x1f\x7f]/g, " ")
     .slice(0, 300);
   deliverPtyBytes(
@@ -1006,6 +1090,7 @@ export async function respawnSession(
   setTerminalCommandState(terminalId, "unknown");
   s.spawnFailed = false;
   s.remoteEpoch = currentRemoteEpoch();
+  s.resourceReclaimed = false;
   s.remoteSuspended = false;
   s.remoteNotice = null;
   cancelHiddenRelease(s);
@@ -1153,6 +1238,9 @@ export function useTerminalSession({
   onExit,
   onCwd,
 }: Options) {
+  useEffect(() => {
+    ensurePressureListener();
+  }, []);
   const remoteBinding = useRemoteRuntimeStore((state) => {
     const workspace = currentWorkspaceEnv();
     const runtime = state.snapshot;
@@ -1193,6 +1281,16 @@ export function useTerminalSession({
   useEffect(() => {
     if (remoteBinding === "local") return;
     const s = ensureSession(terminalId, initialCwdRef.current, blocks);
+    if (s.resourceReclaimed) {
+      if (s.visibleNow && typeof remoteBinding === "number") {
+        void respawnSession(
+          terminalId,
+          s.lastCwd ?? initialCwdRef.current,
+          "preserve-history",
+        );
+      }
+      return;
+    }
     if (typeof remoteBinding !== "number") {
       suspendRemoteSession(terminalId, s, remoteBinding);
       return;
@@ -1267,8 +1365,16 @@ export function useTerminalSession({
     const s = sessions.get(terminalId);
     if (!s) return;
     s.visibleNow = visible;
+    if (!visible) s.hiddenSince = Date.now();
     s.focusedNow = focused;
     if (visible) {
+      if (s.resourceReclaimed && currentRemoteEpoch() !== null) {
+        void respawnSession(
+          terminalId,
+          s.lastCwd ?? s.initialCwd,
+          "preserve-history",
+        );
+      }
       cancelHiddenRelease(s);
       if (s.container && !s.hasSlot) bindTerminalToSlot(terminalId, s);
       else if (s.hasSlot) refreshTerminalSlot(terminalId);

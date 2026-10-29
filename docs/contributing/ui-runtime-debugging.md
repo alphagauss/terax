@@ -87,3 +87,9 @@ AI 性能验证同时记录 renderer 私有内存、JS 堆、Performance 记录�
 只检查受影响元素、状态及其所属链路。布局收集 rectangle、client/scroll size 与计算样式；命中使用 elementFromPoint；焦点和重挂载检查 DOM identity、key 与 activeElement。截图用于外观，不能替代命中或生命周期证据。
 
 结束时移除临时日志并停止本次启动的前台命令，必要时只清理已记录 PID 的子进程，不按进程名批量终止。按 [测试指南](testing.md) 验证受影响代码。
+
+## SSH 会话资源日志
+
+排查会话额度问题先检查正常原生日志的 `SSH_SESSION` 与 `TRANSFER` 记录。`connection` 标识一条 transport，`epoch` 对应运行时连接代次，`request` 关联一次申请，`channel` 对应已建立会话，传输另带 `task`。记录包括建立、等待、额度试探、服务端拒绝码及描述、占用摘要、回收与关闭确认；正常高频 SFTP 请求不逐次记录。
+
+`opened` 不等于新建网络连接，`closed` 表示服务端已确认 channel 关闭；本地发出关闭请求与确认之间仍计入占用。`server_rejected` 的原始原因与申请侧用途日志共同判断故障，不把所有 `ConnectFailed` 都当作额度不足。终端回收记录 PTY ID，页面同时说明原 Shell 已结束。日志不记录凭据、正文或完整命令。

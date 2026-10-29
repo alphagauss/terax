@@ -2,7 +2,7 @@
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
 //! channel。激活终端可在同一 PTY 中确认 Workspace root；两类 SFTP 从认证完成后预热，
-//! 文件保存可在上传期间预开提交 channel，内部 Bash 任务复用高 RTT 单槽预开 channel，
+//! 文件保存可在上传期间预开提交 channel，所有 session 经统一额度准入，
 //! transport 失败和 RTT 统一进入进程级健康监督器。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
@@ -22,6 +22,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
+use super::channels::{SessionChannel, SessionChannels};
 use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
 use super::models::{
@@ -29,7 +30,7 @@ use super::models::{
     SshProfile, SshTaskFallback,
 };
 use super::remote_fs::RemoteFs;
-use super::tasks::{RemoteTaskRuntime, TaskKind, TASK_PREHEAT_RTT_MS};
+use super::tasks::{RemoteTaskRuntime, TaskKind};
 use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
@@ -47,6 +48,7 @@ pub struct ClientHandler {
     pub cancellation: CancellationToken,
     host_key_rejected: Arc<AtomicBool>,
     health: Arc<SshTransportHealth>,
+    pub(crate) channels: Arc<SessionChannels>,
 }
 
 impl Handler for ClientHandler {
@@ -80,6 +82,7 @@ impl Handler for ClientHandler {
         reason: russh::client::DisconnectReason<Self::Error>,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
         let health = self.health.clone();
+        self.channels.disconnect();
         async move {
             health.mark_failed();
             match reason {
@@ -87,6 +90,27 @@ impl Handler for ClientHandler {
                 russh::client::DisconnectReason::Error(error) => Err(error),
             }
         }
+    }
+
+    async fn channel_close(
+        &mut self,
+        channel: russh::ChannelId,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        self.channels.closed(channel.into());
+        Ok(())
+    }
+
+    async fn channel_open_failure(
+        &mut self,
+        channel: russh::ChannelId,
+        reason: russh::ChannelOpenFailure,
+        description: &str,
+        _language: &str,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        log::warn!("SSH_SESSION event=server_rejected connection={} profile={} channel={channel} reason={reason:?} description={description:?}", self.channels.connection, self.profile_id);
+        Ok(())
     }
 
     fn server_channel_open_forwarded_tcpip(
@@ -142,6 +166,7 @@ pub struct RemoteWorkspace {
     secret: Zeroizing<String>,
     proxy_secret_override: Option<Zeroizing<String>>,
     health: Arc<SshTransportHealth>,
+    pub(crate) channels: Arc<SessionChannels>,
     probe_lock: Mutex<()>,
     pub(crate) tasks: Arc<RemoteTaskRuntime>,
     runtime_epoch: AtomicU64,
@@ -211,6 +236,31 @@ impl From<&str> for ConnectFailure {
 }
 
 impl RemoteWorkspace {
+    /// 资源回收请求按连接合并，前端只处理当前 epoch 的隐藏空闲终端。
+    pub(crate) fn request_session_reclaim(&self) -> bool {
+        if self.channels.request_reclaim() {
+            log::info!(
+                "SSH_SESSION event=terminal_reclaim_requested connection={} epoch={}",
+                self.channels.connection,
+                self.epoch()
+            );
+            return tauri::Emitter::emit(&self.app, "terax://ssh-session-pressure", self.epoch())
+                .is_ok();
+        }
+        false
+    }
+
+    pub(crate) fn epoch(&self) -> u64 {
+        self.runtime_epoch.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn open_session(
+        &self,
+        purpose: &'static str,
+    ) -> Result<SessionChannel, String> {
+        self.channels.open(self, purpose).await
+    }
+
     /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
     ///
     /// SFTP 与环境探测并行预热，但只由首次文件请求观察其结果，避免文件子系统阻塞终端。
@@ -274,24 +324,27 @@ impl RemoteWorkspace {
         let config = Arc::new(client_config());
 
         let remote_forwards = RemoteForwardRegistry::default();
+        let mut channels = Arc::new(SessionChannels::default());
         let host_key_rejected = Arc::new(AtomicBool::new(false));
-        let handler = |health: Arc<SshTransportHealth>| ClientHandler {
-            app: app.clone(),
-            profile_id: profile.id.clone(),
-            host: profile.host.clone(),
-            port: profile.port,
-            host_keys: host_keys.clone(),
-            remote_forwards: remote_forwards.clone(),
-            cancellation: cancellation.clone(),
-            host_key_rejected: host_key_rejected.clone(),
-            health,
-        };
+        let handler =
+            |health: Arc<SshTransportHealth>, channels: Arc<SessionChannels>| ClientHandler {
+                app: app.clone(),
+                profile_id: profile.id.clone(),
+                host: profile.host.clone(),
+                port: profile.port,
+                host_keys: host_keys.clone(),
+                remote_forwards: remote_forwards.clone(),
+                cancellation: cancellation.clone(),
+                host_key_rejected: host_key_rejected.clone(),
+                health,
+                channels,
+            };
         let mut health = Arc::new(SshTransportHealth::new());
         let mut handle = connect_transport(
             &profile,
             proxy.as_ref(),
             config.clone(),
-            handler(health.clone()),
+            handler(health.clone(), channels.clone()),
             traffic.clone(),
             health.clone(),
         )
@@ -313,11 +366,12 @@ impl RemoteWorkspace {
                 .await;
             handle = {
                 health = Arc::new(SshTransportHealth::new());
+                channels = Arc::new(SessionChannels::default());
                 connect_transport(
                     &profile,
                     proxy.as_ref(),
                     config,
-                    handler(health.clone()),
+                    handler(health.clone(), channels.clone()),
                     traffic,
                     health.clone(),
                 )
@@ -342,6 +396,7 @@ impl RemoteWorkspace {
             secret,
             proxy_secret_override,
             health,
+            channels,
             probe_lock: Mutex::new(()),
             tasks: Arc::new(RemoteTaskRuntime::default()),
             runtime_epoch: AtomicU64::new(0),
@@ -423,7 +478,6 @@ impl RemoteWorkspace {
         let probe_elapsed = probe_started_at.elapsed();
         *workspace.login_home.write().await = probe.login_home;
         *workspace.home.write().await = probe.root.clone();
-        workspace.prepare_task_channel();
         if prime_filesystem {
             let primed_workspace = workspace.clone();
             let primed_root = probe.root;
@@ -517,18 +571,6 @@ impl RemoteWorkspace {
         }
     }
 
-    /// 后台只为高 RTT 连接维持内部任务单槽 channel。
-    ///
-    /// 兼容入口由现有连接和健康监督器调用，预热不参与后端选择。
-    pub(crate) fn prepare_task_channel(self: &Arc<Self>) {
-        self.tasks.prepare_channel(self);
-    }
-
-    /// 返回当前 RTT 是否值得为内部任务维持一个空闲 channel。
-    pub(crate) fn task_preheat_eligible(&self) -> bool {
-        task_preheat_eligible(self.health.snapshot(0).rtt_ms)
-    }
-
     /// 等待 Explorer 首个目录完成，供非前台资源避免争抢启动 transport。
     pub async fn wait_for_foreground_filesystem(&self) {
         self.remote_fs.wait_for_first_directory().await;
@@ -606,6 +648,7 @@ impl RemoteWorkspace {
     /// 在固定截止时间内尽力关闭旧 transport，不允许失效连接阻塞新 epoch。
     pub async fn disconnect(&self) {
         self.health.mark_failed();
+        self.channels.disconnect();
         // SFTP 可能正在初始化并持有锁，关闭 transport 不能反过来等待它。
         let sftp = self
             .remote_fs
@@ -620,7 +663,6 @@ impl RemoteWorkspace {
             .ok()
             .and_then(|mut session| session.take());
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
-            self.tasks.close().await;
             if let Some(sftp) = sftp {
                 let _ = sftp.close().await;
             }
@@ -650,11 +692,8 @@ impl RemoteWorkspace {
     /// 预开一个尚未发送命令的 session channel。
     ///
     /// 调用方必须在不再使用时执行命令或关闭 channel，避免长期占用服务端资源。
-    pub(crate) async fn open_exec_channel(&self) -> Result<russh::Channel<Msg>, String> {
-        self.handle
-            .channel_open_session()
-            .await
-            .map_err(|error| format!("open SSH exec channel: {error}"))
+    pub(crate) async fn open_exec_channel(&self) -> Result<SessionChannel, String> {
+        self.open_session("exec").await
     }
 
     /// 在已打开的 session channel 上执行一次命令。
@@ -663,7 +702,7 @@ impl RemoteWorkspace {
     /// `fsync` 成功后发送，不能提前观察或替换未完成的临时文件。
     pub(crate) async fn exec_on_channel(
         &self,
-        channel: russh::Channel<Msg>,
+        channel: SessionChannel,
         command: &str,
         cwd: Option<&str>,
         timeout: Duration,
@@ -678,7 +717,7 @@ impl RemoteWorkspace {
     /// 背压。命令一旦发送，后续错误必须被调用方视为结果可能不明确。
     pub(crate) async fn exec_on_channel_with_input(
         &self,
-        channel: russh::Channel<Msg>,
+        channel: SessionChannel,
         command: &str,
         input: Vec<u8>,
         timeout: Duration,
@@ -691,7 +730,7 @@ impl RemoteWorkspace {
     /// 执行可取消的内部只读任务，取消后主动关闭所属 channel。
     pub(crate) async fn exec_task_on_channel_cancellable(
         &self,
-        channel: russh::Channel<Msg>,
+        channel: SessionChannel,
         command: &str,
         input: Vec<u8>,
         timeout: Duration,
@@ -724,7 +763,7 @@ fn build_exec_command(command: &str, cwd: Option<&str>) -> Result<String, String
 
 /// 在已打开的 channel 上发送命令，并有界收集完成状态和输出。
 async fn run_exec_channel(
-    channel: russh::Channel<Msg>,
+    channel: SessionChannel,
     command: String,
     timeout: Duration,
 ) -> Result<ExecOutput, String> {
@@ -733,7 +772,7 @@ async fn run_exec_channel(
 
 /// 发送命令和可选标准输入，并有界收集完成状态与输出。
 async fn run_exec_channel_with_input(
-    mut channel: russh::Channel<Msg>,
+    mut channel: SessionChannel,
     command: String,
     input: Option<Vec<u8>>,
     timeout: Duration,
@@ -1025,11 +1064,6 @@ pub(crate) fn parse_workspace_probe_bytes(
     Ok(WorkspaceProbe { login_home, root })
 }
 
-/// 只在已有高 RTT 样本时占用一个空闲 channel 隐藏下次任务打开往返。
-fn task_preheat_eligible(rtt_ms: Option<u64>) -> bool {
-    rtt_ms.is_some_and(|rtt| rtt >= TASK_PREHEAT_RTT_MS)
-}
-
 #[derive(Default, Debug)]
 /// 一次远端命令执行的有界输出。
 pub struct ExecOutput {
@@ -1283,8 +1317,8 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 mod path_tests {
     use super::{
         build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
-        password_auth_result, task_preheat_eligible, workspace_root_assignment, ConnectFailure,
-        ExecCompletion, ExecOutput, PrimaryAuthResult,
+        password_auth_result, workspace_root_assignment, ConnectFailure, ExecCompletion,
+        ExecOutput, PrimaryAuthResult,
     };
     use bytes::Bytes;
     use russh::ChannelMsg;
@@ -1316,14 +1350,6 @@ mod path_tests {
             "requested='/srv/code'"
         );
         assert!(workspace_root_assignment("bad\npath").is_err());
-    }
-
-    #[test]
-    fn task_channel_preheats_only_for_a_stable_high_latency_sample() {
-        assert!(!task_preheat_eligible(None));
-        assert!(!task_preheat_eligible(Some(99)));
-        assert!(task_preheat_eligible(Some(100)));
-        assert!(task_preheat_eligible(Some(200)));
     }
 
     #[test]

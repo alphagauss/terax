@@ -3,6 +3,7 @@
 //! 当前 Workspace 进程独占一条 transport；profile、凭据和连接状态均由 Rust 管理，
 //! WebView 只提交稳定 profile ID 或一次性凭据覆盖值。
 
+pub(crate) mod channels;
 pub mod commands;
 pub(crate) mod file_service;
 mod health;

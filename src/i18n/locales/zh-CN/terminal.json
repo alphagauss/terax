@@ -32,6 +32,9 @@
     "paste": "粘贴"
   },
   "runtime": {
+    "sessionWaiting": "正在等待可用的 SSH 会话，已有任务继续运行。",
+    "sessionReclaimed": "此空闲终端已释放 SSH 会话。显示此页面时会启动新 Shell，原 Shell 的临时状态不会保留。",
+    "sessionBusy": "SSH 会话资源繁忙。请关闭空闲终端，或等待当前操作完成。",
     "shellStartFailed": "Shell 启动失败：{{detail}}",
     "pressEnterToRetry": "按回车键重试"
   }

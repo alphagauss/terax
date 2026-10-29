@@ -453,7 +453,7 @@ async fn execute_remote_commit(
     let channel = workspace
         .open_exec_channel()
         .await
-        .map_err(|error| message(format!("{operation}: {error}")))?;
+        .map_err(TransferRunError::from)?;
     let output = workspace
         .exec_on_channel_with_input(
             channel,

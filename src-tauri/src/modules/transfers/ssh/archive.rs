@@ -450,10 +450,9 @@ async fn run_remote_with_input(
     output_limit: usize,
 ) -> RunResult<ExecOutput> {
     let mut channel = workspace
-        .handle
-        .channel_open_session()
+        .open_session("transfer_command")
         .await
-        .map_err(|error| message(format!("open archive command channel: {error}")))?;
+        .map_err(TransferRunError::from)?;
     channel
         .exec(true, command.as_bytes())
         .await

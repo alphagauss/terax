@@ -104,7 +104,15 @@ pub(crate) enum TransferRunError {
 
 impl From<String> for TransferRunError {
     fn from(value: String) -> Self {
-        Self::failed(TransferErrorCode::Internal, value)
+        if value.contains(crate::modules::remote::session::EXEC_CANCELLED_ERROR) {
+            return Self::Canceled;
+        }
+        let code = if value.contains(crate::modules::remote::channels::RESOURCE_BUSY) {
+            TransferErrorCode::SessionBusy
+        } else {
+            TransferErrorCode::Internal
+        };
+        Self::failed(code, value)
     }
 }
 
@@ -327,6 +335,7 @@ impl TaskControl {
 pub(crate) struct TransferManager {
     tasks: RwLock<HashMap<String, ManagedTask>>,
     scheduler: TransferScheduler,
+    ssh_scheduler: TransferScheduler,
     journal_loaded: Mutex<bool>,
     enqueue_operations: Mutex<()>,
     history_operations: Mutex<()>,
@@ -352,11 +361,41 @@ impl TransferManager {
             .map_err(|error| error.to_string())?
     }
 
+    /// SSH 从扫描起独占传输运行资格；等待者不会提前打开远端 session。
+    async fn run_queued(
+        &self,
+        workspace: &WorkspaceEnv,
+        id: &str,
+        control: &TaskControl,
+        work: impl std::future::Future<Output = Result<(), TransferRunError>>,
+    ) -> Result<(), TransferRunError> {
+        log::info!("TRANSFER event=queued task={id}");
+        if let WorkspaceEnv::Ssh { profile_id } = workspace {
+            self.ssh_scheduler
+                .run(control, async {
+                    let manager = crate::modules::remote::manager::global_manager()?;
+                    let remote = manager.workspace(profile_id).await?;
+                    let result = remote
+                        .channels
+                        .transfer_scope(&remote, id.to_string(), &control.cancellation, work)
+                        .await;
+                    if control.is_cancelled() {
+                        return Err(TransferRunError::Canceled);
+                    }
+                    result?
+                })
+                .await
+        } else {
+            work.await
+        }
+    }
+
     /// 创建具有固定并发上限的进程内任务管理器。
     fn new(concurrency: usize) -> Self {
         Self {
             tasks: RwLock::new(HashMap::new()),
             scheduler: TransferScheduler::new(concurrency),
+            ssh_scheduler: TransferScheduler::new(1),
             journal_loaded: Mutex::new(false),
             enqueue_operations: Mutex::new(()),
             history_operations: Mutex::new(()),
@@ -459,6 +498,7 @@ impl TransferManager {
     pub(crate) async fn pause(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.pause();
+        log::info!("TRANSFER event=pause task={id}");
         self.mutate_task(app, id, |task| {
             if matches!(
                 task.status,
@@ -476,6 +516,7 @@ impl TransferManager {
     pub(crate) async fn resume(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.resume();
+        log::info!("TRANSFER event=resume task={id}");
         self.mutate_task(app, id, |task| {
             if task.status == TransferStatus::Paused {
                 task.status = resumed_status(task.stage);
@@ -489,6 +530,7 @@ impl TransferManager {
     pub(crate) async fn cancel(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.cancel();
+        log::info!("TRANSFER event=cancel task={id}");
         self.mutate_task(app, id, |task| {
             if !task.status.is_terminal() {
                 task.status = TransferStatus::Canceling;
@@ -826,10 +868,10 @@ impl TransferManager {
             return;
         }
 
-        self.set_stage(&app, &id, TransferStage::Scanning).await;
         let mut context =
             ExecutionContext::new(self.clone(), app.clone(), id.clone(), control.clone());
-        let mut result = async {
+        let work = async {
+            self.set_stage(&app, &id, TransferStage::Scanning).await;
             let mut prepared =
                 planner::prepare(&workspace, &request, &id, request.strategy, &mut context).await?;
             let _reservation = self.scheduler.reserve(prepared.target_keys())?;
@@ -838,13 +880,17 @@ impl TransferManager {
             {
                 prepared.publish_totals(&mut context).await?;
             }
-            let _permit = self.scheduler.acquire(&control).await?;
+            let _permit = if matches!(workspace, WorkspaceEnv::Ssh { .. }) {
+                None
+            } else {
+                Some(self.scheduler.acquire(&control).await?)
+            };
             match request.strategy {
                 TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
                 TransferStrategy::Archive => archive::execute(prepared, &mut context).await,
             }
-        }
-        .await;
+        };
+        let mut result = self.run_queued(&workspace, &id, &control, work).await;
         if let Err(error) = context.flush_pending().await {
             if result.is_ok() {
                 result = Err(error);
@@ -875,7 +921,6 @@ impl TransferManager {
         failure_id: String,
         control: Arc<TaskControl>,
     ) {
-        self.set_stage(&app, &id, TransferStage::Scanning).await;
         let mut context = ExecutionContext::new_file_retry(
             self.clone(),
             app.clone(),
@@ -884,7 +929,8 @@ impl TransferManager {
         );
         // 每次重试使用独立 staging 身份，避免断线清理尚未完成时撞上前一次临时路径。
         let execution_id = Uuid::new_v4().to_string();
-        let mut result = async {
+        let work = async {
+            self.set_stage(&app, &id, TransferStage::Scanning).await;
             control.checkpoint().await?;
             let mut prepared = planner::prepare(
                 &workspace,
@@ -898,10 +944,14 @@ impl TransferManager {
             if conflicts::resolve(&mut prepared, TransferStrategy::Direct, &mut context).await? {
                 prepared.publish_totals(&mut context).await?;
             }
-            let _permit = self.scheduler.acquire(&control).await?;
+            let _permit = if matches!(workspace, WorkspaceEnv::Ssh { .. }) {
+                None
+            } else {
+                Some(self.scheduler.acquire(&control).await?)
+            };
             direct::execute(prepared, &mut context).await
-        }
-        .await;
+        };
+        let mut result = self.run_queued(&workspace, &id, &control, work).await;
         if let Err(error) = context.flush_pending().await {
             if result.is_ok() {
                 result = Err(error);
@@ -957,6 +1007,19 @@ impl TransferManager {
 
     /// 将执行结果转换为稳定终态，并移除暂停和取消控制句柄。
     async fn finish_task(&self, app: &AppHandle, id: &str, result: Result<(), TransferRunError>) {
+        let outcome = match &result {
+            Ok(()) => "completed",
+            Err(TransferRunError::Canceled) => "canceled",
+            Err(TransferRunError::Failed(_)) => "failed",
+        };
+        log::info!(
+            "TRANSFER event=execution_finished task={id} outcome={outcome} code={:?}",
+            result
+                .as_ref()
+                .err()
+                .and_then(TransferRunError::failure)
+                .map(|failure| failure.code)
+        );
         let operation = self.history_operations.lock().await;
         let snapshot = self
             .mutate_task(app, id, |task| {
@@ -1053,6 +1116,7 @@ impl TransferManager {
 
     /// 推进任务阶段，首次离开队列时同步进入运行态。
     pub(crate) async fn set_stage(&self, app: &AppHandle, id: &str, stage: TransferStage) {
+        log::info!("TRANSFER event=stage task={id} stage={stage:?}");
         let _ = self
             .mutate_task(app, id, |task| {
                 task.stage = stage;
@@ -1106,6 +1170,7 @@ impl TransferManager {
     ) -> Result<(), TransferRunError> {
         self.mutate_and_persist(app, id, |task| {
             task.status = TransferStatus::AwaitingDecision;
+            log::info!("TRANSFER event=awaiting_decision task={id}");
             task.stage = TransferStage::CheckingConflicts;
             task.conflict = Some(conflict);
             task.speed_bytes_per_second = 0;

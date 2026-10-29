@@ -22,7 +22,7 @@ pub(crate) enum RemoteCommit {
 /// 在预开 channel 上替换目标，并返回同一进程观察到的最终元数据。
 pub(crate) async fn replace(
     workspace: &Arc<RemoteWorkspace>,
-    channel: russh::Channel<russh::client::Msg>,
+    channel: crate::modules::remote::channels::SessionChannel,
     temporary: &str,
     target: &str,
 ) -> Result<Option<RemoteObservedVersion>, String> {
@@ -82,7 +82,7 @@ pub(crate) async fn sha256(workspace: &Arc<RemoteWorkspace>, path: &str) -> Resu
 /// 按 expected revision 原子提交 SFTP 临时文件。
 pub(crate) async fn commit_checked(
     workspace: &Arc<RemoteWorkspace>,
-    channel: russh::Channel<russh::client::Msg>,
+    channel: crate::modules::remote::channels::SessionChannel,
     temporary: &str,
     target: &str,
     expected_revision: &str,
@@ -113,7 +113,7 @@ pub(crate) async fn commit_checked(
 /// 仅在目标仍缺失时原子发布 SFTP 临时文件。
 pub(crate) async fn commit_missing(
     workspace: &Arc<RemoteWorkspace>,
-    channel: russh::Channel<russh::client::Msg>,
+    channel: crate::modules::remote::channels::SessionChannel,
     temporary: &str,
     target: &str,
 ) -> Result<RemoteCommit, String> {

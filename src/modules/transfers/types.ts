@@ -18,6 +18,7 @@ export type TransferErrorCode =
   | "permission_denied"
   | "connection_lost"
   | "storage_full"
+  | "session_busy"
   | "resource_limit"
   | "task_not_found"
   | "invalid_task_state"

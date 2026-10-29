@@ -94,6 +94,7 @@
       "permission_denied": "Permission was denied while accessing a transfer path.",
       "connection_lost": "The connection was interrupted.",
       "storage_full": "The destination does not have enough free space.",
+      "session_busy": "SSH sessions are busy. Close an idle terminal or retry after current operations finish.",
       "resource_limit": "The transfer task exceeds a safety limit.",
       "task_not_found": "This transfer task is no longer available.",
       "invalid_task_state": "This action is unavailable for the current task state.",
