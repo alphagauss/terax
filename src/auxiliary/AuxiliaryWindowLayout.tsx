@@ -9,6 +9,7 @@ import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/modules/theme";
 import { invoke } from "@tauri-apps/api/core";
@@ -146,14 +147,14 @@ export function AuxiliaryWindowLayout({
     >
       <header
         ref={headerRef}
-        data-tauri-drag-region
+        {...WINDOW_DRAG_REGION}
         className={cn(
           "flex h-8 shrink-0 items-center gap-2 border-b border-layout-divider bg-sidebar dark:bg-card",
           IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2",
         )}
       >
         <div
-          data-tauri-drag-region
+          {...WINDOW_DRAG_REGION}
           className="flex min-w-0 flex-1 items-center"
         >
           {headerContent ?? (

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "native-window-chrome",
+  "description": "Windows drag regions use native WebView2 input instead of asynchronous simulated caption clicks",
+  "platforms": [
+    "windows"
+  ],
+  "windows": [
+    "main",
+    "auxiliary-*"
+  ],
+  "permissions": [
+    "core:window:deny-start-dragging",
+    "core:window:deny-internal-toggle-maximize"
+  ]
+}

@@ -24,6 +24,7 @@ import {
 } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
+import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import FullScreenIcon from "@hugeicons/core-free-icons/FullScreenIcon";
 import MaximizeScreenIcon from "@hugeicons/core-free-icons/MaximizeScreenIcon";
@@ -142,7 +143,7 @@ function NavigationViewport({
     <div
       ref={viewportRef}
       data-sidebar-navigation-viewport
-      data-tauri-drag-region={windowDragRegion || undefined}
+      {...(windowDragRegion ? WINDOW_DRAG_REGION : {})}
       className={cn(
         "overscroll-none scroll-smooth motion-reduce:scroll-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         orientation === "vertical"
@@ -152,7 +153,7 @@ function NavigationViewport({
     >
       <div
         ref={hostRef}
-        data-tauri-drag-region={windowDragRegion || undefined}
+        {...(windowDragRegion ? WINDOW_DRAG_REGION : {})}
         className={cn(
           "relative isolate flex",
           orientation === "vertical"
@@ -599,7 +600,7 @@ export function SidebarActivityBar({
   const compact = activityBar.size === "compact" && vertical;
   const bar = vertical ? (
     <aside
-      data-tauri-drag-region
+      {...WINDOW_DRAG_REGION}
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="vertical"
       className={cn(
@@ -625,7 +626,7 @@ export function SidebarActivityBar({
     </aside>
   ) : (
     <div
-      data-tauri-drag-region
+      {...WINDOW_DRAG_REGION}
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="horizontal"
       style={{ height: SIDEBAR_COMPOSITE_BAR_HEIGHT }}

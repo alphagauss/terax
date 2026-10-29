@@ -8,6 +8,7 @@ import { Button } from "@/components/controls/button";
 import { WindowControls } from "@/components/WindowControls";
 import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import { NotificationBell } from "@/modules/agents";
 import { useTheme } from "@/modules/theme";
 import CommandIcon from "@hugeicons/core-free-icons/CommandIcon";
@@ -93,7 +94,7 @@ export function Header({
 
   return (
     <div
-      data-tauri-drag-region
+      {...WINDOW_DRAG_REGION}
       className={`flex h-8 shrink-0 items-center gap-2 border-b border-layout-divider bg-sidebar select-none dark:bg-card ${
         IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2"
       }`}
@@ -139,10 +140,10 @@ export function Header({
 
       <div
         className="flex min-w-0 flex-1 items-center gap-2"
-        data-tauri-drag-region
+        {...WINDOW_DRAG_REGION}
       >
         {spaceSwitcher}
-        <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
+        <div {...WINDOW_DRAG_REGION} className="h-full min-w-2 flex-1" />
       </div>
 
       <ErrorHistoryButton />

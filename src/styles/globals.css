@@ -11,6 +11,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 只允许标记元素自身拖窗，子级重置继承，按钮与弹层保留原有交互。 */
+[data-native-window-drag-region] > * {
+  -webkit-app-region: no-drag;
+}
+
+[data-native-window-drag-region] {
+  -webkit-app-region: drag;
+}
+
+/* 侧栏图标拖放由指针会话拥有，经过空白区域时也不能启动原生拖窗。 */
+html[data-sidebar-dragging="true"] [data-native-window-drag-region] {
+  -webkit-app-region: no-drag;
+}
+
 /* 嵌入的 SVG 跟随应用主题选择配色，不直接跟随操作系统偏好。 */
 .file-type-icon {
   color-scheme: light;

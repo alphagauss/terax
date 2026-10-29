@@ -17,6 +17,7 @@ const ZEN_HIDDEN_FOCUS_SELECTOR = [
   "[data-sidebar-drop-zone]",
   "[data-workbench-tab-bar]",
   "[data-tauri-drag-region]",
+  "[data-native-window-drag-region]",
   "footer",
 ].join(",");
 

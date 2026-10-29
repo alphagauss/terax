@@ -7,6 +7,7 @@ import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
 import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import {
   isSettingsTab,
   type SettingsTab,
@@ -119,11 +120,11 @@ export function SettingsWindowPage() {
       onValueChange={(value) => setActive(value as SettingsTab)}
       orientation="horizontal"
       className="flex min-w-0 flex-1 items-center"
-      data-tauri-drag-region
+      {...WINDOW_DRAG_REGION}
     >
       <div
         ref={navigationRef}
-        data-tauri-drag-region
+        {...WINDOW_DRAG_REGION}
         className="w-full min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth motion-reduce:scroll-auto"
         onWheel={(event) => {
           // 普通鼠标的纵向滚轮也能浏览横向标签；触控板横向手势交给浏览器。

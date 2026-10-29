@@ -10,6 +10,7 @@ import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import { formatBytes, formatPosixMode } from "@/modules/file-properties/format";
 import {
   cancelDirectoryPropertiesScan,
@@ -210,11 +211,11 @@ export function FilePropertiesWindowPage() {
       title={title}
       headerContent={
         <div
-          data-tauri-drag-region
+          {...WINDOW_DRAG_REGION}
           className="flex min-w-0 flex-1 items-center gap-1"
         >
           <span
-            data-tauri-drag-region
+            {...WINDOW_DRAG_REGION}
             className="min-w-0 flex-1 truncate text-[12px] font-medium"
           >
             {title}
