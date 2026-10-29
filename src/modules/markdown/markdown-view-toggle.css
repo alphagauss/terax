@@ -10,7 +10,11 @@
   --markdown-toggle-background-hover: var(--interactive-hover);
   --markdown-toggle-foreground: var(--secondary-foreground);
   --markdown-toggle-border: var(--border);
-  --markdown-toggle-border-hover: color-mix(in oklab, var(--border), var(--foreground) 28%);
+  --markdown-toggle-border-hover: color-mix(
+    in oklab,
+    var(--border),
+    var(--foreground) 28%
+  );
   --markdown-toggle-shine-edge: rgba(255, 255, 255, 0.16);
   --markdown-toggle-shine: #ffffff;
   --markdown-toggle-shine-glow: rgba(255, 255, 255, 0.58);

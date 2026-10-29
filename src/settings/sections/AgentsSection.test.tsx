@@ -19,20 +19,37 @@ const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount());
   document.body.replaceChildren();
-  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: false, web_fetch: false });
+  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], {
+    web_search: false,
+    web_fetch: false,
+  });
 });
 
 it("disables unavailable tools while preserving checked and unchecked selections", async () => {
-  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: false, web_fetch: false });
+  publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], {
+    web_search: false,
+    web_fetch: false,
+  });
   await renderEditor({ ...MAIN_AGENT, tools: ["web_search"] });
-  const search = document.querySelector("#agent-tool-web_search") as HTMLButtonElement;
-  const fetch = document.querySelector("#agent-tool-web_fetch") as HTMLButtonElement;
+  const search = document.querySelector(
+    "#agent-tool-web_search",
+  ) as HTMLButtonElement;
+  const fetch = document.querySelector(
+    "#agent-tool-web_fetch",
+  ) as HTMLButtonElement;
   expect(search.disabled).toBe(true);
   expect(search.getAttribute("aria-checked")).toBe("true");
   expect(fetch.disabled).toBe(true);
   expect(fetch.getAttribute("aria-checked")).toBe("false");
-  expect(document.body.textContent).toContain("agents.agentDialog.enableToolFirst");
-  await act(async () => publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], { web_search: true, web_fetch: true }));
+  expect(document.body.textContent).toContain(
+    "agents.agentDialog.enableToolFirst",
+  );
+  await act(async () =>
+    publishAgentConfigurations([MAIN_AGENT, CHANNEL_AGENT], {
+      web_search: true,
+      web_fetch: true,
+    }),
+  );
   expect(search.disabled).toBe(false);
   expect(search.getAttribute("aria-checked")).toBe("true");
   expect(fetch.disabled).toBe(false);

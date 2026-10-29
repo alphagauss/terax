@@ -1,11 +1,39 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.9/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
     "useIgnoreFile": true
   },
   "files": {
+    "includes": [
+      "src/**/*.{ts,tsx,js,jsx,mjs,json,css}",
+      "cli/**/*.{ts,tsx,js,json}",
+      "scripts/**/*.{ts,tsx,mts,mjs}",
+      "*.{ts,json,html}",
+      "!src/components/ui/**",
+      "!src/components/ai-elements/**"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "lineEnding": "lf"
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "groups": [":NODE:", ["@/**"], ":PACKAGE:", ":ALIAS:", ":PATH:"]
+          }
+        }
+      }
+    },
     "includes": [
       "src/**/*.ts",
       "src/**/*.tsx",
@@ -18,33 +46,6 @@
       "!src/components/ui/**",
       "!src/components/ai-elements/**"
     ]
-  },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 80
-  },
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": {
-          "level": "on",
-          "options": {
-            "groups": [
-              ":NODE:",
-              [
-                "@/**"
-              ],
-              ":PACKAGE:",
-              ":ALIAS:",
-              ":PATH:"
-            ]
-          }
-        }
-      }
-    }
   },
   "javascript": {
     "formatter": {
@@ -94,7 +95,19 @@
       "performance": {
         "noAccumulatingSpread": "warn"
       }
-    }
+    },
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "cli/**/*.ts",
+      "cli/**/*.tsx",
+      "scripts/build-tui.ts",
+      "scripts/build.mjs",
+      "scripts/terminal-*.ts",
+      "scripts/terminal-*.tsx",
+      "!src/components/ui/**",
+      "!src/components/ai-elements/**"
+    ]
   },
   "overrides": [
     {
@@ -126,5 +139,15 @@
         }
       }
     }
-  ]
+  ],
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  }
 }

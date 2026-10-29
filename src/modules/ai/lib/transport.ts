@@ -202,7 +202,9 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     if (!webSnapshot || webSnapshot.turnId !== turnId) {
       webSnapshot = {
         turnId,
-        services: agent.tools.some((id) => id === "web_search" || id === "web_fetch")
+        services: agent.tools.some(
+          (id) => id === "web_search" || id === "web_fetch",
+        )
           ? prepareWebServices(webKey, webBaseURL)
           : {},
       };

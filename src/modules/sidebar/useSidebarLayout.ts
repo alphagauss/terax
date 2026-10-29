@@ -83,7 +83,8 @@ export function useSidebarLayout(
       initialPlacementState.placements,
       effectiveHiddenIds(initialPlacementState.activityBar.hiddenContainerIds),
     );
-    if (!collapseOnInitialOpen || storedRuntime !== undefined) return normalized;
+    if (!collapseOnInitialOpen || storedRuntime !== undefined)
+      return normalized;
     return {
       ...normalized,
       primary: { ...normalized.primary, collapsed: true },
@@ -256,10 +257,7 @@ export function useSidebarLayout(
           captureWidths = true;
         }
         pendingRestoreLayoutRef.current = null;
-      } else if (
-        mode === "normal" &&
-        current.secondaryMode !== "normal"
-      ) {
+      } else if (mode === "normal" && current.secondaryMode !== "normal") {
         stageSecondaryModeRestore(
           current.secondaryMode,
           preSecondaryModeLayoutRef.current,
@@ -642,9 +640,7 @@ export function useSidebarLayout(
       temporarilyHidden,
       secondaryMode: runtime.secondaryMode,
       expandedPrimaryCollapsed:
-        runtime.secondaryMode === "expanded"
-          ? runtime.primary.collapsed
-          : null,
+        runtime.secondaryMode === "expanded" ? runtime.primary.collapsed : null,
     };
     const previous = previousPresentationRef.current;
     if (

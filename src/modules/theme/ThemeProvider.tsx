@@ -21,10 +21,7 @@ import {
   type ThemePref,
 } from "@/modules/settings/store";
 import { applyTheme } from "./applyTheme";
-import {
-  listCustomThemes,
-  onCustomThemesChange,
-} from "./customThemes";
+import { listCustomThemes, onCustomThemesChange } from "./customThemes";
 import { SurfaceLayer } from "./SurfaceLayer";
 import { getBuiltinTheme, getDefaultTheme } from "./themes";
 import { DEFAULT_THEME_ID, type Theme } from "./types";
@@ -60,7 +57,11 @@ function readFastMode(fallback: ThemePref): ThemePref {
 }
 
 function writeFastMode(t: ThemePref): void {
-  try { window.localStorage.setItem(FAST_PATH_KEY, t); } catch { /* ignore */ }
+  try {
+    window.localStorage.setItem(FAST_PATH_KEY, t);
+  } catch {
+    /* ignore */
+  }
 }
 
 function readFastThemeId(): string {
@@ -69,11 +70,17 @@ function readFastThemeId(): string {
 }
 
 function writeFastThemeId(id: string): void {
-  try { window.localStorage.setItem(FAST_PATH_THEME_ID, id); } catch { /* ignore */ }
+  try {
+    window.localStorage.setItem(FAST_PATH_THEME_ID, id);
+  } catch {
+    /* ignore */
+  }
 }
 
 function resolveTheme(id: string, custom: Theme[]): Theme {
-  return custom.find((t) => t.id === id) ?? getBuiltinTheme(id) ?? getDefaultTheme();
+  return (
+    custom.find((t) => t.id === id) ?? getBuiltinTheme(id) ?? getDefaultTheme()
+  );
 }
 
 /**
@@ -81,8 +88,13 @@ function resolveTheme(id: string, custom: Theme[]): Theme {
  *
  * 负责解析系统明暗模式、内置与自定义主题，并在浏览器绘制前写入完整主题变量。
  */
-export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderProps) {
-  const [mode, setModeState] = useState<ThemePref>(() => readFastMode(defaultMode));
+export function ThemeProvider({
+  children,
+  defaultMode = "dark",
+}: ThemeProviderProps) {
+  const [mode, setModeState] = useState<ThemePref>(() =>
+    readFastMode(defaultMode),
+  );
   const [themeId, setThemeIdState] = useState<string>(() => readFastThemeId());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
@@ -103,7 +115,10 @@ export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderP
       void setI18nLanguage(p.language);
     });
     const unlistenP = onPreferencesChange((key, value) => {
-      if (key === "theme" && (value === "system" || value === "light" || value === "dark")) {
+      if (
+        key === "theme" &&
+        (value === "system" || value === "light" || value === "dark")
+      ) {
         setModeState(value);
         writeFastMode(value);
       } else if (key === "themeId" && typeof value === "string") {
@@ -121,7 +136,9 @@ export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderP
 
   useEffect(() => {
     let alive = true;
-    void listCustomThemes().then((list) => { if (alive) setCustomThemes(list); });
+    void listCustomThemes().then((list) => {
+      if (alive) setCustomThemes(list);
+    });
     const unlisten = onCustomThemesChange(() => {
       void listCustomThemes().then((list) => setCustomThemes(list));
     });
@@ -179,7 +196,15 @@ export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderP
       setThemeId,
       previewThemeId,
     }),
-    [mode, resolvedMode, themeId, customThemes, setMode, setThemeId, previewThemeId],
+    [
+      mode,
+      resolvedMode,
+      themeId,
+      customThemes,
+      setMode,
+      setThemeId,
+      previewThemeId,
+    ],
   );
 
   return (

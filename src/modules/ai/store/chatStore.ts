@@ -752,7 +752,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       sessionEnvironmentFilter,
       sessionDirectoryFilter:
         sessionEnvironmentFilter !== null &&
-        state.sessionDirectoryFilter?.environmentKey !== sessionEnvironmentFilter
+        state.sessionDirectoryFilter?.environmentKey !==
+          sessionEnvironmentFilter
           ? null
           : state.sessionDirectoryFilter,
     })),
@@ -1522,7 +1523,9 @@ export async function stopSession(sessionId: string): Promise<void> {
 }
 
 /** 空闲时独占聊天清理历史后台进程，防止清理与新轮启动交错。 */
-export async function clearIdleSessionProcesses(sessionId: string): Promise<void> {
+export async function clearIdleSessionProcesses(
+  sessionId: string,
+): Promise<void> {
   if (!(await useChatStore.getState().beginSessionRun(sessionId))) {
     throw new Error(i18n.t("ai:commands.busy"));
   }

@@ -262,8 +262,12 @@ export function projectSubagentDisplays(
     if (!run) continue;
     const snapshot = run.snapshot;
     if (entry.consumed && entry.records) {
-      snapshot.instructions = [...(snapshot.instructions ?? []),
-        ...entry.records.filter((item) => item.role === "user").map((item) => String(item.content))];
+      snapshot.instructions = [
+        ...(snapshot.instructions ?? []),
+        ...entry.records
+          .filter((item) => item.role === "user")
+          .map((item) => String(item.content)),
+      ];
     }
     const result = subagentResultText(entry.records ?? []);
     if (

@@ -29,9 +29,7 @@ type AgentStoreState = {
   setStatus: (tabId: number, status: AgentStatus) => void;
   finish: (tabId: number) => void;
   setLocalAgent: (state: LocalAgentState) => void;
-  pushNotification: (
-    n: Omit<AgentNotification, "id" | "at" | "read">,
-  ) => void;
+  pushNotification: (n: Omit<AgentNotification, "id" | "at" | "read">) => void;
   dismissNotification: (id: string) => void;
   dismissNotificationsForTarget: (target: AgentNotificationTarget) => void;
   markAllRead: () => void;
@@ -134,7 +132,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   markAllRead: () =>
     set((s) => {
       if (!s.notifications.some((n) => !n.read)) return s;
-      return { notifications: s.notifications.map((n) => ({ ...n, read: true })) };
+      return {
+        notifications: s.notifications.map((n) => ({ ...n, read: true })),
+      };
     }),
 
   clearNotifications: () => set({ notifications: [] }),

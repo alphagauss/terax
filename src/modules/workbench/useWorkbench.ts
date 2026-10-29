@@ -59,11 +59,7 @@ function firstGroupId(space: SpaceWorkbench): number {
   return groupIds(space.root)[0];
 }
 
-type PreviewTab =
-  | EditorTab
-  | MarkdownTab
-  | GitDiffTab
-  | GitCommitFileDiffTab;
+type PreviewTab = EditorTab | MarkdownTab | GitDiffTab | GitCommitFileDiffTab;
 
 function isPreviewTab(tab: Tab | undefined): tab is PreviewTab {
   return (
@@ -426,9 +422,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (!pin && !forceNew) {
         const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
-          commit((current) =>
-            replacePreview(current, target, preview.id, tab),
-          );
+          commit((current) => replacePreview(current, target, preview.id, tab));
           return id;
         }
       }
@@ -486,9 +480,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (!pin && !forceNew) {
         const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
-          commit((current) =>
-            replacePreview(current, target, preview.id, tab),
-          );
+          commit((current) => replacePreview(current, target, preview.id, tab));
           return id;
         }
       }

@@ -268,9 +268,7 @@ describe("AI session picker", () => {
     const choose = async (text: string) => {
       const option = Array.from(
         popover?.querySelectorAll<HTMLLabelElement>("label") ?? [],
-      ).find(
-        (label) => label.querySelector("span")?.textContent === text,
-      );
+      ).find((label) => label.querySelector("span")?.textContent === text);
       expect(option).toBeDefined();
       await act(async () => option?.click());
     };

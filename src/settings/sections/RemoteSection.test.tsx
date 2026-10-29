@@ -189,8 +189,6 @@ vi.mock("@/components/layout/PageHeader", () => ({
     createElement("h1", null, title),
 }));
 
-
-
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 
 vi.mock("react-i18next", () => ({

@@ -246,10 +246,7 @@ function ActivityBarConfigurationMenu({
             }}
           >
             {ACTIVITY_BAR_POSITIONS.map((position) => (
-              <ContextMenuRadioItem
-                key={position}
-                value={position}
-              >
+              <ContextMenuRadioItem key={position} value={position}>
                 {t(`position.${position}`)}
               </ContextMenuRadioItem>
             ))}
@@ -258,9 +255,7 @@ function ActivityBarConfigurationMenu({
       </ContextMenuSub>
       {activityBar.position === "default" ? (
         <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            {t("activityBarSize")}
-          </ContextMenuSubTrigger>
+          <ContextMenuSubTrigger>{t("activityBarSize")}</ContextMenuSubTrigger>
           <ContextMenuSubContent>
             <ContextMenuRadioGroup
               value={activityBar.size}
@@ -269,10 +264,7 @@ function ActivityBarConfigurationMenu({
               }}
             >
               {ACTIVITY_BAR_SIZES.map((size) => (
-                <ContextMenuRadioItem
-                  key={size}
-                  value={size}
-                >
+                <ContextMenuRadioItem key={size} value={size}>
                   {t(`size.${size}`)}
                 </ContextMenuRadioItem>
               ))}
@@ -320,9 +312,7 @@ function ContainerMenu({
     <ContextMenu>
       <ContextMenuTrigger className="contents">{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem
-          onSelect={() => onToggleVisibility(container.id)}
-        >
+        <ContextMenuItem onSelect={() => onToggleVisibility(container.id)}>
           {t(hidden ? "showContainer" : "hideContainer", {
             name: t(container.titleKey),
           })}
@@ -351,9 +341,7 @@ function ContainerMenu({
           {t("moveToSecondary")}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem
-          onSelect={() => onReset(container.id)}
-        >
+        <ContextMenuItem onSelect={() => onReset(container.id)}>
           {t("resetLocation")}
         </ContextMenuItem>
       </ContextMenuContent>

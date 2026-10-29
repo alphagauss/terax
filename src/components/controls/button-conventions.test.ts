@@ -89,7 +89,7 @@ it("业务 ghost 按钮复用公共普通、警示和危险配色", () => {
         ) {
           const duplicates = literals(style)
             .flatMap((value) => value.split(/\s+/))
-              .filter((token) => repeatedColors.has(token.replace(/!/g, "")));
+            .filter((token) => repeatedColors.has(token.replace(/!/g, "")));
           if (duplicates.length)
             violations.push(
               `${relative(sourceRoot, file)}:${ast.getLineAndCharacterOfPosition(node.getStart()).line + 1}: ${duplicates.join(" ")}`,

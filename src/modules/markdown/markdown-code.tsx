@@ -55,10 +55,6 @@ export function MarkdownCode({
 
   const code = markdownCodeText(children).replace(/\n$/, "");
   return (
-    <ChatCodeBlock
-      code={code}
-      lang={match?.[1] ?? null}
-      variant={variant}
-    />
+    <ChatCodeBlock code={code} lang={match?.[1] ?? null} variant={variant} />
   );
 }

@@ -132,13 +132,30 @@ it("derives independent cards for repeated executions and respects the fork pref
     content: { taskId: "task", runId, label: "Inspect", ...content },
   });
   const first = [
-    entry("first", { toolCallId: "spawn", status: "running", records: [
-      { role: "user", content: "Inspect", timestamp: "now", turn_id: "first" },
-    ] }),
+    entry("first", {
+      toolCallId: "spawn",
+      status: "running",
+      records: [
+        {
+          role: "user",
+          content: "Inspect",
+          timestamp: "now",
+          turn_id: "first",
+        },
+      ],
+    }),
     entry("first", { queued: { id: "queued", message: "Check cancellation" } }),
-    entry("first", { consumed: ["queued"], records: [
-      { role: "user", content: "Check cancellation", timestamp: "now", turn_id: "first" },
-    ] }),
+    entry("first", {
+      consumed: ["queued"],
+      records: [
+        {
+          role: "user",
+          content: "Check cancellation",
+          timestamp: "now",
+          turn_id: "first",
+        },
+      ],
+    }),
     entry("first", {
       execution: {
         id: "read",

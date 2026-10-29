@@ -125,7 +125,8 @@ export function isSubagentDisplaySnapshot(
     Object.keys(snapshot).some((key) => !SNAPSHOT_KEYS.has(key)) ||
     snapshot.version !== 2 ||
     (snapshot.runId !== undefined && !isBoundedText(snapshot.runId, 128)) ||
-    (snapshot.parentTurnId !== undefined && !isBoundedText(snapshot.parentTurnId, 128)) ||
+    (snapshot.parentTurnId !== undefined &&
+      !isBoundedText(snapshot.parentTurnId, 128)) ||
     (snapshot.instructions !== undefined &&
       (!Array.isArray(snapshot.instructions) ||
         !snapshot.instructions.every((item) => typeof item === "string"))) ||

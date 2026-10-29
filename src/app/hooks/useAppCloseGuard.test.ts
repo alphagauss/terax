@@ -10,10 +10,7 @@ import type { Tab } from "@/modules/workbench";
 import { act, createElement, type RefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  type AppCloseDialogState,
-  useAppCloseGuard,
-} from "./useAppCloseGuard";
+import { type AppCloseDialogState, useAppCloseGuard } from "./useAppCloseGuard";
 
 const closeMocks = vi.hoisted(() => ({
   close: vi.fn(),
@@ -36,9 +33,7 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     close: closeMocks.close,
     onCloseRequested: vi.fn(
-      async (
-        listener: (event: { preventDefault: () => void }) => void,
-      ) => {
+      async (listener: (event: { preventDefault: () => void }) => void) => {
         closeMocks.listener = listener;
         return vi.fn();
       },
@@ -64,9 +59,7 @@ function Harness({
   saveAutoSaveDocuments,
   onState,
 }: HarnessProps) {
-  onState(
-    useAppCloseGuard(tabsRef, beforeClose, saveAutoSaveDocuments),
-  );
+  onState(useAppCloseGuard(tabsRef, beforeClose, saveAutoSaveDocuments));
   return null;
 }
 
@@ -157,9 +150,9 @@ describe("useAppCloseGuard", () => {
         async () => false,
       );
       await requestClose();
-      expect(
-        closeMocks.terminalNeedsCloseConfirmation.mock.calls[0]?.[0],
-      ).toBe(7);
+      expect(closeMocks.terminalNeedsCloseConfirmation.mock.calls[0]?.[0]).toBe(
+        7,
+      );
       if (needsConfirmation) {
         expect(latest?.pendingAppClose).toEqual({
           kind: "blocker",
@@ -178,7 +171,10 @@ describe("useAppCloseGuard", () => {
     const saving = new Promise<boolean>((resolve) => {
       releaseSave = () => resolve(true);
     });
-    await renderHarness(async () => {}, () => saving);
+    await renderHarness(
+      async () => {},
+      () => saving,
+    );
 
     await requestClose();
     await act(async () => {

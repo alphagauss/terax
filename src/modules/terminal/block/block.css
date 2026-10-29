@@ -95,11 +95,16 @@
 /* 分隔线挂载到 xterm 原生装饰层，不在 React 覆盖层重复计算位置。 */
 .bt-output-boundary {
   pointer-events: none;
-  border-top: 1px solid color-mix(in srgb, var(--foreground, #fff) 18%, transparent);
+  border-top: 1px solid
+    color-mix(in srgb, var(--foreground, #fff) 18%, transparent);
 }
 
 .bt-output-boundary-fail {
-  border-top-color: color-mix(in srgb, var(--destructive, #e5706b) 50%, transparent);
+  border-top-color: color-mix(
+    in srgb,
+    var(--destructive, #e5706b) 50%,
+    transparent
+  );
 }
 
 .bt-match {

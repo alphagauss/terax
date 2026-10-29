@@ -12,22 +12,25 @@ describe("starterTheme", () => {
   it.each([
     ["light", lightModernVariant],
     ["dark", darkModernVariant],
-  ] as const)("creates a complete editable copy of Modern %s", (mode, baseline) => {
-    const theme = starterTheme();
-    const variant = theme.variants[mode];
+  ] as const)(
+    "creates a complete editable copy of Modern %s",
+    (mode, baseline) => {
+      const theme = starterTheme();
+      const variant = theme.variants[mode];
 
-    expect(variant).toBeDefined();
-    expect(Object.keys(variant?.colors ?? {}).sort()).toEqual(
-      [...THEME_COLOR_KEYS].sort(),
-    );
-    expect(Object.keys(variant?.terminal ?? {}).sort()).toEqual(
-      [...TERMINAL_BASE_KEYS, "ansi"].sort(),
-    );
-    expect(variant?.colors).toEqual(baseline.colors);
-    expect(variant?.colors).not.toBe(baseline.colors);
-    expect(variant?.terminal?.ansi).toEqual(baseline.terminal.ansi);
-    expect(variant?.terminal?.ansi).not.toBe(baseline.terminal.ansi);
-    expect(variant?.editor).toEqual(baseline.editor);
-    expect(variant?.editor).not.toBe(baseline.editor);
-  });
+      expect(variant).toBeDefined();
+      expect(Object.keys(variant?.colors ?? {}).sort()).toEqual(
+        [...THEME_COLOR_KEYS].sort(),
+      );
+      expect(Object.keys(variant?.terminal ?? {}).sort()).toEqual(
+        [...TERMINAL_BASE_KEYS, "ansi"].sort(),
+      );
+      expect(variant?.colors).toEqual(baseline.colors);
+      expect(variant?.colors).not.toBe(baseline.colors);
+      expect(variant?.terminal?.ansi).toEqual(baseline.terminal.ansi);
+      expect(variant?.terminal?.ansi).not.toBe(baseline.terminal.ansi);
+      expect(variant?.editor).toEqual(baseline.editor);
+      expect(variant?.editor).not.toBe(baseline.editor);
+    },
+  );
 });

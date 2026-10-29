@@ -56,23 +56,26 @@ describe("Modern reference template", () => {
   it.each([
     ["light", lightModernVariant],
     ["dark", darkModernVariant],
-  ] as const)("keeps the CSS safety fallback aligned with %s Modern", (_mode, variant) => {
-    for (const key of THEME_COLOR_KEYS) {
-      expect(globalsCss).toContain(
-        `${THEME_COLOR_VARIABLES[key]}: ${variant.colors[key]}`.toLowerCase(),
-      );
-    }
-    for (const key of TERMINAL_BASE_KEYS) {
-      expect(globalsCss).toContain(
-        `${TERMINAL_BASE_VARIABLES[key]}: ${variant.terminal[key]}`.toLowerCase(),
-      );
-    }
-    for (let index = 0; index < TERMINAL_ANSI_VARIABLES.length; index++) {
-      expect(globalsCss).toContain(
-        `${TERMINAL_ANSI_VARIABLES[index]}: ${variant.terminal.ansi[index]}`.toLowerCase(),
-      );
-    }
-  });
+  ] as const)(
+    "keeps the CSS safety fallback aligned with %s Modern",
+    (_mode, variant) => {
+      for (const key of THEME_COLOR_KEYS) {
+        expect(globalsCss).toContain(
+          `${THEME_COLOR_VARIABLES[key]}: ${variant.colors[key]}`.toLowerCase(),
+        );
+      }
+      for (const key of TERMINAL_BASE_KEYS) {
+        expect(globalsCss).toContain(
+          `${TERMINAL_BASE_VARIABLES[key]}: ${variant.terminal[key]}`.toLowerCase(),
+        );
+      }
+      for (let index = 0; index < TERMINAL_ANSI_VARIABLES.length; index++) {
+        expect(globalsCss).toContain(
+          `${TERMINAL_ANSI_VARIABLES[index]}: ${variant.terminal.ansi[index]}`.toLowerCase(),
+        );
+      }
+    },
+  );
 });
 
 describe("Modern Git status colors", () => {

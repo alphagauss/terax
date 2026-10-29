@@ -410,20 +410,58 @@ describe("Agent reasoning duration", () => {
   });
 });
 
-
 it("keeps SDK prefixes and tool definitions stable through web search", async () => {
-  activeModel = new MockLanguageModelV4({ doStream: () => activeModel.doStreamCalls.length === 1
-    ? activityStream({ reasoning: false, toolCallId: "web-call", web: true })
-    : activityStream({ reasoning: false, text: "Found a source." }) });
-  const search = vi.fn().mockResolvedValue([{ title: "Source", url: "https://example.com", content: "Fact", truncated: false }]);
+  activeModel = new MockLanguageModelV4({
+    doStream: () =>
+      activeModel.doStreamCalls.length === 1
+        ? activityStream({
+            reasoning: false,
+            toolCallId: "web-call",
+            web: true,
+          })
+        : activityStream({ reasoning: false, text: "Found a source." }),
+  });
+  const search = vi.fn().mockResolvedValue([
+    {
+      title: "Source",
+      url: "https://example.com",
+      content: "Fact",
+      truncated: false,
+    },
+  ]);
   const result = await runAgentStream({
-    turnId: "web-turn", keys: EMPTY_PROVIDER_KEYS, model: modelRefForProvider("lmstudio", "mock"), systemPrompt: "Stable prompt", allowedTools: ["web_search", "web_fetch"], maxConcurrentSubagents: 3, turnCoordinator: new AgentTurnCoordinator(),
-    toolContext: { getCwd: () => "/workspace", getSessionId: () => "web-prefix", getPermissionMode: () => "ask", getTerminalContext: () => null, isActiveTerminalPrivate: () => false, supportsApprovals: true, webServices: { search } },
-    uiMessages: [{ id: "user", role: "user", parts: [{ type: "text", text: "Search for terax" }] }], onCheckpoint: vi.fn(),
+    turnId: "web-turn",
+    keys: EMPTY_PROVIDER_KEYS,
+    model: modelRefForProvider("lmstudio", "mock"),
+    systemPrompt: "Stable prompt",
+    allowedTools: ["web_search", "web_fetch"],
+    maxConcurrentSubagents: 3,
+    turnCoordinator: new AgentTurnCoordinator(),
+    toolContext: {
+      getCwd: () => "/workspace",
+      getSessionId: () => "web-prefix",
+      getPermissionMode: () => "ask",
+      getTerminalContext: () => null,
+      isActiveTerminalPrivate: () => false,
+      supportsApprovals: true,
+      webServices: { search },
+    },
+    uiMessages: [
+      {
+        id: "user",
+        role: "user",
+        parts: [{ type: "text", text: "Search for terax" }],
+      },
+    ],
+    onCheckpoint: vi.fn(),
   });
   let final: UIMessage | undefined;
   const errors: unknown[] = [];
-  for await (const message of readUIMessageStream({ stream: result.toUIMessageStream(), onError: (error) => errors.push(error) })) final = message;
+  for await (const message of readUIMessageStream({
+    stream: result.toUIMessageStream(),
+    onError: (error) => errors.push(error),
+  }))
+    final = message;
   expect(errors).toEqual([]);
   expect(search).toHaveBeenCalledTimes(1);
   expect(activeModel.doStreamCalls).toHaveLength(2);
@@ -432,5 +470,9 @@ it("keeps SDK prefixes and tool definitions stable through web search", async ()
   expect(second.tools).toEqual(first.tools);
   expect(JSON.stringify(second.prompt)).toContain("https://example.com");
   expect(JSON.stringify(second.prompt)).toContain("untrusted data");
-  expect(final?.parts.some((part) => part.type === "text" && part.text === "Found a source.")).toBe(true);
+  expect(
+    final?.parts.some(
+      (part) => part.type === "text" && part.text === "Found a source.",
+    ),
+  ).toBe(true);
 });

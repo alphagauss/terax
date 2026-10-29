@@ -86,7 +86,11 @@ describe("Agent run lifecycle without UI", () => {
     });
     await cancelAgentRun(run.chat, "session");
     expect(coordinator.runningCount).toBe(0);
-    expect(cleanup).toHaveBeenLastCalledWith("session", expect.any(Promise), "active");
+    expect(cleanup).toHaveBeenLastCalledWith(
+      "session",
+      expect.any(Promise),
+      "active",
+    );
     run.lifecycle.dispose();
   });
   it("cancels a pending approval without resuming the model or unlocking before cleanup", async () => {

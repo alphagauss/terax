@@ -18,11 +18,22 @@ import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import ZoomInAreaIcon from "@hugeicons/core-free-icons/ZoomInAreaIcon";
 import ZoomOutAreaIcon from "@hugeicons/core-free-icons/ZoomOutAreaIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useIsCodeFenceIncomplete } from "streamdown";
 
 import { Shimmer } from "@/components/controls/shimmer";
-import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
+import {
+  highlight,
+  isHighlightable,
+  type HighlightedNode,
+} from "./chat-code-lezer";
 
 // True while the parent message is still streaming from the model. We hide
 // fenced-code contents during this phase: parsing partial code is wasted
@@ -113,7 +124,8 @@ function mermaidConfig(
 function normalizeLangLabel(raw: string): string {
   const lower = raw.toLowerCase();
   if (POSIX_SHELL.has(lower)) return "bash";
-  if (lower === "pwsh" || lower === "ps1" || lower === "ps") return "powershell";
+  if (lower === "pwsh" || lower === "ps1" || lower === "ps")
+    return "powershell";
   if (lower === "bat" || lower === "batch") return "cmd";
   return lower || "text";
 }
@@ -146,12 +158,7 @@ export function ChatCodeBlock({
   }
 
   if (isDiagramLanguage(lang)) {
-    return (
-      <MermaidCode
-        code={code}
-        documentContext={variant === "document"}
-      />
-    );
+    return <MermaidCode code={code} documentContext={variant === "document"} />;
   }
 
   return <FinalizedCodeBlock code={code} lang={label} />;
@@ -236,9 +243,7 @@ function MermaidCode({
           <span className="text-destructive">{state.message}</span>
         </pre>
       ) : state.kind === "waiting" ? (
-        <pre className="text-foreground">
-          {code}
-        </pre>
+        <pre className="text-foreground">{code}</pre>
       ) : (
         <div className="flex min-h-32 items-center justify-center px-3 py-6 text-[11px] text-muted-foreground">
           Rendering diagram…
@@ -314,10 +319,7 @@ function MermaidViewport({ svg }: { svg: string }) {
       data-markdown-interactive="mermaid"
       className="relative my-4 min-h-32 overflow-hidden rounded-md border border-transparent bg-background transition-colors duration-150 hover:border-border/70 focus-within:border-border/70"
     >
-      <div
-        data-markdown-visual-toolbar
-        className="flex items-center"
-      >
+      <div data-markdown-visual-toolbar className="flex items-center">
         <DiagramButton
           label="Pan diagram"
           active={panEnabled}
@@ -415,10 +417,7 @@ function BlockChrome({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      data-markdown-code-block
-      className="not-prose overflow-hidden"
-    >
+    <div data-markdown-code-block className="not-prose overflow-hidden">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-muted-foreground">
           {label}
@@ -434,9 +433,7 @@ function FinalizedCodeBlock({ code, lang }: { code: string; lang: string }) {
   if (!isHighlightable(lang)) {
     return (
       <BlockChrome label={lang} code={code}>
-        <pre className="text-foreground">
-          {code}
-        </pre>
+        <pre className="text-foreground">{code}</pre>
       </BlockChrome>
     );
   }
@@ -476,11 +473,7 @@ const HighlightedPre = memo(function HighlightedPre({
   }, [code, lang]);
 
   if (!nodes) {
-    return (
-      <pre className="text-foreground">
-        {code}
-      </pre>
-    );
+    return <pre className="text-foreground">{code}</pre>;
   }
 
   return (
@@ -523,10 +516,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={onCopy}
       type="button"
     >
-      <HugeiconsIcon
-        icon={copied ? Tick02Icon : Copy01Icon}
-        size={14}
-      />
+      <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={14} />
     </button>
   );
 }

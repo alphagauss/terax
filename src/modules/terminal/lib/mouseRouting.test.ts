@@ -39,20 +39,18 @@ describe("terminal mouse routing", () => {
     ).toBe(true);
   });
 
-  it.each([
-    "x10",
-    "vt200",
-    "drag",
-    "any",
-  ] as const)("reports %s mouse mode without Shift", (mode) => {
-    expect(
-      shouldUseLocalTerminalMouse(
-        mode,
-        { altKey: false, shiftKey: false },
-        false,
-      ),
-    ).toBe(false);
-  });
+  it.each(["x10", "vt200", "drag", "any"] as const)(
+    "reports %s mouse mode without Shift",
+    (mode) => {
+      expect(
+        shouldUseLocalTerminalMouse(
+          mode,
+          { altKey: false, shiftKey: false },
+          false,
+        ),
+      ).toBe(false);
+    },
+  );
 
   it("uses Shift off macOS and Option on macOS", () => {
     expect(

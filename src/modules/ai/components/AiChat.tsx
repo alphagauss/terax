@@ -71,10 +71,11 @@ import {
 import { ChatCollapsibleScrollGuard } from "@/modules/ai/components/ChatCollapsibleScrollGuard";
 import { ChatReasoningPart } from "@/modules/ai/components/ChatReasoningPart";
 import { ChatStatusDots } from "@/modules/ai/components/ChatStatusDots";
-import type {
-  SubagentResultView,
-} from "@/modules/ai/components/SubagentCard";
-import { GroupedSubagentCard, SubagentCardsProvider } from "@/modules/ai/components/SubagentCards";
+import type { SubagentResultView } from "@/modules/ai/components/SubagentCard";
+import {
+  GroupedSubagentCard,
+  SubagentCardsProvider,
+} from "@/modules/ai/components/SubagentCards";
 import { SessionProcessesProvider } from "@/modules/ai/components/SessionProcesses";
 import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
 import {
@@ -440,10 +441,7 @@ export function AiChatView({
   const latestUserMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
-      if (
-        message.role === "user" &&
-        !messageMetadata(message).compaction
-      ) {
+      if (message.role === "user" && !messageMetadata(message).compaction) {
         return messageMetadata(message).commandId ? undefined : message.id;
       }
     }
@@ -550,55 +548,56 @@ export function AiChatView({
         scrollClassName="app-scrollbar [container-type:size] [scrollbar-gutter:stable]"
       >
         <SessionProcessesProvider sessionId={sessionId}>
-        <SubagentCardsProvider sessionId={sessionId} messages={messages}>
-        <ChatFileReferenceBaseProvider baseDirectory={sessionCwd}>
-          <div ref={setToolDetailsWheelScope} className="contents">
-            {activities
-              .filter(
-                (entry) =>
-                  !entry.afterMessageId ||
-                  !messages.some(
-                    (message) => message.id === entry.afterMessageId,
-                  ),
-              )
-              .map((entry) => entry.element)}
-            {messages.map((m) => (
-              <Fragment key={m.id}>
-                {m.id !== pendingAssistantMessageId &&
-                !messageMetadata(m).commandId ? (
-                  <RenderedMessage
-                    sessionId={sessionId}
-                    message={m}
-                    promptChanged={changedTurns.has(
-                      messageMetadata(m).turnId ?? "",
-                    )}
-                    editable={
-                      historyAvailable &&
-                      !editing &&
-                      m.id === latestUserMessageId
-                    }
-                    forkable={
-                      historyAvailable &&
-                      !editing &&
-                      (Boolean(messageMetadata(m).compaction) ||
-                        (messageMetadata(m).turnStatus === "completed" &&
-                          Boolean(messageMetadata(m).turnId) &&
-                          m.parts.some(
-                            (part) => part.type === "text" && part.text.trim(),
-                          )))
-                    }
-                    streaming={m.id === streamingMessageId && !compacting}
-                    appearing={m.id === appearingUserMessageId}
-                  />
-                ) : null}
+          <SubagentCardsProvider sessionId={sessionId} messages={messages}>
+            <ChatFileReferenceBaseProvider baseDirectory={sessionCwd}>
+              <div ref={setToolDetailsWheelScope} className="contents">
                 {activities
-                  .filter((entry) => entry.afterMessageId === m.id)
+                  .filter(
+                    (entry) =>
+                      !entry.afterMessageId ||
+                      !messages.some(
+                        (message) => message.id === entry.afterMessageId,
+                      ),
+                  )
                   .map((entry) => entry.element)}
-              </Fragment>
-            ))}
-          </div>
-        </ChatFileReferenceBaseProvider>
-        </SubagentCardsProvider>
+                {messages.map((m) => (
+                  <Fragment key={m.id}>
+                    {m.id !== pendingAssistantMessageId &&
+                    !messageMetadata(m).commandId ? (
+                      <RenderedMessage
+                        sessionId={sessionId}
+                        message={m}
+                        promptChanged={changedTurns.has(
+                          messageMetadata(m).turnId ?? "",
+                        )}
+                        editable={
+                          historyAvailable &&
+                          !editing &&
+                          m.id === latestUserMessageId
+                        }
+                        forkable={
+                          historyAvailable &&
+                          !editing &&
+                          (Boolean(messageMetadata(m).compaction) ||
+                            (messageMetadata(m).turnStatus === "completed" &&
+                              Boolean(messageMetadata(m).turnId) &&
+                              m.parts.some(
+                                (part) =>
+                                  part.type === "text" && part.text.trim(),
+                              )))
+                        }
+                        streaming={m.id === streamingMessageId && !compacting}
+                        appearing={m.id === appearingUserMessageId}
+                      />
+                    ) : null}
+                    {activities
+                      .filter((entry) => entry.afterMessageId === m.id)
+                      .map((entry) => entry.element)}
+                  </Fragment>
+                ))}
+              </div>
+            </ChatFileReferenceBaseProvider>
+          </SubagentCardsProvider>
         </SessionProcessesProvider>
         {compacting && (
           <div role="status" className="text-xs text-muted-foreground">
@@ -748,16 +747,24 @@ const RenderedMessage = memo(function RenderedMessage({
   // 只订阅子任务调用是否已有执行事实，进度变化不重算分组。
   const liveSubagentPresence = useChatDisplayStore(useChatStore, (state) =>
     subagentCallIds
-      .map((id) => state.subagentDisplaysBySession[sessionId]?.[id] ? "1" : "0")
+      .map((id) =>
+        state.subagentDisplaysBySession[sessionId]?.[id] ? "1" : "0",
+      )
       .join(""),
   );
   const subagentCalls = useMemo(
     () =>
       new Set([
         ...(subagentParts?.displaysByToolCallId.keys() ?? []),
-        ...subagentCallIds.filter((_, index) => liveSubagentPresence[index] === "1"),
+        ...subagentCallIds.filter(
+          (_, index) => liveSubagentPresence[index] === "1",
+        ),
       ]),
-    [subagentParts?.displaysByToolCallId, subagentCallIds, liveSubagentPresence],
+    [
+      subagentParts?.displaysByToolCallId,
+      subagentCallIds,
+      liveSubagentPresence,
+    ],
   );
   const groups = useMemo(
     () =>
@@ -1529,7 +1536,10 @@ export function subagentResultForPart(
     "output" in part ? part.output : undefined,
     "task_id",
   );
-  return resultsByTaskId?.get(toolCallIdFromPart(part)) ?? (taskId ? resultsByTaskId?.get(taskId) : undefined);
+  return (
+    resultsByTaskId?.get(toolCallIdFromPart(part)) ??
+    (taskId ? resultsByTaskId?.get(taskId) : undefined)
+  );
 }
 
 function toolCallIdFromPart(part: AnyPart): string {
@@ -1571,10 +1581,19 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
   }, [parts]);
   const count = paths.length || parts.length;
   const first = parts[0] as { input?: unknown; state?: string } | undefined;
-  const summary = formatToolSummary([
-    ...describeToolCall("read_file", first?.input, first?.state !== "input-streaming"),
-    ...(count > 1 ? [{ label: "moreFiles" as const, values: { count: count - 1 } }] : []),
-  ], t);
+  const summary = formatToolSummary(
+    [
+      ...describeToolCall(
+        "read_file",
+        first?.input,
+        first?.state !== "input-streaming",
+      ),
+      ...(count > 1
+        ? [{ label: "moreFiles" as const, values: { count: count - 1 } }]
+        : []),
+    ],
+    t,
+  );
 
   return (
     <Collapsible className="group/read overflow-hidden rounded-md border border-border/50 bg-card/50">
@@ -1600,9 +1619,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium text-foreground">
-          read_file
-        </span>
+        <span className="shrink-0 font-medium text-foreground">read_file</span>
         {paths.length > 0 ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground group-data-[state=open]/read:invisible">
             {summary}
@@ -1664,13 +1681,14 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
         strokeWidth={1.75}
         className="shrink-0 text-muted-foreground"
       />
-      <span className="shrink-0 font-medium text-foreground">
-        read_file
-      </span>
+      <span className="shrink-0 font-medium text-foreground">read_file</span>
       <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
         {formatToolSummary(
-          describeToolCall("read_file", (part as { input?: unknown }).input,
-            state !== "input-streaming"),
+          describeToolCall(
+            "read_file",
+            (part as { input?: unknown }).input,
+            state !== "input-streaming",
+          ),
           t,
         )}
       </span>
@@ -1798,17 +1816,28 @@ const RenderedTool = memo(function RenderedTool({
         className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
         toolName={externalLabel ?? webToolLabel(toolName)}
         state={display.state}
-        summary={externalLabel ? undefined : formatToolSummary(
-          describeToolCall(toolName, part.input, part.state !== "input-streaming"),
-          t,
-        )}
+        summary={
+          externalLabel
+            ? undefined
+            : formatToolSummary(
+                describeToolCall(
+                  toolName,
+                  part.input,
+                  part.state !== "input-streaming",
+                ),
+                t,
+              )
+        }
         input={externalLabel ? undefined : part.input}
         output={
-          "output" in part && part.output !== undefined
-            ? (toolName === "web_search" || toolName === "web_fetch") && !display.errorText
-              ? <WebToolResult output={part.output} />
-              : part.output
-            : undefined
+          "output" in part && part.output !== undefined ? (
+            (toolName === "web_search" || toolName === "web_fetch") &&
+            !display.errorText ? (
+              <WebToolResult output={part.output} />
+            ) : (
+              part.output
+            )
+          ) : undefined
         }
         errorText={display.errorText}
       />

@@ -456,10 +456,18 @@ function reduceDisplayProgress(
   event: SubagentProgressEvent,
 ): SubagentDisplayState {
   if (event.type === "execution") {
-    return { ...state, runId: event.runId, parentTurnId: event.parentTurnId, instructions: [event.task] };
+    return {
+      ...state,
+      runId: event.runId,
+      parentTurnId: event.parentTurnId,
+      instructions: [event.task],
+    };
   }
   if (event.type === "instructions") {
-    return { ...state, instructions: [...(state.instructions ?? []), ...event.messages] };
+    return {
+      ...state,
+      instructions: [...(state.instructions ?? []), ...event.messages],
+    };
   }
   if (event.type === "thinking") {
     return { ...state, phase: "thinking" };

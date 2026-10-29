@@ -204,7 +204,10 @@ export function layoutGraph(
     // bottom from its position. Skip the branch lanes we already recorded.
     const branchTargets = new Set(
       bottomEdges
-        .filter((e): e is Extract<GraphEdge, { kind: "branch" }> => e.kind === "branch")
+        .filter(
+          (e): e is Extract<GraphEdge, { kind: "branch" }> =>
+            e.kind === "branch",
+        )
         .map((e) => e.toLane),
     );
     for (let i = 0; i < lanes.length; i++) {
@@ -221,11 +224,7 @@ export function layoutGraph(
       laneColors.length = trimmed.length;
     }
 
-    const widestLane = Math.max(
-      lanesBefore.length,
-      lanes.length,
-      lane + 1,
-    );
+    const widestLane = Math.max(lanesBefore.length, lanes.length, lane + 1);
 
     rows.push({
       sha: commit.sha,
@@ -237,5 +236,8 @@ export function layoutGraph(
     });
   }
 
-  return { rows, state: { lanes: lanes.slice(), laneColors: laneColors.slice() } };
+  return {
+    rows,
+    state: { lanes: lanes.slice(), laneColors: laneColors.slice() },
+  };
 }

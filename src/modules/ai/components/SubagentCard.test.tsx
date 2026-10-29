@@ -63,20 +63,35 @@ afterEach(async () => {
 describe("SubagentCard", () => {
   it("translates restored operation summaries when the interface language changes", async () => {
     await preloadZhCN();
-    await act(async () => root.render(
-      <SubagentCard part={part as never} display={{
-        version: 2,
-        taskId: "task-1",
-        toolCallId: "parent-call",
-        label: "Inspector",
-        status: "completed",
-        durationMs: 100,
-        steps: [{ id: "delete", toolName: "file_operation",
-          summary: [{ label: "deleteRecursive" }, "build"], status: "completed" }],
-      }} />,
-    ));
-    await act(async () => container.querySelector<HTMLButtonElement>("button[data-state]")?.click());
-    const process = [...container.querySelectorAll("button")].find((button) => button.textContent === "Process 1");
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={{
+            version: 2,
+            taskId: "task-1",
+            toolCallId: "parent-call",
+            label: "Inspector",
+            status: "completed",
+            durationMs: 100,
+            steps: [
+              {
+                id: "delete",
+                toolName: "file_operation",
+                summary: [{ label: "deleteRecursive" }, "build"],
+                status: "completed",
+              },
+            ],
+          }}
+        />,
+      ),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>("button[data-state]")?.click(),
+    );
+    const process = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Process 1",
+    );
     await act(async () => process?.click());
     expect(container.textContent).toContain("Delete recursively · build");
     await act(async () => i18n.changeLanguage("zh-CN"));
@@ -104,11 +119,22 @@ describe("SubagentCard", () => {
         },
       },
       {
-        role: "usage", call_id: "later-call", timestamp: "later",
+        role: "usage",
+        call_id: "later-call",
+        timestamp: "later",
         content: {
-          turnId: "turn", taskId: "task-1", runId: "run-2",
-          model: { providerId: "test", modelId: "test" }, contextWindow: 10000,
-          values: { inputTokens: 5000, cacheReadTokens: 4000, outputTokens: 900 }, estimated: [], toolCalls: 8,
+          turnId: "turn",
+          taskId: "task-1",
+          runId: "run-2",
+          model: { providerId: "test", modelId: "test" },
+          contextWindow: 10000,
+          values: {
+            inputTokens: 5000,
+            cacheReadTokens: 4000,
+            outputTokens: 900,
+          },
+          estimated: [],
+          toolCalls: 8,
         },
       },
     ]);
@@ -117,7 +143,11 @@ describe("SubagentCard", () => {
         <SubagentCard
           sessionId="subagent-usage-tab"
           part={part as never}
-          display={display({ runId: "run-1", status: "completed", result: "Final result" })}
+          display={display({
+            runId: "run-1",
+            status: "completed",
+            result: "Final result",
+          })}
         />,
       ),
     );
@@ -139,10 +169,28 @@ describe("SubagentCard", () => {
   });
 
   it("keeps the chosen tab when an execution completes", async () => {
-    await act(async () => root.render(<SubagentCard part={part as never} display={display()} />));
-    await act(async () => container.querySelector<HTMLButtonElement>("button[data-state]")?.click());
-    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Process 0")?.click());
-    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "completed", result: "Do not switch to me" })} />));
+    await act(async () =>
+      root.render(<SubagentCard part={part as never} display={display()} />),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>("button[data-state]")?.click(),
+    );
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Process 0")
+        ?.click(),
+    );
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({
+            status: "completed",
+            result: "Do not switch to me",
+          })}
+        />,
+      ),
+    );
     expect(container.textContent).not.toContain("Do not switch to me");
     expect(container.textContent).toContain("No tool calls.");
   });
@@ -150,22 +198,58 @@ describe("SubagentCard", () => {
   it("selects execution details without following a later resume while reading history", async () => {
     const execution = (number: number) => ({
       part: { ...part, toolCallId: `call-${number}` } as never,
-      number, current: number > 1,
-      display: display({ toolCallId: `call-${number}`, runId: `run-${number}`, status: "completed", result: `Result ${number}`, instructions: [`Instruction ${number}`] }),
+      number,
+      current: number > 1,
+      display: display({
+        toolCallId: `call-${number}`,
+        runId: `run-${number}`,
+        status: "completed",
+        result: `Result ${number}`,
+        instructions: [`Instruction ${number}`],
+      }),
     });
     const executions = [execution(1), execution(2)];
-    await act(async () => root.render(<SubagentCard part={part as never} executions={executions} />));
-    await act(async () => container.querySelector<HTMLButtonElement>("button[data-state]")?.click());
+    await act(async () =>
+      root.render(
+        <SubagentCard part={part as never} executions={executions} />,
+      ),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>("button[data-state]")?.click(),
+    );
     expect(container.textContent).toContain("Result 2");
-    await act(async () => container.querySelector('[role="combobox"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes("Execution 1"));
+    await act(async () =>
+      container
+        .querySelector('[role="combobox"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        ),
+    );
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.textContent?.includes("Execution 1"));
     expect(option).toBeDefined();
-    await act(async () => option?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await act(async () =>
+      option?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
     expect(container.textContent).toContain("Result 1");
-    await act(async () => root.render(<SubagentCard part={part as never} executions={[...executions, execution(3)]} />));
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          executions={[...executions, execution(3)]}
+        />,
+      ),
+    );
     expect(container.textContent).toContain("Result 1");
     expect(container.textContent).toContain("View latest execution 3");
-    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("View latest execution"))?.click());
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("View latest execution"))
+        ?.click(),
+    );
     expect(container.textContent).toContain("Result 3");
   });
 
@@ -222,22 +306,50 @@ describe("SubagentCard", () => {
   });
 
   it("updates the same call immediately without restarting its hold time for equivalent summaries", async () => {
-    const progress = display({ phase: "tool", steps: [{
-      id: "edit", toolName: "write_file", summary: ["a.ts"], status: "running",
-    }] });
-    await act(async () => root.render(<SubagentCard part={part as never} display={progress} />));
+    const progress = display({
+      phase: "tool",
+      steps: [
+        {
+          id: "edit",
+          toolName: "write_file",
+          summary: ["a.ts"],
+          status: "running",
+        },
+      ],
+    });
+    await act(async () =>
+      root.render(<SubagentCard part={part as never} display={progress} />),
+    );
     await act(async () => vi.advanceTimersByTime(500));
-    const enriched = display({ ...progress, steps: [{ ...progress.steps[0], summary: [{ label: "rewrite" }, "a.ts"] }] });
-    await act(async () => root.render(<SubagentCard part={part as never} display={enriched} />));
+    const enriched = display({
+      ...progress,
+      steps: [
+        { ...progress.steps[0], summary: [{ label: "rewrite" }, "a.ts"] },
+      ],
+    });
+    await act(async () =>
+      root.render(<SubagentCard part={part as never} display={enriched} />),
+    );
     expect(container.textContent).toContain("write_file Rewrite · a.ts");
     await act(async () => vi.advanceTimersByTime(500));
     const equivalent = JSON.parse(JSON.stringify(enriched));
-    await act(async () => root.render(<SubagentCard part={part as never} display={equivalent} />));
+    await act(async () =>
+      root.render(<SubagentCard part={part as never} display={equivalent} />),
+    );
     await act(async () => vi.advanceTimersByTime(1));
-    await act(async () => root.render(<SubagentCard part={part as never} display={display({
-      ...equivalent, status: "completed", durationMs: 1001,
-      steps: [{ ...equivalent.steps[0], status: "completed" }],
-    })} />));
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({
+            ...equivalent,
+            status: "completed",
+            durationMs: 1001,
+            steps: [{ ...equivalent.steps[0], status: "completed" }],
+          })}
+        />,
+      ),
+    );
     expect(container.textContent).toContain("Completed · 1 tool call · 1.0s");
   });
 
@@ -258,7 +370,9 @@ describe("SubagentCard", () => {
     const trigger = container.querySelector("button");
     expect(trigger).not.toBeNull();
     await act(async () => trigger?.click());
-    expect(container.textContent).not.toContain("Inspect the persistence boundary");
+    expect(container.textContent).not.toContain(
+      "Inspect the persistence boundary",
+    );
     expect(container.textContent).toContain("Final result");
     const taskTrigger = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Task",
@@ -296,15 +410,40 @@ describe("SubagentCard", () => {
     );
   });
   it("switches an open running task to its final result and hides cancellation internals", async () => {
-    await act(async () => root.render(<SubagentCard part={part as never} display={display()} />));
+    await act(async () =>
+      root.render(<SubagentCard part={part as never} display={display()} />),
+    );
     await act(async () => container.querySelector("button")?.click());
-    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "completed", result: "Finished work" })} />));
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({ status: "completed", result: "Finished work" })}
+        />,
+      ),
+    );
     expect(container.textContent).toContain("Finished work");
-    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "stopping" })} />));
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({ status: "stopping" })}
+        />,
+      ),
+    );
     expect(container.textContent).toContain("Stopping…");
-    await act(async () => root.render(<SubagentCard part={part as never} display={display({ status: "cancelled", error: "AbortError: signal is aborted without reason" })} />));
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({
+            status: "cancelled",
+            error: "AbortError: signal is aborted without reason",
+          })}
+        />,
+      ),
+    );
     expect(container.textContent).not.toContain("AbortError");
     expect(container.textContent).toContain("cancelled");
   });
-
 });

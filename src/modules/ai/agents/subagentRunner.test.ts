@@ -281,17 +281,28 @@ it("manages only owned tasks, keeps stable IDs and blocks exhausted resumes", as
   expect(await invoke("subagent_task", { action: "list" })).toMatchObject({
     concurrency: { limit: 1, running: 0 },
   });
-  expect(await invoke("subagent_task", { action: "get", task_id: "missing" })).toMatchObject({
-    status: "rejected", error: "Task not found in this chat.",
+  expect(
+    await invoke("subagent_task", { action: "get", task_id: "missing" }),
+  ).toMatchObject({
+    status: "rejected",
+    error: "Task not found in this chat.",
   });
   const cleanup = vi.spyOn(native, "shellStopTask").mockResolvedValue();
   try {
-    expect(await invoke("subagent_task", { action: "stop", task_id: started.task_id })).toMatchObject({
-      status: "completed", cleanup: "completed",
+    expect(
+      await invoke("subagent_task", {
+        action: "stop",
+        task_id: started.task_id,
+      }),
+    ).toMatchObject({
+      status: "completed",
+      cleanup: "completed",
     });
     expect(cleanup).toHaveBeenCalledWith("child-test", started.task_id);
     cleanup.mockRejectedValueOnce(new Error("cleanup failed"));
-    await expect(invoke("subagent_task", { action: "stop", task_id: started.task_id })).rejects.toThrow("cleanup failed");
+    await expect(
+      invoke("subagent_task", { action: "stop", task_id: started.task_id }),
+    ).rejects.toThrow("cleanup failed");
   } finally {
     cleanup.mockRestore();
   }

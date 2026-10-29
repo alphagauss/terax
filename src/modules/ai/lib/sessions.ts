@@ -139,7 +139,9 @@ export async function clearSessionProcesses(
   scope: "all" | "active" = "all",
 ): Promise<void> {
   const cleanup = await Promise.allSettled([
-    invoke(scope === "all" ? "shell_clear_owner" : "shell_stop_active", { ownerSessionId: id }),
+    invoke(scope === "all" ? "shell_clear_owner" : "shell_stop_active", {
+      ownerSessionId: id,
+    }),
     toolsSettled,
   ]);
   // 进程先终止以唤醒工具；文件运行时必须等工具收尾后再释放。

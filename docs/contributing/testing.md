@@ -7,12 +7,17 @@
 前端：
 
 ```sh
+pnpm format:check
 pnpm lint
 pnpm check-types
 pnpm test
 ```
 
 可向 `pnpm test` 传入相关测试文件。构建或发布变更增加 `pnpm build`。
+
+格式化使用固定版本 Biome，配置 schema 与工具版本一起更新。`pnpm format` 写入格式化结果，`pnpm format:check` 仅检查；CI 将格式检查作为必过步骤。格式范围覆盖项目自有前端源码、CSS、JSON、HTML 入口、脚本和根配置，使用 2 空格、80 列建议行宽和 LF，CSS 开启 Tailwind 指令解析。注册表管理的 `src/components/ui/`、`src/components/ai-elements/` 保持排除，生成产物遵循 Git 忽略规则。
+
+格式化、lint 和导入整理分别配置范围；扩展格式化范围不自动扩大 lint 范围。VS Code 保存时执行格式化和导入整理，不自动应用 quick fix。需要修复 lint 时显式执行 `pnpm lint:fix`，该命令只修改 `src/`；`pnpm format` 不执行 lint 修复或导入整理。
 
 Rust，在 `src-tauri/` 中执行：
 

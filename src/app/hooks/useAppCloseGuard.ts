@@ -97,8 +97,7 @@ export function useAppCloseGuard(
 
       void (async () => {
         try {
-          const autoSavedDocuments =
-            (await saveAutoSaveDocuments?.()) ?? false;
+          const autoSavedDocuments = (await saveAutoSaveDocuments?.()) ?? false;
           const busyTerminal = ignoreBlockers
             ? false
             : await anyTerminalBusy(tabsRef.current);

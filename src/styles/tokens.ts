@@ -13,9 +13,7 @@ export type TerminalTokens = Record<
   string
 >;
 
-const KEYS = Object.keys(
-  TERMINAL_TOKEN_VARIABLES,
-) as (keyof TerminalTokens)[];
+const KEYS = Object.keys(TERMINAL_TOKEN_VARIABLES) as (keyof TerminalTokens)[];
 
 let probe: HTMLDivElement | null = null;
 

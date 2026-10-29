@@ -977,7 +977,10 @@ export function projectSessionMessages(
     )
       statuses.set(record.turn_id, record.turn_status);
   }
-  const materialized = materializeSubagentDisplayParts(messages, projectSubagentDisplays(records));
+  const materialized = materializeSubagentDisplayParts(
+    messages,
+    projectSubagentDisplays(records),
+  );
   const finalByTurn = new Map<string, UIMessage>();
   for (const message of materialized) {
     if (message.role === "user") continue;
@@ -1472,10 +1475,19 @@ export function materializeSubagentDisplayParts(
   if (snapshots.length === 0) return [...messages];
   return messages.map((message) => {
     if (message.role !== "assistant") return message;
-    const turnId = messageMetadata(message).turnId ?? message.parts.find(isSubagentDisplayDataPart)?.data.snapshot.parentTurnId;
-    const byToolCallId = new Map(snapshots
-      .filter((snapshot) => !turnId || !snapshot.parentTurnId || snapshot.parentTurnId === turnId)
-      .map((snapshot) => [snapshot.toolCallId, snapshot]));
+    const turnId =
+      messageMetadata(message).turnId ??
+      message.parts.find(isSubagentDisplayDataPart)?.data.snapshot.parentTurnId;
+    const byToolCallId = new Map(
+      snapshots
+        .filter(
+          (snapshot) =>
+            !turnId ||
+            !snapshot.parentTurnId ||
+            snapshot.parentTurnId === turnId,
+        )
+        .map((snapshot) => [snapshot.toolCallId, snapshot]),
+    );
     const parts = attachSubagentDisplays(message.parts, byToolCallId);
     return parts === message.parts ? message : { ...message, parts };
   });

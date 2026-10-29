@@ -8,9 +8,17 @@ describe("markdownCodeText", () => {
 
     const text = markdownCodeText([
       "\n",
-      React.createElement("span", { key: "a" }, 'const client = createClient("");'),
+      React.createElement(
+        "span",
+        { key: "a" },
+        'const client = createClient("");',
+      ),
       "\n",
-      React.createElement("span", { key: "b" }, 'await client.send({ id: "example" });'),
+      React.createElement(
+        "span",
+        { key: "b" },
+        'await client.send({ id: "example" });',
+      ),
       "\n",
     ]);
 

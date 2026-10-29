@@ -219,12 +219,7 @@ export async function createAgentSession(options: {
         );
         chat.messages = messages;
       }
-      await persistCompletedTurn(
-        record(),
-        cursor,
-        messages,
-        outcome,
-      );
+      await persistCompletedTurn(record(), cursor, messages, outcome);
       persisted = true;
       if (savedDisplays.length)
         chat.messages = materializeSubagentDisplayParts(

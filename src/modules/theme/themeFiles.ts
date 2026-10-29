@@ -9,10 +9,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { appConfigDir, join } from "@tauri-apps/api/path";
 import type { Theme } from "./types";
 import { validateTheme, type ValidationResult } from "./validateTheme";
-import {
-  darkModernVariant,
-  lightModernVariant,
-} from "./themes/modern";
+import { darkModernVariant, lightModernVariant } from "./themes/modern";
 
 const THEME_FILE_EXT = ".terax-theme";
 const THEME_EDIT_EVENT = "terax://theme-edit";
@@ -85,7 +82,8 @@ export function starterTheme(): Theme {
   return {
     id,
     name: "My Theme",
-    description: "Custom theme based on the complete Modern light and dark templates.",
+    description:
+      "Custom theme based on the complete Modern light and dark templates.",
     variants: {
       light: {
         colors: { ...lightModernVariant.colors },

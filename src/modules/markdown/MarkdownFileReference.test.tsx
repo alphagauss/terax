@@ -22,9 +22,7 @@ vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
     t: (key: string, options?: { line?: number }) =>
-      key === "fileActions.lineReference"
-        ? `(line:${options?.line})`
-        : key,
+      key === "fileActions.lineReference" ? `(line:${options?.line})` : key,
   }),
 }));
 

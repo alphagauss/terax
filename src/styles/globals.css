@@ -30,71 +30,74 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
 }
 
 @theme inline {
-    --default-transition-duration: var(--dur-feedback);
-    --default-transition-timing-function: var(--ease-standard);
-    --ease-in: var(--ease-standard);
-    --ease-out: var(--ease-standard);
-    --ease-in-out: var(--ease-standard);
-    --font-heading: var(--font-sans);
-    --font-sans: 'Inter Variable', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    --spacing-page: 1.5rem;
-    --spacing-section: 1rem;
-    --spacing-field: 0.75rem;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-activity-bar-hover: var(--activity-bar-hover);
-    --color-activity-bar-active: var(--activity-bar-active);
-    --color-activity-bar-selected: var(--activity-bar-selected);
-    --color-activity-bar-selected-hover: var(--activity-bar-selected-hover);
-    --color-activity-bar-selected-active: var(--activity-bar-selected-active);
-    --color-activity-bar-selected-foreground: var(--activity-bar-selected-foreground);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-layout-divider: var(--layout-divider);
-    --color-destructive: var(--destructive);
-    --color-success: var(--success);
-    --color-warning: var(--warning);
-    --color-info: var(--info);
-    --color-interactive-hover: var(--interactive-hover);
-    --color-interactive-active: var(--interactive-active);
-    --color-git-modified: var(--git-modified);
-    --color-git-added: var(--git-added);
-    --color-git-untracked: var(--git-untracked);
-    --color-git-renamed: var(--git-renamed);
-    --color-git-deleted: var(--git-deleted);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+  --default-transition-duration: var(--dur-feedback);
+  --default-transition-timing-function: var(--ease-standard);
+  --ease-in: var(--ease-standard);
+  --ease-out: var(--ease-standard);
+  --ease-in-out: var(--ease-standard);
+  --font-heading: var(--font-sans);
+  --font-sans:
+    "Inter Variable", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --spacing-page: 1.5rem;
+  --spacing-section: 1rem;
+  --spacing-field: 0.75rem;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-activity-bar-hover: var(--activity-bar-hover);
+  --color-activity-bar-active: var(--activity-bar-active);
+  --color-activity-bar-selected: var(--activity-bar-selected);
+  --color-activity-bar-selected-hover: var(--activity-bar-selected-hover);
+  --color-activity-bar-selected-active: var(--activity-bar-selected-active);
+  --color-activity-bar-selected-foreground: var(
+    --activity-bar-selected-foreground
+  );
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-layout-divider: var(--layout-divider);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-interactive-hover: var(--interactive-hover);
+  --color-interactive-active: var(--interactive-active);
+  --color-git-modified: var(--git-modified);
+  --color-git-added: var(--git-added);
+  --color-git-untracked: var(--git-untracked);
+  --color-git-renamed: var(--git-renamed);
+  --color-git-deleted: var(--git-deleted);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @utility duration-feedback {
@@ -155,116 +158,116 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
 
 /* React 挂载前的安全回退必须与完整 Modern 基准保持一致。 */
 :root {
-    --background: #ffffff;
-    --foreground: #333333;
-    --card: #f8f8f8;
-    --card-foreground: #333333;
-    --popover: #ffffff;
-    --popover-foreground: #333333;
-    --primary: #005fb8;
-    --primary-foreground: #ffffff;
-    --secondary: #e5e5e5;
-    --secondary-foreground: #333333;
-    --muted: #f8f8f8;
-    --muted-foreground: #595959;
-    --accent: #f2f2f2;
-    --accent-foreground: #333333;
-    --destructive: #f85149;
-    --success: #188038;
-    --warning: #895503;
-    --info: #005fb8;
-    --border: #e5e5e5;
-    --layout-divider: color-mix(in srgb, var(--border) 92%, var(--foreground));
-    --input: #e5e5e5;
-    --ring: #005fb8;
-    --interactive-hover: rgba(59, 59, 59, 0.09);
-    --interactive-active: rgba(59, 59, 59, 0.13);
-    --search-match-background: #ffef5a;
-    --search-current-match-background: #ffa84d;
-    --git-modified: #95661c;
-    --git-added: #698924;
-    --git-untracked: #1a7f1a;
-    --git-renamed: #1a7f1a;
-    --git-deleted: #b52020;
-    --editor-git-modified: #2472c8;
-    --editor-git-added: #0dbc79;
-    --editor-git-deleted: #cd3131;
-    --chart-1: #005fb8;
-    --chart-2: #007100;
-    --chart-3: #895503;
-    --chart-4: #af00db;
-    --chart-5: #ad0707;
-    --radius: 0.5rem;
-    --sidebar: #f5f5f5;
-    --sidebar-foreground: #333333;
-    --sidebar-primary: #005fb8;
-    --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f2f2f2;
-    --sidebar-accent-foreground: #333333;
-    --activity-bar-hover: #e6e6e6;
-    --activity-bar-active: #d4d4d4;
-    --activity-bar-selected: #d6e9fa;
-    --activity-bar-selected-hover: #c1ddf5;
-    --activity-bar-selected-active: #a8ceed;
-    --activity-bar-selected-foreground: #004f9a;
-    --sidebar-border: #e5e5e5;
-    --sidebar-ring: #005fb8;
+  --background: #ffffff;
+  --foreground: #333333;
+  --card: #f8f8f8;
+  --card-foreground: #333333;
+  --popover: #ffffff;
+  --popover-foreground: #333333;
+  --primary: #005fb8;
+  --primary-foreground: #ffffff;
+  --secondary: #e5e5e5;
+  --secondary-foreground: #333333;
+  --muted: #f8f8f8;
+  --muted-foreground: #595959;
+  --accent: #f2f2f2;
+  --accent-foreground: #333333;
+  --destructive: #f85149;
+  --success: #188038;
+  --warning: #895503;
+  --info: #005fb8;
+  --border: #e5e5e5;
+  --layout-divider: color-mix(in srgb, var(--border) 92%, var(--foreground));
+  --input: #e5e5e5;
+  --ring: #005fb8;
+  --interactive-hover: rgba(59, 59, 59, 0.09);
+  --interactive-active: rgba(59, 59, 59, 0.13);
+  --search-match-background: #ffef5a;
+  --search-current-match-background: #ffa84d;
+  --git-modified: #95661c;
+  --git-added: #698924;
+  --git-untracked: #1a7f1a;
+  --git-renamed: #1a7f1a;
+  --git-deleted: #b52020;
+  --editor-git-modified: #2472c8;
+  --editor-git-added: #0dbc79;
+  --editor-git-deleted: #cd3131;
+  --chart-1: #005fb8;
+  --chart-2: #007100;
+  --chart-3: #895503;
+  --chart-4: #af00db;
+  --chart-5: #ad0707;
+  --radius: 0.5rem;
+  --sidebar: #f5f5f5;
+  --sidebar-foreground: #333333;
+  --sidebar-primary: #005fb8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f2f2f2;
+  --sidebar-accent-foreground: #333333;
+  --activity-bar-hover: #e6e6e6;
+  --activity-bar-active: #d4d4d4;
+  --activity-bar-selected: #d6e9fa;
+  --activity-bar-selected-hover: #c1ddf5;
+  --activity-bar-selected-active: #a8ceed;
+  --activity-bar-selected-foreground: #004f9a;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #005fb8;
 }
 
 .dark {
-    --background: #1f1f1f;
-    --foreground: #d4d4d4;
-    --card: #181818;
-    --card-foreground: #d4d4d4;
-    --popover: #202020;
-    --popover-foreground: #d4d4d4;
-    --primary: #0078d4;
-    --primary-foreground: #ffffff;
-    --secondary: #2b2b2b;
-    --secondary-foreground: #d4d4d4;
-    --muted: #2b2b2b;
-    --muted-foreground: #adadad;
-    --accent: #2b2b2b;
-    --accent-foreground: #d4d4d4;
-    --destructive: #f85149;
-    --success: #73c991;
-    --warning: #e2c08d;
-    --info: #4daafc;
-    --border: #2b2b2b;
-    --layout-divider: color-mix(in srgb, var(--border) 60%, transparent);
-    --input: #313131;
-    --ring: #0078d4;
-    --interactive-hover: rgba(204, 204, 204, 0.09);
-    --interactive-active: rgba(204, 204, 204, 0.13);
-    --search-match-background: #a88e12;
-    --search-current-match-background: #ce7618;
-    --git-modified: #e2c08d;
-    --git-added: #81b88b;
-    --git-untracked: #73c991;
-    --git-renamed: #73c991;
-    --git-deleted: #c74e39;
-    --editor-git-modified: #0451a5;
-    --editor-git-added: #107c10;
-    --editor-git-deleted: #cd3131;
-    --chart-1: #4daafc;
-    --chart-2: #73c991;
-    --chart-3: #e2c08d;
-    --chart-4: #d670d6;
-    --chart-5: #c74e39;
-    --sidebar: #181818;
-    --sidebar-foreground: #d4d4d4;
-    --sidebar-primary: #0078d4;
-    --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #2b2b2b;
-    --sidebar-accent-foreground: #d4d4d4;
-    --activity-bar-hover: #333333;
-    --activity-bar-active: #444444;
-    --activity-bar-selected: #173b57;
-    --activity-bar-selected-hover: #214d6e;
-    --activity-bar-selected-active: #2b5d82;
-    --activity-bar-selected-foreground: #b8e0ff;
-    --sidebar-border: #2b2b2b;
-    --sidebar-ring: #0078d4;
+  --background: #1f1f1f;
+  --foreground: #d4d4d4;
+  --card: #181818;
+  --card-foreground: #d4d4d4;
+  --popover: #202020;
+  --popover-foreground: #d4d4d4;
+  --primary: #0078d4;
+  --primary-foreground: #ffffff;
+  --secondary: #2b2b2b;
+  --secondary-foreground: #d4d4d4;
+  --muted: #2b2b2b;
+  --muted-foreground: #adadad;
+  --accent: #2b2b2b;
+  --accent-foreground: #d4d4d4;
+  --destructive: #f85149;
+  --success: #73c991;
+  --warning: #e2c08d;
+  --info: #4daafc;
+  --border: #2b2b2b;
+  --layout-divider: color-mix(in srgb, var(--border) 60%, transparent);
+  --input: #313131;
+  --ring: #0078d4;
+  --interactive-hover: rgba(204, 204, 204, 0.09);
+  --interactive-active: rgba(204, 204, 204, 0.13);
+  --search-match-background: #a88e12;
+  --search-current-match-background: #ce7618;
+  --git-modified: #e2c08d;
+  --git-added: #81b88b;
+  --git-untracked: #73c991;
+  --git-renamed: #73c991;
+  --git-deleted: #c74e39;
+  --editor-git-modified: #0451a5;
+  --editor-git-added: #107c10;
+  --editor-git-deleted: #cd3131;
+  --chart-1: #4daafc;
+  --chart-2: #73c991;
+  --chart-3: #e2c08d;
+  --chart-4: #d670d6;
+  --chart-5: #c74e39;
+  --sidebar: #181818;
+  --sidebar-foreground: #d4d4d4;
+  --sidebar-primary: #0078d4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2b2b2b;
+  --sidebar-accent-foreground: #d4d4d4;
+  --activity-bar-hover: #333333;
+  --activity-bar-active: #444444;
+  --activity-bar-selected: #173b57;
+  --activity-bar-selected-hover: #214d6e;
+  --activity-bar-selected-active: #2b5d82;
+  --activity-bar-selected-foreground: #b8e0ff;
+  --sidebar-border: #2b2b2b;
+  --sidebar-ring: #0078d4;
 }
 
 @layer base {
@@ -276,21 +279,23 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
   }
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
     margin: 0;
     overflow: hidden;
-    }
-  html, body, #root {
+  }
+  html,
+  body,
+  #root {
     height: 100%;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
   button:enabled {
     cursor: pointer;
-    }
+  }
 }
 
 :root {
@@ -371,20 +376,23 @@ html[data-chrome="borderless"] #auxiliary-root {
   background: var(--background);
 }
 html[data-chrome="borderless"]:is(
-  [data-window-maximized],
-  [data-window-fullscreen],
-  [data-zen-mode]
-) .terax-bg-surface,
+    [data-window-maximized],
+    [data-window-fullscreen],
+    [data-zen-mode]
+  )
+  .terax-bg-surface,
 html[data-chrome="borderless"]:is(
-  [data-window-maximized],
-  [data-window-fullscreen],
-  [data-zen-mode]
-) #root,
+    [data-window-maximized],
+    [data-window-fullscreen],
+    [data-zen-mode]
+  )
+  #root,
 html[data-chrome="borderless"]:is(
-  [data-window-maximized],
-  [data-window-fullscreen],
-  [data-zen-mode]
-) #auxiliary-root {
+    [data-window-maximized],
+    [data-window-fullscreen],
+    [data-zen-mode]
+  )
+  #auxiliary-root {
   border: 0;
   border-radius: 0;
 }
@@ -432,7 +440,6 @@ textarea,
   opacity: 0;
   cursor: pointer;
 }
-
 
 .no-scrollbar {
   scrollbar-width: none !important;

@@ -22,19 +22,44 @@ body,
   font-size: 12px;
 }
 
-.screenshot-hint { pointer-events: none; }
-.screenshot-feedback { display: flex; gap: 12px; }
-.screenshot-editor .screenshots-button { border: 0; background: transparent; color: var(--foreground); }
+.screenshot-hint {
+  pointer-events: none;
+}
+.screenshot-feedback {
+  display: flex;
+  gap: 12px;
+}
+.screenshot-editor .screenshots-button {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+}
 .screenshot-editor .screenshots-operations-buttons,
 .screenshot-editor .screenshots-option-container {
   background: var(--popover);
   color: var(--popover-foreground);
   border-color: var(--border);
 }
-.screenshot-editor .screenshots-button:hover { background: var(--accent); }
-.screenshot-editor .screenshots-button-checked { color: var(--primary); }
-.screenshot-editor .screenshots-option[data-placement="top"] .screenshots-option-arrow { border-top-color: var(--popover); }
-.screenshot-editor .screenshots-option[data-placement="bottom"] .screenshots-option-arrow { border-bottom-color: var(--popover); }
-.screenshot-editor .screenshots-operations-divider { background-color: var(--border); }
+.screenshot-editor .screenshots-button:hover {
+  background: var(--accent);
+}
+.screenshot-editor .screenshots-button-checked {
+  color: var(--primary);
+}
+.screenshot-editor
+  .screenshots-option[data-placement="top"]
+  .screenshots-option-arrow {
+  border-top-color: var(--popover);
+}
+.screenshot-editor
+  .screenshots-option[data-placement="bottom"]
+  .screenshots-option-arrow {
+  border-bottom-color: var(--popover);
+}
+.screenshot-editor .screenshots-operations-divider {
+  background-color: var(--border);
+}
 /* Tailwind 的图片最大宽度不能把选区内的整屏底图压缩到选区宽度。 */
-.screenshot-editor .screenshots-canvas-image { max-width: none; }
+.screenshot-editor .screenshots-canvas-image {
+  max-width: none;
+}

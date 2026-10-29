@@ -1,1 +1,111 @@
-[{"data":"\u001b[6n"},{"data":"\u001b[?9001h\u001b[?1004h"},{"data":"\u001b[m\u001b]0;C:\\WINDOWS\\system32\\wsl.exe\u0007\u001b[?25h"},{"data":"w"},{"data":"sl: 检测到 localhost 代理配置，但未镜像到 WSL。NAT 模式下的 WSL 不支持 localhost 代理。\r\n"},{"data":"\u001b]777;terax;tasks;13774;idle;\u001b\\\u001b]133;D;0\u001b\\"},{"data":"\u001b]7;file://userx/mnt/c/Users/local\u001b\\"},{"data":"\u001b]133;A\u001b\\"},{"data":"\u001b]777;terax;tasks;13774;idle;\u001b\\\u001b]133;D;0\u001b\\"},{"data":"\u001b]7;file://userx/mnt/c/Users/local\u001b\\"},{"data":"\u001b]133;A\u001b\\"},{"data":"\u001b[?2004h\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ \u001b]0;userx@userx: /mnt/c/Users/local\u0007"},{"data":"\u001b[?2004l\u001b]777;terax;tasks;13774;running;\u001b\\seq -f 'ROW_%02g' 1 45\r\n\u001b]133;C\u001b\\"},{"data":"ROW_01\r\nROW_02\r\nROW_03\r\nROW_04\r\nROW_05\r\nROW_06\r\nROW_07\r\nROW_08\r\nROW_09\r\nROW_10\r\nROW_11\r\nROW_12\r\nROW_13\r\nROW_14\r\nROW_15\r\nROW_16\r\nROW_17\r\nROW_18\r\nROW_19\r\nROW_20\r\nROW_21\r\nROW_22\r\nROW_23\r\nROW_24\r\nROW_25\r\nROW_26\r\nROW_27\r\nROW_28\r\nROW_29\r"},{"data":"\nROW_30\r\nROW_31\r\nROW_32\r\nROW_33\r\nROW_34\r\nROW_35\r\nROW_36\r\nROW_37\r\nROW_38\r\nROW_39\r\nROW_40\r\nROW_41\r\nROW_42\r\nROW_43\r\nROW_44\r\nROW_45\r"},{"data":"\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"},{"data":"\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"},{"data":"\u001b[?2004h\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"data":"printf '%s\\n' \\\r\u001b[?2004l"},{"data":"\n"},{"data":"\u001b[?2004h"},{"data":"> 'FIRST' \\\r\u001b[?2004l\u001b[?2004h\n> 'SECOND'\r\u001b[?2004l\u001b]777;terax;tasks;13774;running;\u001b\\\n\u001b]133;C\u001b\\"},{"data":"FIRST\r\nSECOND\r"},{"data":"\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"},{"data":"\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"},{"data":"\u001b[?2004h\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"data":"python3 -c 'print(\"JSON_\"*160)'\r\u001b[?2004l"},{"data":"\n"},{"data":"\u001b]777;terax;tasks;13774;running;\u001b\\\u001b]133;C\u001b\\"},{"data":"JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[24;1H"},{"data":"\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"},{"data":"\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"},{"data":"\u001b[?2004h\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"cols":45,"rows":20},{"data":"\u001b[?25l\u001b[8;20;45t\u001b[Hrint(\"JSON_\"*160)'\u001b[K\r\nJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[K\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\u001b[1C\u001b[?25h"},{"data":"\r\u001b[K\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"cols":100,"rows":35},{"data":"\u001b[?25l\u001b[Hrint(\"JSON_\"*160)'\u001b[K\r\nJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\u001b[10;33H\u001b[?25h"},{"data":"\r\u001b[K\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"cols":35,"rows":12},{"data":"\u001b[?25l\u001b[HJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_     \u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$    \u001b[12;33H\u001b[?25h"},{"data":"\r\u001b[K\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "},{"cols":80,"rows":24},{"data":"\u001b[?25l\u001b[HJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[K\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\u001b[6;33H\u001b[?25h"},{"data":"\r\u001b[K\u001b]133;B\u001b\\"},{"data":"\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "}]
+[
+  { "data": "\u001b[6n" },
+  { "data": "\u001b[?9001h\u001b[?1004h" },
+  {
+    "data": "\u001b[m\u001b]0;C:\\WINDOWS\\system32\\wsl.exe\u0007\u001b[?25h"
+  },
+  { "data": "w" },
+  {
+    "data": "sl: 检测到 localhost 代理配置，但未镜像到 WSL。NAT 模式下的 WSL 不支持 localhost 代理。\r\n"
+  },
+  {
+    "data": "\u001b]777;terax;tasks;13774;idle;\u001b\\\u001b]133;D;0\u001b\\"
+  },
+  { "data": "\u001b]7;file://userx/mnt/c/Users/local\u001b\\" },
+  { "data": "\u001b]133;A\u001b\\" },
+  {
+    "data": "\u001b]777;terax;tasks;13774;idle;\u001b\\\u001b]133;D;0\u001b\\"
+  },
+  { "data": "\u001b]7;file://userx/mnt/c/Users/local\u001b\\" },
+  { "data": "\u001b]133;A\u001b\\" },
+  { "data": "\u001b[?2004h\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ \u001b]0;userx@userx: /mnt/c/Users/local\u0007"
+  },
+  {
+    "data": "\u001b[?2004l\u001b]777;terax;tasks;13774;running;\u001b\\seq -f 'ROW_%02g' 1 45\r\n\u001b]133;C\u001b\\"
+  },
+  {
+    "data": "ROW_01\r\nROW_02\r\nROW_03\r\nROW_04\r\nROW_05\r\nROW_06\r\nROW_07\r\nROW_08\r\nROW_09\r\nROW_10\r\nROW_11\r\nROW_12\r\nROW_13\r\nROW_14\r\nROW_15\r\nROW_16\r\nROW_17\r\nROW_18\r\nROW_19\r\nROW_20\r\nROW_21\r\nROW_22\r\nROW_23\r\nROW_24\r\nROW_25\r\nROW_26\r\nROW_27\r\nROW_28\r\nROW_29\r"
+  },
+  {
+    "data": "\nROW_30\r\nROW_31\r\nROW_32\r\nROW_33\r\nROW_34\r\nROW_35\r\nROW_36\r\nROW_37\r\nROW_38\r\nROW_39\r\nROW_40\r\nROW_41\r\nROW_42\r\nROW_43\r\nROW_44\r\nROW_45\r"
+  },
+  {
+    "data": "\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"
+  },
+  {
+    "data": "\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"
+  },
+  { "data": "\u001b[?2004h\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "data": "printf '%s\\n' \\\r\u001b[?2004l" },
+  { "data": "\n" },
+  { "data": "\u001b[?2004h" },
+  {
+    "data": "> 'FIRST' \\\r\u001b[?2004l\u001b[?2004h\n> 'SECOND'\r\u001b[?2004l\u001b]777;terax;tasks;13774;running;\u001b\\\n\u001b]133;C\u001b\\"
+  },
+  { "data": "FIRST\r\nSECOND\r" },
+  {
+    "data": "\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"
+  },
+  {
+    "data": "\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"
+  },
+  { "data": "\u001b[?2004h\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "data": "python3 -c 'print(\"JSON_\"*160)'\r\u001b[?2004l" },
+  { "data": "\n" },
+  {
+    "data": "\u001b]777;terax;tasks;13774;running;\u001b\\\u001b]133;C\u001b\\"
+  },
+  {
+    "data": "JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\r\n\u001b[23;80H_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[24;1H"
+  },
+  {
+    "data": "\u001b]777;terax;tasks;13774;idle;\u001b\\\n\u001b]133;D;0\u001b\\"
+  },
+  {
+    "data": "\u001b]7;file://userx/mnt/c/Users/local\u001b\\\u001b]133;A\u001b\\"
+  },
+  { "data": "\u001b[?2004h\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "cols": 45, "rows": 20 },
+  {
+    "data": "\u001b[?25l\u001b[8;20;45t\u001b[Hrint(\"JSON_\"*160)'\u001b[K\r\nJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[K\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\u001b[1C\u001b[?25h"
+  },
+  { "data": "\r\u001b[K\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "cols": 100, "rows": 35 },
+  {
+    "data": "\u001b[?25l\u001b[Hrint(\"JSON_\"*160)'\u001b[K\r\nJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\u001b[10;33H\u001b[?25h"
+  },
+  { "data": "\r\u001b[K\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "cols": 35, "rows": 12 },
+  {
+    "data": "\u001b[?25l\u001b[HJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_     \u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$    \u001b[12;33H\u001b[?25h"
+  },
+  { "data": "\r\u001b[K\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  },
+  { "cols": 80, "rows": 24 },
+  {
+    "data": "\u001b[?25l\u001b[HJSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_JSON_\u001b[K\u001b[32m\u001b[1m\r\nuserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\r\n\u001b[K\u001b[6;33H\u001b[?25h"
+  },
+  { "data": "\r\u001b[K\u001b]133;B\u001b\\" },
+  {
+    "data": "\u001b[32m\u001b[1muserx@userx\u001b[m:\u001b[34m\u001b[1m/mnt/c/Users/local\u001b[m$ "
+  }
+]

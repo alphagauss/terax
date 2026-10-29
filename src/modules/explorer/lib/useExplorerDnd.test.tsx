@@ -36,16 +36,14 @@ it("拖入附件目标只附加；取消或拖出文件树不会移动，拖回�
   const drag = (target: Element | null, cancel = false, release = target) => {
     point.mockReturnValue(target);
     act(() =>
-      container
-        .querySelector("[data-fs-path]")
-        ?.dispatchEvent(
-          new PointerEvent("pointerdown", {
-            bubbles: true,
-            button: 0,
-            clientX: 10,
-            clientY: 10,
-          }),
-        ),
+      container.querySelector("[data-fs-path]")?.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: 10,
+          clientY: 10,
+        }),
+      ),
     );
     act(() =>
       window.dispatchEvent(

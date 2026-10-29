@@ -109,8 +109,12 @@ it.each([false, true])(
       '[data-streamdown="table-wrapper"] > div:last-child',
     );
     expect(tableViewport).not.toBeNull();
-    expect(tableViewport?.getAttribute("style") ?? "").not.toContain("max-height");
-    expect(tableViewport?.hasAttribute("data-markdown-table-scroll")).toBe(false);
+    expect(tableViewport?.getAttribute("style") ?? "").not.toContain(
+      "max-height",
+    );
+    expect(tableViewport?.hasAttribute("data-markdown-table-scroll")).toBe(
+      false,
+    );
     expect(tableViewport?.classList.contains("overflow-auto")).toBe(true);
     expect(document.querySelector("li")?.textContent?.trim()).toBe(
       '货币为 "$"（加元），标价 $16.95。',

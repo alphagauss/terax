@@ -43,12 +43,11 @@ export function FileEditTool({
           size={13}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium">
-          {toolName}
-        </span>
+        <span className="shrink-0 font-medium">{toolName}</span>
         <span className="min-w-0 truncate font-mono text-muted-foreground">
           {formatToolSummary(
-            describeToolCall(toolName, input, state !== "input-streaming"), t,
+            describeToolCall(toolName, input, state !== "input-streaming"),
+            t,
           )}
         </span>
         {!denied && (

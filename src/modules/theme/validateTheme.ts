@@ -47,7 +47,8 @@ function parseColors(raw: unknown, path: string): ThemeColors | string {
       return `${path}.${k} is not a recognized color key`;
     }
     const v = raw[k];
-    if (!isStr(v) || v.length === 0) return `${path}.${k} must be a non-empty string`;
+    if (!isStr(v) || v.length === 0)
+      return `${path}.${k} must be a non-empty string`;
     out[k as keyof ThemeColors] = v;
   }
   return out;
@@ -60,9 +61,7 @@ function parseTerminal(raw: unknown, path: string): TerminalPalette | string {
   for (const k of Object.keys(raw)) {
     if (
       k !== "ansi" &&
-      !TERMINAL_BASE_KEYS.includes(
-        k as Exclude<keyof TerminalPalette, "ansi">,
-      )
+      !TERMINAL_BASE_KEYS.includes(k as Exclude<keyof TerminalPalette, "ansi">)
     ) {
       return `${path}.${k} is not a recognized terminal key`;
     }
@@ -147,7 +146,8 @@ export function validateTheme(raw: unknown): ValidationResult {
   if (!isStr(raw.name) || raw.name.trim().length === 0) {
     return { ok: false, error: "name must be a non-empty string" };
   }
-  if (!isObj(raw.variants)) return { ok: false, error: "variants must be an object" };
+  if (!isObj(raw.variants))
+    return { ok: false, error: "variants must be an object" };
   const variants: Theme["variants"] = {};
   if (raw.variants.light !== undefined) {
     const v = parseVariant(raw.variants.light, "variants.light");
@@ -160,7 +160,10 @@ export function validateTheme(raw: unknown): ValidationResult {
     variants.dark = v;
   }
   if (!variants.light && !variants.dark) {
-    return { ok: false, error: "variants must contain at least one of: light, dark" };
+    return {
+      ok: false,
+      error: "variants must contain at least one of: light, dark",
+    };
   }
   const theme: Theme = {
     id: raw.id,

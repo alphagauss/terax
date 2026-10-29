@@ -145,9 +145,7 @@ describe("SSH traffic control", () => {
 
     const { container, root } = render(createElement(SshTrafficControl));
     await act(async () => Promise.resolve());
-    expect(container.querySelector("button")?.textContent).toBe(
-      "0 KB/s0 KB/s",
-    );
+    expect(container.querySelector("button")?.textContent).toBe("0 KB/s0 KB/s");
 
     sampledAt = 1_000;
     await act(async () => {
@@ -161,9 +159,7 @@ describe("SSH traffic control", () => {
 
     visibility = "hidden";
     act(() => document.dispatchEvent(new Event("visibilitychange")));
-    expect(container.querySelector("button")?.textContent).toBe(
-      "0 KB/s0 KB/s",
-    );
+    expect(container.querySelector("button")?.textContent).toBe("0 KB/s0 KB/s");
     await vi.advanceTimersByTimeAsync(2_000);
     expect(mocks.trafficSnapshot).toHaveBeenCalledTimes(2);
 
@@ -174,9 +170,7 @@ describe("SSH traffic control", () => {
       await Promise.resolve();
     });
     expect(mocks.trafficSnapshot).toHaveBeenCalledTimes(3);
-    expect(container.querySelector("button")?.textContent).toBe(
-      "0 KB/s0 KB/s",
-    );
+    expect(container.querySelector("button")?.textContent).toBe("0 KB/s0 KB/s");
     expect(container.textContent).toContain("2.98 KB");
     expect(container.textContent).toContain("5.95 KB");
 

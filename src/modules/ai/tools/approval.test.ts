@@ -241,7 +241,14 @@ describe("AI tool approval mode", () => {
       stdout: "",
       stderr: "",
     });
-    nativeMock.shellList.mockResolvedValue([{ process_id: processId, task_id: "abcd", execution_id: "private-run", command: "server" }]);
+    nativeMock.shellList.mockResolvedValue([
+      {
+        process_id: processId,
+        task_id: "abcd",
+        execution_id: "private-run",
+        command: "server",
+      },
+    ]);
     const tools = buildShellTools(context);
     if (!tools.shell_process.execute || !tools.shell_list.execute) {
       throw new Error("Shell process tools must be executable");

@@ -87,9 +87,9 @@ describe("WindowControls", () => {
   it("marks the document when the window is fullscreen", async () => {
     await renderControls({ maximized: false, fullscreen: true });
 
-    expect(document.documentElement.hasAttribute("data-window-fullscreen")).toBe(
-      true,
-    );
+    expect(
+      document.documentElement.hasAttribute("data-window-fullscreen"),
+    ).toBe(true);
   });
 
   it("marks the document when the window is maximized", async () => {

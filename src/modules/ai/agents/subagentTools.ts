@@ -69,7 +69,10 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
       if (input.action === "list")
         return {
           tasks: [...store.tasks.values()].map(describe),
-          concurrency: { limit: opts.maxConcurrentSubagents, running: coordinator.runningCount },
+          concurrency: {
+            limit: opts.maxConcurrentSubagents,
+            running: coordinator.runningCount,
+          },
         };
       const task = store.tasks.get(input.taskId ?? "");
       if (!task)
@@ -85,7 +88,7 @@ export function buildManagedSubagentTools(opts: RunAgentOptions) {
             task.taskId,
             input.timeoutMs ?? 30000,
             execution.abortSignal ?? opts.abortSignal,
-          )) ?? restored
+          )) ?? restored,
         );
       }
       if (input.action === "get") {

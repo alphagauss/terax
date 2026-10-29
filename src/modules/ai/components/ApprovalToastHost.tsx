@@ -149,9 +149,14 @@ function ApprovalToast({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 text-[12px] font-medium">{request.toolName}</span>
+        <span className="shrink-0 text-[12px] font-medium">
+          {request.toolName}
+        </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-          {formatToolSummary(describeToolCall(request.toolName, request.input), t)}
+          {formatToolSummary(
+            describeToolCall(request.toolName, request.input),
+            t,
+          )}
         </span>
         <Hint content={`${sessionTitle}: ${t("toolApproval.needsApproval")}`}>
           <span className="max-w-28 truncate text-[10px] text-muted-foreground">
@@ -263,7 +268,8 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
             {t("toolApproval.destination")}: {destination}
           </div>
         ) : null}
-        {request.input.operation === "delete" && request.input.recursive === true ? (
+        {request.input.operation === "delete" &&
+        request.input.recursive === true ? (
           <div className="text-[10.5px] text-muted-foreground">
             {t("toolApproval.recursiveDelete")}
           </div>

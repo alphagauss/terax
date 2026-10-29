@@ -5,7 +5,15 @@
 
 import { ExecutionProcesses } from "@/modules/ai/components/SessionProcesses";
 import type { SubagentExecution } from "@/modules/ai/components/SubagentCards";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/controls/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/controls/select";
 import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
@@ -14,7 +22,10 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
-import { FileEditContext, FileEditStats } from "@/modules/ai/components/FileEditStats";
+import {
+  FileEditContext,
+  FileEditStats,
+} from "@/modules/ai/components/FileEditStats";
 import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
 import { useChatDisplayActive } from "@/modules/ai/hooks/chatDisplay";
 import {
@@ -85,14 +96,22 @@ export function SubagentCard({
   const fileEdits = useContext(FileEditContext);
   const [selectedId, setSelectedId] = useState<string>();
   const latest = executions?.[executions.length - 1];
-  const selected = executions?.find((item) => (item.display.runId ?? item.part.toolCallId) === selectedId) ?? latest;
+  const selected =
+    executions?.find(
+      (item) => (item.display.runId ?? item.part.toolCallId) === selectedId,
+    ) ?? latest;
   const part = selected?.part ?? originalPart;
   const display = selected?.display ?? originalDisplay;
   const latestDisplay = latest?.display ?? originalDisplay;
-  const selectedFileEdits = useMemo(() => selected
-    ? { sessionId, calls: selected.fileEditCalls }
-    : fileEdits, [sessionId, selected, fileEdits]);
-  const latestStatus = resolveStatus(latest?.part ?? originalPart, latestDisplay, backgroundResult);
+  const selectedFileEdits = useMemo(
+    () => (selected ? { sessionId, calls: selected.fileEditCalls } : fileEdits),
+    [sessionId, selected, fileEdits],
+  );
+  const latestStatus = resolveStatus(
+    latest?.part ?? originalPart,
+    latestDisplay,
+    backgroundResult,
+  );
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
   const task = stringValue(input?.task) ?? stringValue(input?.message) ?? "";
@@ -112,12 +131,18 @@ export function SubagentCard({
     resultFromToolError(part);
   const [open, setOpen] = useState(false);
   const [chosenTab, setTab] = useState<"process" | "result" | "usage">();
-  const tab = chosenTab ?? (status === "running" || status === "stopping" ? "process" : "result");
+  const tab =
+    chosenTab ??
+    (status === "running" || status === "stopping" ? "process" : "result");
   const [taskOpen, setTaskOpen] = useState(false);
-  const label = latestDisplay?.label ?? stringValue(input?.label) ?? t("chat.subagent.title");
+  const label =
+    latestDisplay?.label ??
+    stringValue(input?.label) ??
+    t("chat.subagent.title");
   const taskId = latestDisplay?.taskId ?? stringValue(output?.task_id);
-  const color = `var(--chart-${1 + [...(taskId ?? "")].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 5})`;
-  const statusLabel = (value: SubagentDisplayStatus) => t(`chat.subagent.${value === "incomplete" ? "stepLimit" : value}`);
+  const color = `var(--chart-${1 + ([...(taskId ?? "")].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 5)})`;
+  const statusLabel = (value: SubagentDisplayStatus) =>
+    t(`chat.subagent.${value === "incomplete" ? "stepLimit" : value}`);
 
   return (
     <Collapsible
@@ -139,10 +164,14 @@ export function SubagentCard({
             <span className="min-w-0 truncate text-[12px] font-medium text-foreground">
               {label}
             </span>
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{taskId}</span>
-            {latest && <span className="shrink-0 text-[10px] text-muted-foreground">
-              {t("chat.subagent.execution", { number: latest.number })}
-            </span>}
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+              {taskId}
+            </span>
+            {latest && (
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {t("chat.subagent.execution", { number: latest.number })}
+              </span>
+            )}
             {!open &&
               headline.kind === "running" &&
               headline.action.kind === "tool" && (
@@ -162,10 +191,17 @@ export function SubagentCard({
                 {runningActionLabel(headline.action, t)}
               </Shimmer>
             ) : (
-              terminalSummary(headline.status, latestDisplay?.steps.length ?? 0, latestDisplay, t)
+              terminalSummary(
+                headline.status,
+                latestDisplay?.steps.length ?? 0,
+                latestDisplay,
+                t,
+              )
             )}
           </span>
-          <span className="block"><ExecutionProcesses runId={latestDisplay?.runId} /></span>
+          <span className="block">
+            <ExecutionProcesses runId={latestDisplay?.runId} />
+          </span>
         </span>
         <HugeiconsIcon
           icon={ArrowRight01Icon}
@@ -180,47 +216,111 @@ export function SubagentCard({
 
       <CollapsibleContent className="terax-collapsible-content border-t border-border/30">
         <div className="space-y-2.5 px-2.5 py-2">
-          {executions && selected && <>
-            <div className="text-[10px] text-muted-foreground">
-              {t("chat.subagent.turnExecutions", { count: executions.filter((item) => item.current).length })}
-            </div>
-            <Select value={selected.display.runId ?? selected.part.toolCallId} onValueChange={(id) => { setSelectedId(id === (latest?.display.runId ?? latest?.part.toolCallId) ? undefined : id); setTab(undefined); setTaskOpen(true); }}>
-              <SelectTrigger size="sm" aria-label={t("chat.subagent.executions")} data-chat-scroll-preserve>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[true, false].map((current) => {
-                  const items = executions.filter((item) => item.current === current);
-                  return items.length > 0 && <SelectGroup key={String(current)}>
-                    <SelectLabel>{t(current ? "chat.subagent.currentExecutions" : "chat.subagent.historyExecutions")}</SelectLabel>
-                    {items.map((item) => <SelectItem key={item.display.runId ?? item.part.toolCallId} value={item.display.runId ?? item.part.toolCallId}>
-                      {t("chat.subagent.execution", { number: item.number })} · {statusLabel(item.display.status)} · {(item.display.instructions?.[0] ?? "").replace(/\s+/g, " ").slice(0, 60)}
-                    </SelectItem>)}
-                  </SelectGroup>;
+          {executions && selected && (
+            <>
+              <div className="text-[10px] text-muted-foreground">
+                {t("chat.subagent.turnExecutions", {
+                  count: executions.filter((item) => item.current).length,
                 })}
-              </SelectContent>
-            </Select>
-            {selected !== latest && <button type="button" data-chat-scroll-preserve
-              className="text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={() => { setSelectedId(undefined); setTab(undefined); }}>
-              {t("chat.subagent.latestExecution", { number: latest?.number })} · {statusLabel(latestStatus)}
-            </button>}
-          </>}
+              </div>
+              <Select
+                value={selected.display.runId ?? selected.part.toolCallId}
+                onValueChange={(id) => {
+                  setSelectedId(
+                    id === (latest?.display.runId ?? latest?.part.toolCallId)
+                      ? undefined
+                      : id,
+                  );
+                  setTab(undefined);
+                  setTaskOpen(true);
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  aria-label={t("chat.subagent.executions")}
+                  data-chat-scroll-preserve
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[true, false].map((current) => {
+                    const items = executions.filter(
+                      (item) => item.current === current,
+                    );
+                    return (
+                      items.length > 0 && (
+                        <SelectGroup key={String(current)}>
+                          <SelectLabel>
+                            {t(
+                              current
+                                ? "chat.subagent.currentExecutions"
+                                : "chat.subagent.historyExecutions",
+                            )}
+                          </SelectLabel>
+                          {items.map((item) => (
+                            <SelectItem
+                              key={item.display.runId ?? item.part.toolCallId}
+                              value={item.display.runId ?? item.part.toolCallId}
+                            >
+                              {t("chat.subagent.execution", {
+                                number: item.number,
+                              })}{" "}
+                              · {statusLabel(item.display.status)} ·{" "}
+                              {(item.display.instructions?.[0] ?? "")
+                                .replace(/\s+/g, " ")
+                                .slice(0, 60)}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              {selected !== latest && (
+                <button
+                  type="button"
+                  data-chat-scroll-preserve
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setSelectedId(undefined);
+                    setTab(undefined);
+                  }}
+                >
+                  {t("chat.subagent.latestExecution", {
+                    number: latest?.number,
+                  })}{" "}
+                  · {statusLabel(latestStatus)}
+                </button>
+              )}
+            </>
+          )}
 
           <ExecutionProcesses runId={display?.runId} />
           <Collapsible open={taskOpen} onOpenChange={setTaskOpen}>
             <CollapsibleTrigger className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">
-              <HugeiconsIcon icon={ArrowRight01Icon} size={10} className={cn(taskOpen && "rotate-90")} />
+              <HugeiconsIcon
+                icon={ArrowRight01Icon}
+                size={10}
+                className={cn(taskOpen && "rotate-90")}
+              />
               {t("chat.subagent.task")}
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="mt-1 whitespace-pre-wrap wrap-break-word text-[11.5px] leading-relaxed text-foreground">
-                {display?.instructions?.[0] || task || t("chat.subagent.emptyTask")}
+                {display?.instructions?.[0] ||
+                  task ||
+                  t("chat.subagent.emptyTask")}
                 {display?.instructions?.slice(1).map((instruction, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: 补充要求在一次执行内只追加，正文与序号共同区分重复消息。
-                  <div key={`${index}-${instruction}`} className="mt-2 border-t border-border/30 pt-2">
+                  <div
+                    key={`${index}-${instruction}`}
+                    className="mt-2 border-t border-border/30 pt-2"
+                  >
                     <span className="block text-[10px] text-muted-foreground">
-                      {t("chat.subagent.additionalInstruction", { number: index + 1 })}
+                      {t("chat.subagent.additionalInstruction", {
+                        number: index + 1,
+                      })}
                     </span>
                     {instruction}
                   </div>
@@ -248,21 +348,21 @@ export function SubagentCard({
           </div>
 
           <FileEditContext.Provider value={selectedFileEdits}>
-          {tab === "process" ? (
-            <ProcessList
-              steps={steps}
-              running={status === "running"}
-              taskId={display?.taskId}
-            />
-          ) : tab === "usage" ? (
-            <TaskUsageDetails
-              sessionId={sessionId}
-              runId={display?.runId}
-              taskId={display?.taskId ?? stringValue(output?.task_id)}
-            />
-          ) : (
-            <ResultPanel status={status} result={result} />
-          )}
+            {tab === "process" ? (
+              <ProcessList
+                steps={steps}
+                running={status === "running"}
+                taskId={display?.taskId}
+              />
+            ) : tab === "usage" ? (
+              <TaskUsageDetails
+                sessionId={sessionId}
+                runId={display?.runId}
+                taskId={display?.taskId ?? stringValue(output?.task_id)}
+              />
+            ) : (
+              <ResultPanel status={status} result={result} />
+            )}
           </FileEditContext.Provider>
         </div>
       </CollapsibleContent>
@@ -323,7 +423,9 @@ function ProcessList({
         >
           <StepStatus status={step.status} />
           <span className="shrink-0 font-medium text-foreground">
-            {step.toolName === "web_search" || step.toolName === "web_fetch" ? t(`chat.web.${step.toolName}`) : step.toolName}
+            {step.toolName === "web_search" || step.toolName === "web_fetch"
+              ? t(`chat.web.${step.toolName}`)
+              : step.toolName}
           </span>
           {step.summary ? (
             <span className="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground">
@@ -352,7 +454,11 @@ function ResultPanel({
   if (status === "running" || status === "stopping") {
     return (
       <div className="rounded-md bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground">
-        {t(status === "stopping" ? "chat.subagent.stopping" : "chat.subagent.waitingResult")}
+        {t(
+          status === "stopping"
+            ? "chat.subagent.stopping"
+            : "chat.subagent.waitingResult",
+        )}
       </div>
     );
   }
@@ -513,7 +619,10 @@ function useStableHeadline(actual: Headline): Headline {
       shownRef.current = next;
       setShown(next);
     };
-    if (!mustHold || (actual.kind === "terminal" && actual.status === "stopping")) {
+    if (
+      !mustHold ||
+      (actual.kind === "terminal" && actual.status === "stopping")
+    ) {
       applyLatest();
       return;
     }
@@ -628,7 +737,10 @@ function runningActionLabel(
   t: ReturnType<typeof useTranslation<"ai">>["t"],
 ): string {
   if (action.kind === "thinking") return t("chat.subagent.thinking");
-  const label = action.toolName === "web_search" || action.toolName === "web_fetch" ? t(`chat.web.${action.toolName}`) : action.toolName;
+  const label =
+    action.toolName === "web_search" || action.toolName === "web_fetch"
+      ? t(`chat.web.${action.toolName}`)
+      : action.toolName;
   const summary = formatToolSummary(action.summary, t);
   return summary ? `${label} ${summary}` : label;
 }

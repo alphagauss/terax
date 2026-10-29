@@ -10,7 +10,12 @@ type AgentToastArgs = {
   onActivate: () => void;
 };
 
-export function showAgentToast({ agent, title, body, onActivate }: AgentToastArgs) {
+export function showAgentToast({
+  agent,
+  title,
+  body,
+  onActivate,
+}: AgentToastArgs) {
   const hint = shortcutLabel("agent.focusAttention");
   toast(title, {
     description: hint ? (

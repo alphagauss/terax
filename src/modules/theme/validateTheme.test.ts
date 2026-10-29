@@ -163,12 +163,12 @@ describe("validateTheme", () => {
   });
 
   it("rejects the removed top-level editorTheme reference", () => {
-    expect(validateTheme(baseTheme({ editorTheme: { dark: "tokyo" } }))).toEqual(
-      {
-        ok: false,
-        error: "editorTheme is not a recognized theme key",
-      },
-    );
+    expect(
+      validateTheme(baseTheme({ editorTheme: { dark: "tokyo" } })),
+    ).toEqual({
+      ok: false,
+      error: "editorTheme is not a recognized theme key",
+    });
   });
 
   it("captures optional author and description", () => {

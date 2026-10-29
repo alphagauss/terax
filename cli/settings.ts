@@ -124,11 +124,7 @@ export async function loadTerminalSettings(modelOption?: string) {
       getKeys: () => keys,
       getModel: () => selectedModel,
       getEnvironment: () =>
-        resolveAgentExecutionEnvironment(
-          { kind: "local" },
-          platform,
-          shells,
-        ),
+        resolveAgentExecutionEnvironment({ kind: "local" }, platform, shells),
       getCustomInstructions: () =>
         typeof settings.customInstructions === "string"
           ? settings.customInstructions

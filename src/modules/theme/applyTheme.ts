@@ -9,10 +9,7 @@ import {
   TERMINAL_BASE_VARIABLES,
   THEME_COLOR_VARIABLES,
 } from "./themeRegistry";
-import {
-  darkModernVariant,
-  lightModernVariant,
-} from "./themes/modern";
+import { darkModernVariant, lightModernVariant } from "./themes/modern";
 import type {
   CompleteThemeVariant,
   Theme,
@@ -31,7 +28,10 @@ const ALL_VARS: readonly string[] = [
 let lastApplied: string | null = null;
 
 /** 按请求模式选择主题变体，单变体主题继续沿用其已有配色。 */
-function selectVariant(theme: Theme, mode: ThemeMode): ThemeVariant | undefined {
+function selectVariant(
+  theme: Theme,
+  mode: ThemeMode,
+): ThemeVariant | undefined {
   return theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
 }
 
@@ -44,8 +44,7 @@ function completeVariant(
   variant: ThemeVariant,
   mode: ThemeMode,
 ): CompleteThemeVariant {
-  const baseline =
-    mode === "dark" ? darkModernVariant : lightModernVariant;
+  const baseline = mode === "dark" ? darkModernVariant : lightModernVariant;
   return {
     colors: { ...baseline.colors, ...variant.colors },
     terminal: {

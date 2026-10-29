@@ -50,21 +50,24 @@ describe("remote terminal exit classification", () => {
     ["vt200", "\x1b[?1000h"],
     ["drag", "\x1b[?1002h"],
     ["any", "\x1b[?1003h"],
-  ] as const)("clears stale %s mouse tracking without erasing history", async (mode, enableSequence) => {
-    const term = new Terminal({ allowProposedApi: true });
-    try {
-      await writeTerminal(term, "history before reconnect\r\n");
-      await writeTerminal(term, `${enableSequence}\x1b[?1006h`);
-      expect(term.modes.mouseTrackingMode).toBe(mode);
+  ] as const)(
+    "clears stale %s mouse tracking without erasing history",
+    async (mode, enableSequence) => {
+      const term = new Terminal({ allowProposedApi: true });
+      try {
+        await writeTerminal(term, "history before reconnect\r\n");
+        await writeTerminal(term, `${enableSequence}\x1b[?1006h`);
+        expect(term.modes.mouseTrackingMode).toBe(mode);
 
-      await writeTerminal(term, REMOTE_RECONNECT_RESET_SEQUENCE);
+        await writeTerminal(term, REMOTE_RECONNECT_RESET_SEQUENCE);
 
-      expect(term.modes.mouseTrackingMode).toBe("none");
-      expect(term.buffer.normal.getLine(0)?.translateToString(true)).toBe(
-        "history before reconnect",
-      );
-    } finally {
-      term.dispose();
-    }
-  });
+        expect(term.modes.mouseTrackingMode).toBe("none");
+        expect(term.buffer.normal.getLine(0)?.translateToString(true)).toBe(
+          "history before reconnect",
+        );
+      } finally {
+        term.dispose();
+      }
+    },
+  );
 });

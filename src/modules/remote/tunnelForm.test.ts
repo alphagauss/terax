@@ -21,7 +21,9 @@ describe("tunnel form", () => {
     form.targetPort = "";
 
     expect(tunnelValidationIssue(form)).toBeNull();
-    expect(tunnelConfigFromForm(form, "ssh-prod", "tunnel-socks")).toMatchObject({
+    expect(
+      tunnelConfigFromForm(form, "ssh-prod", "tunnel-socks"),
+    ).toMatchObject({
       configId: "tunnel-socks",
       profileId: "ssh-prod",
       bindPort: 0,
@@ -56,7 +58,9 @@ describe("tunnel form", () => {
     });
 
     expect(form.bindPort).toBe("0");
-    expect(tunnelConfigFromForm(form, "ssh-prod", "tunnel-app").bindPort).toBe(0);
+    expect(tunnelConfigFromForm(form, "ssh-prod", "tunnel-app").bindPort).toBe(
+      0,
+    );
   });
 
   it("keeps an empty name and derives a concise display label", () => {

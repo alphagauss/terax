@@ -24,7 +24,10 @@ import {
   startChatMessage,
   steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
-import { appendSessionDisplay, clearIdleSessionProcesses } from "@/modules/ai/store/chatStore";
+import {
+  appendSessionDisplay,
+  clearIdleSessionProcesses,
+} from "@/modules/ai/store/chatStore";
 import {
   projectDeliveries,
   useDeliveryHistory,
@@ -253,15 +256,24 @@ describe("chat store multi-process lifecycle", () => {
   it("holds the session lock throughout explicit process cleanup and releases it on failure", async () => {
     useChatStore.setState({ sessions: [first], activeSessionId: first.id });
     let finish!: () => void;
-    io.clearProcesses.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    io.clearProcesses.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const cleanup = clearIdleSessionProcesses(first.id);
-    await vi.waitFor(() => expect(io.clearProcesses).toHaveBeenCalledWith(first.id));
+    await vi.waitFor(() =>
+      expect(io.clearProcesses).toHaveBeenCalledWith(first.id),
+    );
     expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
     finish();
     await cleanup;
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
     io.clearProcesses.mockRejectedValueOnce(new Error("cleanup failed"));
-    await expect(clearIdleSessionProcesses(first.id)).rejects.toThrow("cleanup failed");
+    await expect(clearIdleSessionProcesses(first.id)).rejects.toThrow(
+      "cleanup failed",
+    );
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
     expect(io.release).toHaveBeenCalledTimes(2);
   });
@@ -398,7 +410,9 @@ describe("chat store multi-process lifecycle", () => {
       }
       expect(io.read).not.toHaveBeenCalled();
       expect(sending).not.toHaveBeenCalled();
-      expect(useSessionAttentionStore.getState().activeRunSessionIds).toEqual({});
+      expect(useSessionAttentionStore.getState().activeRunSessionIds).toEqual(
+        {},
+      );
       expect(
         useChatStore.getState().runLockSessionIds[first.id],
       ).toBeUndefined();
@@ -927,17 +941,17 @@ describe("chat store multi-process lifecycle", () => {
     expect(
       useSessionAttentionStore.getState().activeRunSessionIds[first.id],
     ).toBe(true);
-    expect(
-      useSessionAttentionStore.getState().bySession[first.id],
-    ).toBe("background-running");
+    expect(useSessionAttentionStore.getState().bySession[first.id]).toBe(
+      "background-running",
+    );
     expect(useSessionAttentionStore.getState().pendingCompletions).toEqual([]);
     await useChatStore.getState().commitMessages(first.id, []);
     expect(
       useSessionAttentionStore.getState().activeRunSessionIds[first.id],
     ).toBeUndefined();
-    expect(
-      useSessionAttentionStore.getState().bySession[first.id],
-    ).toBe("completed-unread");
+    expect(useSessionAttentionStore.getState().bySession[first.id]).toBe(
+      "completed-unread",
+    );
     expect(
       useChatStore.getState().agentMetaBySession[first.id]?.commitError,
     ).toBeUndefined();

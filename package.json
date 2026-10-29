@@ -121,7 +121,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
-    "@biomejs/biome": "^2.5.9",
+    "@biomejs/biome": "2.5.9",
     "@opentui/core": "^0.5.10",
     "@opentui/react": "^0.5.10",
     "@rolldown/plugin-babel": "^0.2.3",

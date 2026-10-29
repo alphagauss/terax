@@ -4,7 +4,7 @@
   "editor.codeActionsOnSave": {
     "source.organizeImports": "never",
     "source.organizeImports.biome": "explicit",
-    "quickfix.biome": "explicit"
+    "quickfix.biome": "never"
   },
   "files.associations": {
     "**/src/styles/globals.css": "tailwindcss"

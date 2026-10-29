@@ -33,16 +33,14 @@ afterEach(async () => {
 });
 
 it("shares native process status by execution, pauses hidden reads, and observes actual exits", async () => {
-  const list = vi
-    .spyOn(native, "shellList")
-    .mockResolvedValue([
-      {
-        process_id: "p",
-        command: "server",
-        execution_id: "run-1",
-        task_id: "abcd",
-      } as ShellProcessInfo,
-    ]);
+  const list = vi.spyOn(native, "shellList").mockResolvedValue([
+    {
+      process_id: "p",
+      command: "server",
+      execution_id: "run-1",
+      task_id: "abcd",
+    } as ShellProcessInfo,
+  ]);
   const render = (active: boolean) =>
     root.render(
       <ChatDisplayContext.Provider value={active}>

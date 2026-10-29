@@ -211,12 +211,19 @@ export function TaskUsageDetails({
 }) {
   const { t } = useTranslation("ai");
   const records = useUsageRecords(sessionId).filter(
-    (record) => taskId != null && record.taskId === taskId && runId != null && record.runId === runId,
+    (record) =>
+      taskId != null &&
+      record.taskId === taskId &&
+      runId != null &&
+      record.runId === runId,
   );
   return (
     <div className="space-y-1 text-[11px]">
       <UsageDetails records={records} />
-      <OutputToolDetails records={records} outputLabel={t("chat.subagent.executionOutput")} />
+      <OutputToolDetails
+        records={records}
+        outputLabel={t("chat.subagent.executionOutput")}
+      />
     </div>
   );
 }

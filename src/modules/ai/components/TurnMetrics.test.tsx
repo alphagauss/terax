@@ -52,14 +52,12 @@ it("opens saved statistics on hover and excludes other turns and subagents", asy
     );
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     await act(async () =>
-      container
-        .querySelector("button")
-        ?.dispatchEvent(
-          new PointerEvent("pointermove", {
-            bubbles: true,
-            pointerType: "mouse",
-          }),
-        ),
+      container.querySelector("button")?.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
     );
     await act(async () => vi.advanceTimersByTimeAsync(800));
     const panel = document.querySelector('[role="tooltip"]');

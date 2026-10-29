@@ -167,7 +167,11 @@ export class FileEditRuntime {
   }
 
   /** 完整参数在工具执行前立即发布，避免短调用被节流窗口吞掉。 */
-  private publishEstimate(key: string, state: InputState, input: unknown): void {
+  private publishEstimate(
+    key: string,
+    state: InputState,
+    input: unknown,
+  ): void {
     state.onInput?.(state.toolCallId, state.toolName, input);
     const stats = estimateFileEdit(state.toolName, input);
     const previous = this.values.get(key);

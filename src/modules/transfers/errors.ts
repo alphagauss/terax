@@ -49,10 +49,7 @@ export function formatTransferFailure(
 }
 
 /** 本地化 Tauri 操作错误，并为非传输错误保留可诊断文本。 */
-export function formatTransferError(
-  error: unknown,
-  t: TFunction,
-): string {
+export function formatTransferError(error: unknown, t: TFunction): string {
   const failure = parseTransferFailure(error);
   return failure
     ? formatTransferFailure(failure, t)

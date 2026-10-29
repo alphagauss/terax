@@ -7,10 +7,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { applyTheme, clearTheme } from "./applyTheme";
-import {
-  darkModernVariant,
-  lightModernVariant,
-} from "./themes/modern";
+import { darkModernVariant, lightModernVariant } from "./themes/modern";
 import type { Theme } from "./types";
 
 afterEach(() => {
@@ -95,7 +92,9 @@ describe("applyTheme", () => {
       document.documentElement.style.getPropertyValue("--interactive-active"),
     ).toBe("custom-active");
     expect(
-      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+      document.documentElement.style.getPropertyValue(
+        "--activity-bar-selected",
+      ),
     ).toBe("custom-selected");
     expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),
@@ -110,7 +109,9 @@ describe("applyTheme", () => {
       document.documentElement.style.getPropertyValue("--interactive-active"),
     ).toBe(darkModernVariant.colors.interactiveActive);
     expect(
-      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+      document.documentElement.style.getPropertyValue(
+        "--activity-bar-selected",
+      ),
     ).toBe(darkModernVariant.colors.activityBarSelected);
     expect(
       document.documentElement.style.getPropertyValue("--foreground"),
@@ -119,21 +120,23 @@ describe("applyTheme", () => {
       document.documentElement.style.getPropertyValue("--layout-divider"),
     ).toBe(darkModernVariant.colors.layoutDivider);
     expect(
-      document.documentElement.style.getPropertyValue(
-        "--terminal-ansi-yellow",
-      ),
+      document.documentElement.style.getPropertyValue("--terminal-ansi-yellow"),
     ).toBe(darkModernVariant.terminal.ansi[3]);
 
     applyTheme(fallback, "light");
     expect(
-      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+      document.documentElement.style.getPropertyValue(
+        "--activity-bar-selected",
+      ),
     ).toBe(lightModernVariant.colors.activityBarSelected);
     expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),
     ).toBe(lightModernVariant.colors.layoutDivider);
     clearTheme();
     expect(
-      document.documentElement.style.getPropertyValue("--activity-bar-selected"),
+      document.documentElement.style.getPropertyValue(
+        "--activity-bar-selected",
+      ),
     ).toBe("");
     expect(
       document.documentElement.style.getPropertyValue("--layout-divider"),

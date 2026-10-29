@@ -238,9 +238,7 @@ describe("agent system prompt", () => {
     expect(prompt).toContain('"version":"7.1"');
     expect(prompt).toContain('"version":"5.1"');
     expect(prompt).not.toContain('"version":null');
-    expect(prompt).toContain(
-      "Put commands directly in shell_exec.command",
-    );
+    expect(prompt).toContain("Put commands directly in shell_exec.command");
     const unknownVersionPrompt = buildAgentSystemPrompt({
       ...options,
       environment: {

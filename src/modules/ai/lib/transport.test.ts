@@ -19,7 +19,9 @@ const mocks = vi.hoisted(() => ({
   toUIMessageStream: vi.fn(),
 }));
 
-vi.mock("@/modules/ai/web/runtime", () => ({ prepareWebServices: mocks.prepareWebServices }));
+vi.mock("@/modules/ai/web/runtime", () => ({
+  prepareWebServices: mocks.prepareWebServices,
+}));
 
 vi.mock("./agent", () => ({ runAgentStream: mocks.runAgentStream }));
 vi.mock("../external-agents/runtime", async (importOriginal) => ({
@@ -345,13 +347,21 @@ describe("session transport", () => {
   });
 });
 
-
 it("keeps web service snapshots across approval continuation and refreshes on the next turn", async () => {
-  mocks.runAgentStream.mockResolvedValue({ toUIMessageStream: () => new ReadableStream({ start(controller) { controller.close(); } }) });
+  mocks.runAgentStream.mockResolvedValue({
+    toUIMessageStream: () =>
+      new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+  });
   mocks.readWorkspaceInstructions.mockResolvedValue([]);
   const first = { search: vi.fn() };
   const second = { fetch: vi.fn() };
-  mocks.prepareWebServices.mockReturnValueOnce(first).mockReturnValueOnce(second);
+  mocks.prepareWebServices
+    .mockReturnValueOnce(first)
+    .mockReturnValueOnce(second);
   let turnId = "web-turn-1";
   let key = "first-key";
   const transport = createSessionTransport({
@@ -361,7 +371,16 @@ it("keeps web service snapshots across approval continuation and refreshes on th
     toolContext,
     getModel: () => modelRefForProvider("openai", "model"),
     getCustomInstructions: () => "",
-    getAgent: () => ({ revision: 1, id: "builtin:main", name: "Terax", instructions: "", description: "", workspaceFiles: [], icon: "coder", tools: ["web_search", "web_fetch"] }),
+    getAgent: () => ({
+      revision: 1,
+      id: "builtin:main",
+      name: "Terax",
+      instructions: "",
+      description: "",
+      workspaceFiles: [],
+      icon: "coder",
+      tools: ["web_search", "web_fetch"],
+    }),
     getCwd: () => "D:/workspace/project",
     getEnvironment: () => environment,
   });
@@ -369,16 +388,24 @@ it("keeps web service snapshots across approval continuation and refreshes on th
   key = "next-key";
   await transport.sendMessages({ messages: [] });
   expect(mocks.prepareWebServices).toHaveBeenCalledTimes(1);
-  expect(mocks.runAgentStream.mock.lastCall?.[0].toolContext.webServices).toBe(first);
+  expect(mocks.runAgentStream.mock.lastCall?.[0].toolContext.webServices).toBe(
+    first,
+  );
   turnId = "web-turn-2";
   await transport.sendMessages({ messages: [] });
-  expect(mocks.prepareWebServices).toHaveBeenLastCalledWith("next-key", undefined);
-  expect(mocks.runAgentStream.mock.lastCall?.[0].toolContext.webServices).toBe(second);
+  expect(mocks.prepareWebServices).toHaveBeenLastCalledWith(
+    "next-key",
+    undefined,
+  );
+  expect(mocks.runAgentStream.mock.lastCall?.[0].toolContext.webServices).toBe(
+    second,
+  );
 });
 
-
 it("applies tool availability through agent revisions only on a new turn", async () => {
-  const { publishAgentConfigurations, readAgentConfiguration } = await import("./agentConfiguration");
+  const { publishAgentConfigurations, readAgentConfiguration } = await import(
+    "./agentConfiguration"
+  );
   const { MAIN_AGENT } = await import("./agentDefinition");
   mocks.runAgentStream.mockClear();
   mocks.readWorkspaceInstructions.mockClear().mockResolvedValue([]);
@@ -387,18 +414,29 @@ it("applies tool availability through agent revisions only on a new turn", async
   publishAgentConfigurations([agent], { web_search: true });
   let turnId = "availability-1";
   const transport = createSessionTransport({
-    ...subagentDeps, getTurnId: () => turnId,
-    getKeys: () => ({ deepseek: "key" }) as never, toolContext,
+    ...subagentDeps,
+    getTurnId: () => turnId,
+    getKeys: () => ({ deepseek: "key" }) as never,
+    toolContext,
     getModel: () => modelRefForProvider("openai", "model"),
     getCustomInstructions: () => "",
     getAgent: () => readAgentConfiguration(agent.id),
-    getCwd: () => "D:/workspace/project", getEnvironment: () => environment,
+    getCwd: () => "D:/workspace/project",
+    getEnvironment: () => environment,
   });
-  const messages: UIMessage[] = [{ id: "history", role: "user", parts: [{ type: "text", text: "Existing conversation" }] }];
+  const messages: UIMessage[] = [
+    {
+      id: "history",
+      role: "user",
+      parts: [{ type: "text", text: "Existing conversation" }],
+    },
+  ];
   await transport.sendMessages({ messages });
   publishAgentConfigurations([agent], { web_search: false });
   await transport.sendMessages({ messages });
-  expect(mocks.runAgentStream.mock.lastCall?.[0].allowedTools).toEqual(["web_search"]);
+  expect(mocks.runAgentStream.mock.lastCall?.[0].allowedTools).toEqual([
+    "web_search",
+  ]);
   expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(1);
   turnId = "availability-2";
   await transport.sendMessages({ messages });
@@ -408,7 +446,9 @@ it("applies tool availability through agent revisions only on a new turn", async
   publishAgentConfigurations([agent], { web_search: true });
   turnId = "availability-3";
   await transport.sendMessages({ messages });
-  expect(mocks.runAgentStream.mock.lastCall?.[0].allowedTools).toEqual(["web_search"]);
+  expect(mocks.runAgentStream.mock.lastCall?.[0].allowedTools).toEqual([
+    "web_search",
+  ]);
   expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(3);
   expect(agent.tools).toEqual(["web_search"]);
 });

@@ -25,15 +25,19 @@ describe("ToastDismissOnClick", () => {
     const onClose = vi.fn();
     container = document.createElement("div");
     container.innerHTML =
-      '<div data-sonner-toast><span>Message</span><button data-close-button>Close</button></div>';
+      "<div data-sonner-toast><span>Message</span><button data-close-button>Close</button></div>";
     document.body.append(container);
-    container.querySelector("[data-close-button]")?.addEventListener("click", onClose);
+    container
+      .querySelector("[data-close-button]")
+      ?.addEventListener("click", onClose);
     root = createRoot(document.createElement("div"));
 
     await act(async () => {
       root?.render(createElement(ToastDismissOnClick));
     });
-    container.querySelector("span")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    container
+      .querySelector("span")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -43,16 +47,22 @@ describe("ToastDismissOnClick", () => {
     const onClose = vi.fn();
     container = document.createElement("div");
     container.innerHTML =
-      '<div data-sonner-toast><button data-button>Open</button><button data-close-button>Close</button></div>';
+      "<div data-sonner-toast><button data-button>Open</button><button data-close-button>Close</button></div>";
     document.body.append(container);
-    container.querySelector("[data-button]")?.addEventListener("click", onAction);
-    container.querySelector("[data-close-button]")?.addEventListener("click", onClose);
+    container
+      .querySelector("[data-button]")
+      ?.addEventListener("click", onAction);
+    container
+      .querySelector("[data-close-button]")
+      ?.addEventListener("click", onClose);
     root = createRoot(document.createElement("div"));
 
     await act(async () => {
       root?.render(createElement(ToastDismissOnClick));
     });
-    container.querySelector("[data-button]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    container
+      .querySelector("[data-button]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(onAction).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();

@@ -46,11 +46,15 @@ it("等待工具收尾后释放文件状态，即使进程终止失败也不提�
 it("普通停止使用活跃执行范围，显式清理使用完整聊天范围", async () => {
   ipc.mockReset();
   await clearSessionProcesses("session", Promise.resolve(), "active");
-  expect(ipc).toHaveBeenCalledWith("shell_stop_active", { ownerSessionId: "session" });
+  expect(ipc).toHaveBeenCalledWith("shell_stop_active", {
+    ownerSessionId: "session",
+  });
   expect(ipc).not.toHaveBeenCalledWith("shell_clear_owner", expect.anything());
   ipc.mockClear();
   await clearSessionProcesses("session");
-  expect(ipc).toHaveBeenCalledWith("shell_clear_owner", { ownerSessionId: "session" });
+  expect(ipc).toHaveBeenCalledWith("shell_clear_owner", {
+    ownerSessionId: "session",
+  });
 });
 
 it("从真实用户正文生成标题，不读取结构化片段", () => {
@@ -78,8 +82,14 @@ it("从真实用户正文生成标题，不读取结构化片段", () => {
 it.each([
   ["  请看\n  这里的具体问题  ", "请看 这里的具体问题"],
   ["\t\r\nReview\r\n\r\n\tthis issue\rplease\n", "Review this issue please"],
-  [`  ${"a".repeat(20)}\n${"b".repeat(19)}  `, `${"a".repeat(20)} ${"b".repeat(19)}`],
-  [`\n${"a".repeat(20)}\n${"b".repeat(20)}`, `${"a".repeat(20)} ${"b".repeat(19)}…`],
+  [
+    `  ${"a".repeat(20)}\n${"b".repeat(19)}  `,
+    `${"a".repeat(20)} ${"b".repeat(19)}`,
+  ],
+  [
+    `\n${"a".repeat(20)}\n${"b".repeat(20)}`,
+    `${"a".repeat(20)} ${"b".repeat(19)}…`,
+  ],
 ])("清理标题空白后沿用 40 字符截断规则：%j", (text, title) => {
   const messages = [
     {

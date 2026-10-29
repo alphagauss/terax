@@ -3,12 +3,7 @@
  * 空名称保持为空并在展示时派生，避免配置参数修改后留下过期名称。
  */
 
-import type {
-  SshTunnel,
-  TunnelConfig,
-  TunnelInfo,
-  TunnelKind,
-} from "./types";
+import type { SshTunnel, TunnelConfig, TunnelInfo, TunnelKind } from "./types";
 
 export type TunnelForm = {
   name: string;
@@ -116,7 +111,8 @@ export function tunnelDisplayName(
   >,
 ): string {
   if (tunnel.name.trim()) return tunnel.name;
-  const type = tunnel.kind === "local" ? "L" : tunnel.kind === "remote" ? "R" : "D";
+  const type =
+    tunnel.kind === "local" ? "L" : tunnel.kind === "remote" ? "R" : "D";
   const bind = `${tunnel.bindHost}:${tunnel.bindPort || "auto"}`;
   return tunnel.kind === "dynamic"
     ? `${type} ${bind}`
