@@ -110,11 +110,11 @@ export function SshCapabilityControl() {
         <Hint content={t("sshCapabilities.aria", { state: label })}>
           <button
             type="button"
-            className="flex h-6 w-5 items-center justify-center rounded-sm hover:bg-accent"
+            className="status-bar-item min-w-6 justify-center hover:bg-accent"
             aria-label={t("sshCapabilities.aria", { state: label })}
           >
             <span
-              className={cn("size-2 rounded-full", lampClass[current.state])}
+              className={cn("size-1.5 rounded-full", lampClass[current.state])}
             />
           </button>
         </Hint>

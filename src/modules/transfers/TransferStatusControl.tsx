@@ -146,20 +146,19 @@ function TransferStatusPanel() {
           <button
             type="button"
             className={cn(
-              "flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground",
+              "status-bar-item text-muted-foreground hover:bg-accent hover:text-foreground",
               failed > 0 && "text-destructive",
             )}
             aria-label={t("transfers.title")}
           >
             {processing ? (
               <Spinner
-                className="size-[13px] motion-reduce:animate-none"
+                className="motion-reduce:animate-none"
                 aria-hidden="true"
               />
             ) : (
               <HugeiconsIcon
                 icon={ArrowDataTransferVerticalIcon}
-                size={13}
                 strokeWidth={1.8}
               />
             )}

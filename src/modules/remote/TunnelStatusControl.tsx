@@ -125,8 +125,8 @@ export function TunnelStatusControl() {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex h-6 items-center rounded-sm px-1.5 text-muted-foreground">
-            <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
+          <span className="status-bar-item text-muted-foreground">
+            <HugeiconsIcon icon={Route01Icon} strokeWidth={1.75} />
             <span className="sr-only">{t("tunnels.label")}</span>
           </span>
         </TooltipTrigger>
@@ -144,9 +144,9 @@ export function TunnelStatusControl() {
           aria-label={lifecycleError ?? t("tunnels.label")}
           type="button"
           onClick={() => setOpen(true)}
-          className="flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="status-bar-item text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
+          <HugeiconsIcon icon={Route01Icon} strokeWidth={1.75} />
           <span>
             {t("tunnels.count", { count: profile?.tunnels.length ?? 0 })}
           </span>

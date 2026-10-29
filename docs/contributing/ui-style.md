@@ -2,6 +2,8 @@
 
 Terax 使用紧凑桌面密度，业务页面复用公共控件与语义 token。尺寸和样式定义以 `components/controls/`、`components/layout/`、`components/settings/` 与 `styles/globals.css` 为准，菜单使用 `components/menu/`。
 
+底部状态栏与 Surf、AlphaGo 沿用相同的桌面密度约定，尺寸集中在 `modules/statusbar/status-bar.css`。常驻控件继承状态栏字号，功能图标、网速箭头和状态圆点分别统一；详情浮层保留自身规格。长路径与标签可收缩省略，完整信息仍通过原有提示或详情查看。
+
 ## 展示规则
 
 - Hugeicons 使用包公开的单图标子路径导入，避免开发模式加载整套图标数据；保持现有图标形状、名称和交互不变。

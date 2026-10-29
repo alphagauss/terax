@@ -35,7 +35,7 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
         type="button"
         onClick={onClick}
         className={cn(
-          "flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors",
+          "status-bar-item status-bar-badge border transition-colors",
           "border-transparent text-muted-foreground hover:border-border/60 hover:bg-accent hover:text-foreground",
           active && "border-border bg-accent text-foreground",
         )}
@@ -45,7 +45,7 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
         {hasRunningSession ? (
           <span className="size-1.5 shrink-0 rounded-full bg-warning" />
         ) : null}
-        <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />
+        <HugeiconsIcon icon={AiChat01Icon} strokeWidth={1.75} />
         <span>AI</span>
       </button>
     </Hint>

@@ -121,13 +121,9 @@ export function WorkspaceEnvSelector({
             <button
               aria-label={triggerTitle}
               type="button"
-              className="flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+              className="status-bar-item text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
             >
-              <HugeiconsIcon
-                icon={ServerStack03Icon}
-                size={13}
-                strokeWidth={1.75}
-              />
+              <HugeiconsIcon icon={ServerStack03Icon} strokeWidth={1.75} />
               {env.kind === "ssh" ? (
                 <>
                   <span

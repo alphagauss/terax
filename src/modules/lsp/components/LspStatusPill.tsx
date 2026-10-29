@@ -26,7 +26,7 @@ type Props = {
 };
 
 const PILL_CLASS =
-  "terax-pill-in ml-1.5 flex h-6 shrink-0 cursor-pointer [&_button]:cursor-pointer items-center gap-1 rounded-full border border-border/50 bg-interactive-hover px-2 text-[10.5px] font-medium text-muted-foreground transition-colors duration-surface hover:bg-interactive-active hover:text-foreground";
+  "terax-pill-in status-bar-item status-bar-badge cursor-pointer [&_button]:cursor-pointer border border-border/50 bg-interactive-hover font-medium text-muted-foreground transition-colors duration-surface hover:bg-interactive-active hover:text-foreground";
 
 /** 编辑器语言服务器状态入口，按当前文件展示会话和诊断信息。 */
 export function LspStatusPill({ filePath }: Props) {
@@ -41,11 +41,13 @@ export function LspStatusPill({ filePath }: Props) {
           <button
             aria-label={t("startTitle", { command: hint.preset.command })}
             type="button"
-            className="flex items-center gap-1"
+            className="flex min-w-0 items-center gap-1"
             onClick={() => void setLspActivation(hint.preset.id, "enabled")}
           >
-            <HugeiconsIcon icon={SourceCodeIcon} size={11} strokeWidth={2} />
-            <span>{t("enableLsp", { name: hint.preset.name })}</span>
+            <HugeiconsIcon icon={SourceCodeIcon} strokeWidth={2} />
+            <span className="truncate">
+              {t("enableLsp", { name: hint.preset.name })}
+            </span>
           </button>
         </Hint>
         <DismissButton preset={hint.preset} />
@@ -89,8 +91,10 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
             type="button"
             className={PILL_CLASS}
           >
-            <span className="size-1.5 rounded-full bg-destructive" />
-            <span>{t("pillLabel", { name: preset.name })}</span>
+            <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
+            <span className="truncate">
+              {t("pillLabel", { name: preset.name })}
+            </span>
           </button>
         </Hint>
       </PopoverTrigger>
@@ -132,10 +136,10 @@ function DismissButton({ preset }: { preset: LspPreset }) {
       <button
         aria-label={t("dismissTitle")}
         type="button"
-        className="rounded-full p-0.5 hover:bg-interactive-active"
+        className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-interactive-active"
         onClick={() => void setLspActivation(preset.id, "dismissed")}
       >
-        <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2.2} />
+        <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2.2} />
       </button>
     </Hint>
   );
@@ -164,9 +168,11 @@ function InstallPill({ preset }: { preset: LspPreset }) {
     <Popover>
       <span className={PILL_CLASS}>
         <PopoverTrigger asChild>
-          <button type="button" className="flex items-center gap-1">
-            <HugeiconsIcon icon={SourceCodeIcon} size={11} strokeWidth={2} />
-            <span>{t("installLsp", { name: preset.name })}</span>
+          <button type="button" className="flex min-w-0 items-center gap-1">
+            <HugeiconsIcon icon={SourceCodeIcon} strokeWidth={2} />
+            <span className="truncate">
+              {t("installLsp", { name: preset.name })}
+            </span>
           </button>
         </PopoverTrigger>
         <DismissButton preset={preset} />
@@ -258,14 +264,15 @@ function ActivePill({
             {starting ? (
               <HugeiconsIcon
                 icon={Loading03Icon}
-                size={11}
                 strokeWidth={2}
                 className="animate-spin"
               />
             ) : (
-              <span className="size-1.5 rounded-full bg-success" />
+              <span className="size-1.5 shrink-0 rounded-full bg-success" />
             )}
-            <span>{t("pillLabel", { name: preset.name })}</span>
+            <span className="truncate">
+              {t("pillLabel", { name: preset.name })}
+            </span>
           </button>
         </Hint>
       </PopoverTrigger>

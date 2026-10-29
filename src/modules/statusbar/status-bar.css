@@ -1,0 +1,48 @@
+/* 状态栏统一桌面密度；浮层通过 Portal 保留各自的控件规格。 */
+.app-status-bar {
+  display: flex;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.app-status-bar .status-bar-item {
+  display: flex;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.app-status-bar .status-bar-badge {
+  height: 20px;
+  min-width: 0;
+  max-width: 256px;
+  flex-shrink: 1;
+}
+.app-status-bar svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.app-status-bar .status-bar-arrow {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-style: normal;
+}
+.app-status-bar .status-bar-rate {
+  display: grid;
+  grid-template-columns: 12px minmax(8ch, auto);
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}

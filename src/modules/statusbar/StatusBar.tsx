@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { ActivePath } from "./ActivePath";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
+import "./status-bar.css";
 
 type Props = {
   cwd: string | null;
@@ -59,7 +60,7 @@ export function StatusBar({
 }: Props) {
   const { t } = useTranslation("statusbar");
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between gap-3 border-t border-layout-divider bg-sidebar pl-3 pr-4 text-[11px] dark:bg-card/60">
+    <footer className="app-status-bar border-t border-layout-divider bg-sidebar dark:bg-card/60">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector
           onSelect={onWorkspaceChange}
@@ -75,9 +76,9 @@ export function StatusBar({
         {privateActive ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="flex shrink-0 cursor-default items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-[10.5px] font-medium text-warning">
-                <HugeiconsIcon icon={IncognitoIcon} size={11} strokeWidth={2} />
-                <span>{t("private.label")}</span>
+              <span className="status-bar-item status-bar-badge cursor-default bg-warning/15 font-medium text-warning">
+                <HugeiconsIcon icon={IncognitoIcon} strokeWidth={2} />
+                <span className="truncate">{t("private.label")}</span>
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-64 leading-relaxed">
@@ -86,20 +87,16 @@ export function StatusBar({
           </Tooltip>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-2">
         {pythonFileActive ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="flex max-w-44 items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="status-bar-item min-w-0 max-w-44 text-muted-foreground hover:bg-accent hover:text-foreground"
                 onClick={onSelectPython}
               >
-                <HugeiconsIcon
-                  icon={SourceCodeIcon}
-                  size={11}
-                  strokeWidth={2}
-                />
+                <HugeiconsIcon icon={SourceCodeIcon} strokeWidth={2} />
                 <span className="truncate">
                   {pythonInterpreter
                     ? pythonInterpreter.kind === "system"

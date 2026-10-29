@@ -10,9 +10,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import ArrowDown02Icon from "@hugeicons/core-free-icons/ArrowDown02Icon";
-import ArrowUp02Icon from "@hugeicons/core-free-icons/ArrowUp02Icon";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { remoteNative } from "./native";
@@ -227,19 +224,19 @@ function SshTrafficPanel() {
         <Hint content={t("sshTraffic.label")}>
           <button
             type="button"
-            className="flex h-6 items-center gap-1.5 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="status-bar-item tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label={t("sshTraffic.label")}
           >
-            <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
-              <HugeiconsIcon icon={ArrowUp02Icon} size={11} strokeWidth={1.8} />
+            <span className="status-bar-rate">
+              <span className="status-bar-arrow" aria-hidden="true">
+                ↑
+              </span>
               <span>{uploadRate}</span>
             </span>
-            <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
-              <HugeiconsIcon
-                icon={ArrowDown02Icon}
-                size={11}
-                strokeWidth={1.8}
-              />
+            <span className="status-bar-rate">
+              <span className="status-bar-arrow" aria-hidden="true">
+                ↓
+              </span>
               <span>{downloadRate}</span>
             </span>
           </button>

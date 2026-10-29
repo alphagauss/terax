@@ -83,7 +83,7 @@ export function SshRttIndicator() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground">
+        <span className="status-bar-item cursor-default tabular-nums text-muted-foreground">
           <span>{value} ms</span>
         </span>
       </TooltipTrigger>

@@ -15,16 +15,16 @@ export function DiagnosticsBadge({ filePath }: Props) {
   if (!counts || (counts.errors === 0 && counts.warnings === 0)) return null;
 
   return (
-    <span className="terax-pill-in flex shrink-0 cursor-default items-center gap-2 text-[10.5px] font-medium tabular-nums">
+    <span className="terax-pill-in flex shrink-0 cursor-default items-center gap-2 font-medium tabular-nums">
       {counts.errors > 0 ? (
-        <span className="flex items-center gap-0.5 text-destructive">
-          <HugeiconsIcon icon={CancelCircleIcon} size={11} strokeWidth={2} />
+        <span className="flex items-center gap-1 text-destructive">
+          <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
           {counts.errors}
         </span>
       ) : null}
       {counts.warnings > 0 ? (
-        <span className="flex items-center gap-0.5 text-warning">
-          <HugeiconsIcon icon={Alert02Icon} size={11} strokeWidth={2} />
+        <span className="flex items-center gap-1 text-warning">
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} />
           {counts.warnings}
         </span>
       ) : null}
