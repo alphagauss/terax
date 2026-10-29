@@ -30,6 +30,7 @@ afterEach(async () => {
 it.each(["default", "top", "bottom"] as const)(
   "%s 活动栏空白处不响应标题栏操作，普通右键打开配置菜单",
   async (position) => {
+    const vertical = position === "default";
     const onToggleVisibility = vi.fn();
     const onActivate = vi.fn();
     const onMove = vi.fn();
@@ -71,10 +72,16 @@ it.each(["default", "top", "bottom"] as const)(
       .querySelectorAll<HTMLElement>("[data-sidebar-container-id]")
       .forEach((item, index) => {
         vi.spyOn(item, "getBoundingClientRect").mockReturnValue(
-          new DOMRect(index * 40, index * 40, 40, 40),
+          new DOMRect(
+            vertical ? 0 : index * 40,
+            vertical ? index * 40 : 0,
+            40,
+            40,
+          ),
         );
       });
     button.setPointerCapture = vi.fn();
+    // 只沿布局主轴拖动，确保横向排序错误地使用纵坐标时测试会失败。
     for (const [type, coordinate] of [
       ["pointerdown", 10],
       ["pointermove", 90],
@@ -86,8 +93,8 @@ it.each(["default", "top", "bottom"] as const)(
             bubbles: true,
             pointerId: 1,
             button: 0,
-            clientX: coordinate,
-            clientY: coordinate,
+            clientX: vertical ? 20 : coordinate,
+            clientY: vertical ? coordinate : 20,
           }),
         ),
       );
