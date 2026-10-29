@@ -7,7 +7,8 @@ use windows_sys::Win32::{
     UI::{
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::{
-            GetClientRect, HTCAPTION, SC_MOUSEMENU, WM_NCDESTROY, WM_NCRBUTTONUP, WM_SYSCOMMAND,
+            GetClientRect, HTCAPTION, SC_MOUSEMENU, WM_CONTEXTMENU, WM_NCDESTROY, WM_NCRBUTTONUP,
+            WM_SYSCOMMAND,
         },
     },
 };
@@ -61,8 +62,10 @@ unsafe fn install(hwnd: HWND, context_menu: impl Fn(ContextMenuPoint) + 'static)
     }
 }
 
-fn is_caption_context_menu(message: u32, wparam: WPARAM) -> bool {
-    (message == WM_NCRBUTTONUP && wparam == HTCAPTION as WPARAM)
+fn is_mouse_context_menu(message: u32, wparam: WPARAM, lparam: LPARAM) -> bool {
+    // WebView 子窗口的菜单请求可由 DefWindowProc 转发给宿主，键盘请求没有鼠标坐标。
+    (message == WM_CONTEXTMENU && lparam != -1)
+        || (message == WM_NCRBUTTONUP && wparam == HTCAPTION as WPARAM)
         || (message == WM_SYSCOMMAND && wparam & 0xfff0 == SC_MOUSEMENU as WPARAM)
 }
 
@@ -82,7 +85,7 @@ unsafe extern "system" fn chrome_subclass(
     subclass_id: usize,
     reference_data: usize,
 ) -> LRESULT {
-    if is_caption_context_menu(message, wparam) {
+    if is_mouse_context_menu(message, wparam, lparam) {
         let mut point = screen_point(lparam);
         let mut bounds = std::mem::zeroed();
         // 只处理 WebView 所在客户区，系统边框与任务栏菜单仍交给 Windows。
@@ -117,11 +120,18 @@ mod tests {
     };
 
     #[test]
-    fn forwards_only_mouse_caption_menus() {
-        assert!(is_caption_context_menu(WM_NCRBUTTONUP, HTCAPTION as WPARAM));
-        assert!(is_caption_context_menu(
+    fn forwards_mouse_menus_without_intercepting_keyboard_or_window_actions() {
+        assert!(is_mouse_context_menu(WM_CONTEXTMENU, 0, 0));
+        assert!(!is_mouse_context_menu(WM_CONTEXTMENU, 0, -1));
+        assert!(is_mouse_context_menu(
+            WM_NCRBUTTONUP,
+            HTCAPTION as WPARAM,
+            0
+        ));
+        assert!(is_mouse_context_menu(
             WM_SYSCOMMAND,
-            SC_MOUSEMENU as WPARAM | 3
+            SC_MOUSEMENU as WPARAM | 3,
+            0
         ));
         for (message, wparam) in [
             (WM_NCRBUTTONUP, HTLEFT as WPARAM),
@@ -132,7 +142,7 @@ mod tests {
             (WM_SYSCOMMAND, SC_MAXIMIZE as WPARAM),
             (WM_SYSCOMMAND, SC_KEYMENU as WPARAM),
         ] {
-            assert!(!is_caption_context_menu(message, wparam));
+            assert!(!is_mouse_context_menu(message, wparam, 0));
         }
     }
 
@@ -146,12 +156,12 @@ mod tests {
     }
 
     #[test]
-    fn native_caption_messages_reach_the_menu_bridge() {
+    fn native_context_menu_messages_reach_the_menu_bridge() {
         use std::{cell::RefCell, ptr::null_mut, rc::Rc};
         use windows_sys::Win32::{
             Graphics::Gdi::ClientToScreen,
             UI::WindowsAndMessaging::{
-                CreateWindowExW, DestroyWindow, SendMessageW, WS_OVERLAPPEDWINDOW,
+                CreateWindowExW, DestroyWindow, SendMessageW, WS_CHILD, WS_OVERLAPPEDWINDOW,
             },
         };
 
@@ -190,7 +200,24 @@ mod tests {
             let packed = ((point.y as u16 as u32) << 16 | point.x as u16 as u32) as LPARAM;
             SendMessageW(window.0, WM_NCRBUTTONUP, HTCAPTION as WPARAM, packed);
             SendMessageW(window.0, WM_SYSCOMMAND, SC_MOUSEMENU as WPARAM | 3, packed);
-            assert_eq!(*received.borrow(), [(20, 30), (20, 30)]);
+            let child = TestWindow(CreateWindowExW(
+                0,
+                class.as_ptr(),
+                class.as_ptr(),
+                WS_CHILD,
+                0,
+                0,
+                100,
+                100,
+                window.0,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            ));
+            assert!(!child.0.is_null());
+            // 子窗口通过默认过程把标准菜单请求转发给宿主，不能只覆盖直接发送的标题栏消息。
+            SendMessageW(child.0, WM_CONTEXTMENU, child.0 as WPARAM, packed);
+            assert_eq!(*received.borrow(), [(20, 30), (20, 30), (20, 30)]);
         }
     }
 }
