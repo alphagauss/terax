@@ -601,17 +601,18 @@ pub fn stage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
-    let mut args: Vec<OsString> = vec!["add".into(), "--".into()];
-    for p in &resolved {
-        args.push(p.clone().into());
+    for batch in path_batches(&resolved) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["add", "--"]
+                .into_iter()
+                .chain(batch.iter().map(String::as_str)),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, "git add failed")?;
     }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git add failed")
+    Ok(())
 }
 
 pub fn unstage(
@@ -626,33 +627,32 @@ pub fn unstage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
-    let mut reset_args: Vec<OsString> = vec!["reset".into(), "HEAD".into(), "--".into()];
-    for p in &resolved {
-        reset_args.push(p.clone().into());
+    for batch in path_batches(&resolved) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["reset", "HEAD", "--"]
+                .into_iter()
+                .chain(batch.iter().map(String::as_str)),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        if output.exit_code == Some(0) {
+            continue;
+        }
+        if output.timed_out || !looks_like_no_head(&output) {
+            return ensure_success(&output, "git reset failed");
+        }
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["rm", "--cached", "-r", "--"]
+                .into_iter()
+                .chain(batch.iter().map(String::as_str)),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, "git rm --cached failed")?;
     }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        reset_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    if output.exit_code == Some(0) {
-        return Ok(());
-    }
-    if !looks_like_no_head(&output) {
-        return ensure_success(&output, "git reset failed");
-    }
-    let mut rm_args: Vec<OsString> = vec!["rm".into(), "--cached".into(), "-r".into(), "--".into()];
-    for p in &resolved {
-        rm_args.push(p.clone().into());
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        rm_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git rm --cached failed")
+    Ok(())
 }
 
 fn looks_like_no_head(output: &GitOutput) -> bool {
@@ -686,29 +686,25 @@ pub fn discard(
         }
     }
 
-    if !tracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["restore".into(), "--worktree".into(), "--".into()];
-        for p in &tracked {
-            args.push(p.clone().into());
-        }
+    for batch in path_batches(&tracked) {
         let output = run_git(
             &repo_root.workspace,
             Some(&repo_root.git_path),
-            args,
+            ["restore", "--worktree", "--"]
+                .into_iter()
+                .chain(batch.iter().map(String::as_str)),
             DEFAULT_TIMEOUT_SECS,
         )?;
         ensure_success(&output, "git restore failed")?;
     }
 
-    if !untracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["clean".into(), "-f".into(), "-d".into(), "--".into()];
-        for p in &untracked {
-            args.push(p.clone().into());
-        }
+    for batch in path_batches(&untracked) {
         let output = run_git(
             &repo_root.workspace,
             Some(&repo_root.git_path),
-            args,
+            ["clean", "-f", "-d", "--"]
+                .into_iter()
+                .chain(batch.iter().map(String::as_str)),
             DEFAULT_TIMEOUT_SECS,
         )?;
         ensure_success(&output, "git clean failed")?;
@@ -1533,6 +1529,32 @@ fn nothing_to_commit(output: &GitOutput) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
     stderr.contains("nothing to commit") || stdout.contains("nothing to commit")
+}
+
+/// 按转义后的保守长度上界分批，为 Git 参数、本地或 WSL 启动参数预留空间。
+/// 全部路径须在首批执行前完成校验，避免后续非法路径导致前半部分已被修改。
+fn path_batches(mut paths: &[String]) -> impl Iterator<Item = &[String]> {
+    const MAX_PATH_ARGS_LENGTH: usize = 24_000;
+
+    std::iter::from_fn(move || {
+        if paths.is_empty() {
+            return None;
+        }
+        let mut length = 0;
+        let mut count = 0;
+        for path in paths {
+            // UTF-8 字节数覆盖 UTF-16 长度，四倍预算同时覆盖 Windows 和 SSH Shell 转义。
+            let cost = path.len() * 4 + 3;
+            if count > 0 && length + cost > MAX_PATH_ARGS_LENGTH {
+                break;
+            }
+            length += cost;
+            count += 1;
+        }
+        let (batch, remaining) = paths.split_at(count);
+        paths = remaining;
+        Some(batch)
+    })
 }
 
 fn resolve_pathspecs(repo_root: &Path, paths: &[String], remote: bool) -> Result<Vec<String>> {

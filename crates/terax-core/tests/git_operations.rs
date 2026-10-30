@@ -479,6 +479,151 @@ fn unstage_clears_index_entry() {
 }
 
 #[test]
+fn bulk_mutations_handle_long_path_lists_without_touching_other_changes() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let paths = bulk_paths();
+    let (tracked, untracked) = paths.split_at(800);
+    for path in tracked {
+        fx.write_file(path, "base\n");
+    }
+    fx.write_file("keep.txt", "base\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    fx.write_file("keep.txt", "index\n");
+    fx.run_git(&["add", "keep.txt"]);
+    fx.write_file("keep.txt", "worktree\n");
+    fx.write_file("keep-new.txt", "keep\n");
+    fx.write_file(".gitignore", "ignored.txt\n");
+    fx.write_file("ignored.txt", "ignored\n");
+
+    for (index, path) in tracked.iter().enumerate() {
+        if index % 2 == 0 {
+            fx.write_file(path, "modified\n");
+        } else {
+            std::fs::remove_file(fx.repo_path.join(path)).unwrap();
+        }
+    }
+    for path in untracked {
+        fx.write_file(path, "new\n");
+    }
+
+    // 非法路径位于列表末尾，必须在执行任何批次前拒绝整个请求。
+    let mut invalid_paths = paths.clone();
+    invalid_paths.push("../outside.txt".into());
+    operations::stage(&fx.registry, &fx.repo_str(), &invalid_paths, &fx.workspace)
+        .expect_err("validate every path before staging");
+    assert_eq!(
+        git_stdout(&fx, &["diff", "--cached", "--name-only"]),
+        "keep.txt"
+    );
+
+    operations::stage(&fx.registry, &fx.repo_str(), &paths, &fx.workspace)
+        .expect("stage long path list");
+    assert_eq!(
+        git_stdout(&fx, &["diff", "--cached", "--name-only", "-z"])
+            .split_terminator('\0')
+            .count(),
+        paths.len() + 1
+    );
+    operations::unstage(&fx.registry, &fx.repo_str(), &paths, &fx.workspace)
+        .expect("unstage long path list");
+    assert_eq!(
+        git_stdout(&fx, &["diff", "--cached", "--name-only"]),
+        "keep.txt"
+    );
+
+    let mut entries: Vec<_> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| DiscardEntry {
+            path: path.clone(),
+            untracked: index >= tracked.len(),
+        })
+        .collect();
+    entries.push(DiscardEntry {
+        path: "../outside.txt".into(),
+        untracked: true,
+    });
+    operations::discard(&fx.registry, &fx.repo_str(), &entries, &fx.workspace)
+        .expect_err("validate every entry before discarding");
+    entries.pop();
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_path.join(&tracked[0])).unwrap(),
+        "modified\n"
+    );
+    assert!(!fx.repo_path.join(&tracked[1]).exists());
+    assert!(fx.repo_path.join(&untracked[0]).exists());
+
+    operations::discard(&fx.registry, &fx.repo_str(), &entries, &fx.workspace)
+        .expect("discard long tracked and untracked path lists");
+    for path in tracked {
+        assert_eq!(
+            std::fs::read_to_string(fx.repo_path.join(path)).unwrap(),
+            "base\n"
+        );
+    }
+    for path in untracked {
+        assert!(!fx.repo_path.join(path).exists(), "{path} must be removed");
+    }
+    assert_eq!(git_stdout(&fx, &["show", ":keep.txt"]), "index");
+    for (path, expected) in [
+        ("keep.txt", "worktree\n"),
+        ("keep-new.txt", "keep\n"),
+        ("ignored.txt", "ignored\n"),
+        (".gitignore", "ignored.txt\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(fx.repo_path.join(path)).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn bulk_unstage_without_head_handles_long_path_lists_and_keeps_worktree() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let paths = bulk_paths();
+    for path in &paths {
+        fx.write_file(path, "new\n");
+    }
+    fx.write_file("keep.txt", "keep\n");
+    fx.run_git(&["add", "."]);
+
+    operations::unstage(&fx.registry, &fx.repo_str(), &paths, &fx.workspace)
+        .expect("unstage long path list without HEAD");
+
+    assert_eq!(git_stdout(&fx, &["ls-files"]), "keep.txt");
+    for path in paths {
+        assert_eq!(
+            std::fs::read_to_string(fx.repo_path.join(path)).unwrap(),
+            "new\n"
+        );
+    }
+}
+
+fn bulk_paths() -> Vec<String> {
+    let paths: Vec<_> = (0..1600)
+        .map(|index| format!("目录 with spaces/file '{index:04}-{}.txt", "x".repeat(40)))
+        .collect();
+    // 两类撤销路径各自超过 Windows 命令行上限，确保 restore 和 clean 都覆盖分批边界。
+    for half in paths.chunks(800) {
+        assert!(
+            half.iter()
+                .map(|path| path.encode_utf16().count() + 1)
+                .sum::<usize>()
+                > 32_767
+        );
+    }
+    paths
+}
+
+#[test]
 fn commit_with_empty_message_is_rejected() {
     if skip_if_no_git() {
         return;
