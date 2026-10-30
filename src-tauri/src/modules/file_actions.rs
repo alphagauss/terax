@@ -89,7 +89,7 @@ pub async fn file_save_as(
         let task = transfers
             .manager()
             .enqueue(
-                window.app_handle().clone(),
+                crate::adapters::tauri::host::transfer(window.app_handle()),
                 env,
                 workspace.bootstrap().id.clone(),
                 EnqueueTransferRequest {

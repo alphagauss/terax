@@ -1,0 +1,114 @@
+[package]
+name = "terax-core"
+version = "0.8.2"
+edition = "2021"
+publish = false
+
+[features]
+default = ["workspace-runtime"]
+workspace-runtime = [
+    "dep:notify",
+    "dep:portable-pty",
+    "dep:nucleo-matcher",
+    "dep:russh",
+    "dep:russh-sftp",
+    "dep:tokio-socks",
+    "dep:tokio-rustls",
+    "dep:rustls-pki-types",
+    "dep:rustls-platform-verifier",
+]
+
+[dependencies]
+notify = { workspace = true, optional = true }
+flate2 = "1"
+tar = "0.4"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+dirs = { workspace = true }
+log = { workspace = true }
+ignore = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+grep-matcher = "0.1"
+globset = "0.4"
+ipnet = "2"
+shared_child = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "socks"] }
+bytes = { workspace = true }
+base64 = "0.22"
+aes = "0.9"
+md5 = "0.8"
+percent-encoding = "2"
+futures-util = { workspace = true }
+filetime = "0.2"
+sha2 = "0.10"
+tokio = { workspace = true, default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "net",
+    "io-util",
+    "signal",
+    "process",
+    "time",
+    "fs",
+] }
+tokio-util = { workspace = true, features = ["rt"] }
+tempfile = { workspace = true }
+trash = "5.2.6"
+which = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v5", "serde"] }
+fs2 = "0.4"
+zeroize = "1"
+portable-pty = { version = "0.9", optional = true }
+nucleo-matcher = { version = "0.3", optional = true }
+russh = { version = "0.61.2", optional = true, default-features = false, features = [
+    "ring",
+    "rsa",
+    "flate2",
+    "async-trait",
+] }
+russh-sftp = { version = "2.3.0", optional = true }
+tokio-socks = { version = "0.5", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+rustls-pki-types = { version = "1", optional = true }
+rustls-platform-verifier = { version = "0.6", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+system-configuration = "0.7"
+keyring = { workspace = true, default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, default-features = false, features = ["windows-native"] }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+junction = { workspace = true }
+
+[[test]]
+name = "git_operations"
+required-features = ["workspace-runtime"]
+
+[[test]]
+name = "fs_search"
+required-features = ["workspace-runtime"]

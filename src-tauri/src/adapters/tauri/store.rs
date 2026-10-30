@@ -80,9 +80,11 @@ impl SharedStoreState {
     }
 }
 
-impl StoreEvents for AppHandle {
+pub(crate) struct DesktopStoreEvents(pub(crate) AppHandle);
+
+impl StoreEvents for DesktopStoreEvents {
     fn changed(&self, store: &str) -> Result<(), String> {
-        emit_changed(self, store)
+        emit_changed(&self.0, store)
     }
 }
 
@@ -100,13 +102,13 @@ pub fn shared_store_set(
     key: String,
     value: Value,
 ) -> Result<(), String> {
-    service::shared_store_set(app, store, key, value)
+    service::shared_store_set(DesktopStoreEvents(app), store, key, value)
 }
 
 /// 将桌面请求交给共享配置服务。
 #[tauri::command]
 pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result<(), String> {
-    service::shared_store_delete(app, store, key)
+    service::shared_store_delete(DesktopStoreEvents(app), store, key)
 }
 
 /// 将桌面请求交给共享配置服务。
@@ -116,7 +118,7 @@ pub fn shared_store_mutate(
     store: String,
     mutations: Vec<SharedStoreMutation>,
 ) -> Result<(), String> {
-    service::shared_store_mutate(app, store, mutations)
+    service::shared_store_mutate(DesktopStoreEvents(app), store, mutations)
 }
 
 /// 将桌面请求交给共享配置服务。

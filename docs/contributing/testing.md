@@ -19,15 +19,15 @@ pnpm test
 
 格式化、lint 和导入整理分别配置范围；扩展格式化范围不自动扩大 lint 范围。VS Code 保存时执行格式化和导入整理，不自动应用 quick fix。需要修复 lint 时显式执行 `pnpm lint:fix`，该命令只修改 `src/`；`pnpm format` 不执行 lint 修复或导入整理。
 
-Rust，在 `src-tauri/` 中执行：
+Rust，从仓库根目录执行，显式覆盖整个 workspace：
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo nextest run --locked
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo nextest run --workspace --locked
 ```
 
-没有 nextest 时使用 `cargo test --locked`；局部修改可以选择相关测试。实验性终端的专用命令见 [终端宿主](../architecture/terminal-agent.md)。
+没有 nextest 时使用 `cargo test --workspace --locked`。局部修改使用 `-p terax-core`、`-p terax-host` 或 `-p terax` 选择 crate，再选择相关测试；core 默认覆盖完整 Workspace 能力。共享边界变更还需单独执行 `cargo check -p terax-host --all-targets --locked`，防止联合构建的特性合并掩盖轻量宿主问题。构建组织见 [原生 workspace](../architecture/native-workspace.md)，实验性终端的专用命令见 [终端宿主](../architecture/terminal-agent.md)。
 
 ## 测试边界
 

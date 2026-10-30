@@ -17,6 +17,7 @@ const host = process.env.TAURI_DEV_HOST;
 // 只限制前端监听；根目录的后台源码、数据和构建产物不参与页面热更新。
 const frontendWatchIgnored = [
   "src-tauri",
+  "crates",
   "target",
   ".cargo-test-target",
   "artifacts",

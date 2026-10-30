@@ -1,6 +1,6 @@
 //! 桌面宿主的共享能力入口。
 //!
-//! 整个模块由 desktop 特性控制，命令本身无需重复声明宿主条件。
+//! 仅属于桌面 crate，共享业务由 terax-core 提供。
 
 pub mod agent;
 pub mod files;
@@ -14,3 +14,5 @@ pub mod shell;
 pub mod store;
 pub mod tree;
 pub mod workspace;
+
+pub(crate) mod host;

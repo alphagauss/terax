@@ -14,6 +14,7 @@ import { installNativeHost } from "@/lib/nativeHost";
 import { createAgentSession } from "@/modules/ai/lib/agentSession";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
+import { ShellExecution } from "@/modules/ai/lib/shellExecution";
 
 const root = await mkdtemp(join(tmpdir(), "terax-agent-smoke-"));
 const native = createTerminalHost(root);
@@ -238,10 +239,12 @@ try {
         ),
       ),
   );
-  const processInfo = await native.host.invoke<{ status: string }>(
-    "shell_exec",
-    {
+  // 与正式工具一样登记活跃执行，确保停止会话能按执行归属清理进程。
+  const execution = new ShellExecution(cancelled.id);
+  const processInfo = await execution.run((executionId) =>
+    native.host.invoke<{ process_id: string; status: string }>("shell_exec", {
       ownerSessionId: cancelled.id,
+      executionId,
       command:
         process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30",
       initialCwd: root,
@@ -252,20 +255,25 @@ try {
       maxOutputBytes: 4096,
       shell: "default",
       login: false,
-    },
+    }),
   );
   assert.equal(processInfo.status, "running");
   await cancelled.stop();
   assert.equal(locks.size, 0);
   assert.equal(cancelled.getSnapshot().owned, false);
   assert(trace.includes("http_cancel"));
+  // 停止会保留终态记录，验证同一进程已被终止而不是要求历史为空。
+  const stoppedProcesses = await native.host.invoke<
+    { process_id: string; status: string }[]
+  >("shell_list", {
+    ownerSessionId: cancelled.id,
+    includeExited: true,
+  });
   assert.deepEqual(
-    await native.host.invoke("shell_list", {
-      ownerSessionId: cancelled.id,
-      includeExited: true,
-    }),
-    [],
+    stoppedProcesses.map(({ process_id, status }) => ({ process_id, status })),
+    [{ process_id: processInfo.process_id, status: "terminated" }],
   );
+  await execution.close();
   console.log(
     "PASS: native HTTP, tool execution, conditional write, commit order, restore, sequential client handoff, approval denial, stream cancellation, process cleanup",
   );

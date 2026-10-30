@@ -23,7 +23,7 @@ pnpm agent --resume SESSION_UUID
 
 桌面与终端共享业务规则和原生服务，各自拥有运行实例；桌面与 Channels 尚未统一到 TUI 会话控制器。会话锁、checkpoint、授权与收尾继续由共享实现拥有。
 
-共享服务位于 modules，桌面和私有管道接入位于 adapters。私有管道不监听端口，不是稳定外部协议；EOF 和终止取消请求并清理进程与锁。PTY、SSH 管理等桌面专用能力不为 TUI 预先拆分，daemon 与远程服务不在当前范围。
+共享服务由 `terax-core` 提供，私有管道接入位于 `terax-host`，依赖边界见 [原生 workspace](native-workspace.md)。私有管道不监听端口，不是稳定外部协议；EOF 和终止取消请求并清理进程与锁。终端宿主不启用完整 Workspace 能力，不增加 PTY、SSH 入口；daemon 与远程服务不在当前范围。
 
 ## 构建与验证
 
@@ -32,7 +32,7 @@ pnpm build tui
 pnpm build tui mjs
 ```
 
-当前生成 Windows x64 单文件：standalone 包含 Bun，mjs 需要外部 Bun。原生宿主及资源释放到进程专属临时目录；只回收已退出实例的资源。中间产物独立于桌面 target。
+当前生成 Windows x64 单文件：standalone 包含 Bun，mjs 需要外部 Bun。原生宿主及资源释放到进程专属临时目录；只回收已退出实例的资源。打包中间文件位于 `artifacts/`，Rust 产物统一位于根目录 `target/`。
 
 修改终端链路时按范围运行：
 
@@ -42,8 +42,8 @@ pnpm build:host
 pnpm test:terminal
 pnpm test:tui
 pnpm test:tui:package
-cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --all-targets --locked -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --locked
+cargo clippy -p terax-host --all-targets --locked -- -D warnings
+cargo test -p terax-host --locked
 ```
 
 打包测试需要先生成两种发行物。未影响终端链路的桌面修改不运行 TUI 专项检查。

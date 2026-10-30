@@ -56,7 +56,7 @@ pub async fn fs_write_file(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
-    service::fs_write_file(path, content, workspace, source, &app).await
+    service::fs_write_file(path, content, workspace, source, &DesktopFileEvents(app)).await
 }
 
 /// 按内容版本或缺失条件写入编辑器与 AI 工具文件。
@@ -71,7 +71,15 @@ pub async fn fs_write_file_checked(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<CheckedWriteResult, String> {
-    service::fs_write_file_checked(path, content, condition, workspace, source, &app).await
+    service::fs_write_file_checked(
+        path,
+        content,
+        condition,
+        workspace,
+        source,
+        &DesktopFileEvents(app),
+    )
+    .await
 }
 
 /// 将桌面上下文交给共享服务。
@@ -93,9 +101,11 @@ pub async fn fs_stat(
     service::fs_stat(path, workspace, missing_ok.unwrap_or(false)).await
 }
 
-impl FileEvents for tauri::AppHandle {
+pub(crate) struct DesktopFileEvents(pub(crate) tauri::AppHandle);
+
+impl FileEvents for DesktopFileEvents {
     fn file_written(&self, path: &str, source: Option<String>) {
-        let _ = self.emit(
+        let _ = self.0.emit(
             "fs:file-written",
             FileWrittenEvent {
                 path: path.to_string(),

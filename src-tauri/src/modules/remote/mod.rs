@@ -1,29 +1,7 @@
-//! SSH Runtime、远端文件系统、终端和隧道的原生实现。
-//!
-//! 当前 Workspace 进程独占一条 transport；profile、凭据和连接状态均由 Rust 管理，
-//! WebView 只提交稳定 profile ID 或一次性凭据覆盖值。
+//! 桌面 SSH 命令与启动接入；运行时由原生核心持有。
 
-pub(crate) mod channels;
+pub use terax_core::modules::remote::*;
 pub mod commands;
-pub(crate) mod file_service;
-mod health;
-mod host_key;
-pub mod manager;
-pub mod models;
-pub(crate) mod mutation_service;
-pub(crate) mod profile;
-mod proxy;
-mod remote_fs;
-pub mod session;
-pub mod sftp;
-mod ssh_config;
-pub(crate) mod tasks;
-pub mod terminal;
-mod traffic;
-pub(crate) mod tree_service;
-pub mod tunnel;
-
-pub use manager::RemoteState;
 
 use tauri::Manager;
 

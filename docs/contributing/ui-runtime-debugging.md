@@ -46,7 +46,7 @@ Get-Content "$env:USERPROFILE\.terax\logs\Terax.log" -Tail 100 -Wait
 退出目标 Workspace 的已有实例后，在设置上述 WebView2 调试环境变量的同一 PowerShell 中启动构建产物：
 
 ```powershell
-& .\src-tauri\target\release\terax.exe
+& .\target\release\terax.exe
 ```
 
 已有实例可能只被激活而不继承调试环境变量。通过 `http://127.0.0.1:9223/json` 查找 URL 为 `http://tauri.localhost/` 的主窗口 target，使用返回的 `devtoolsFrontendUrl` 打开检查器，或连接 `webSocketDebuggerUrl`。启用 Console 的 Preserve log，并在 Network 中检查失败的脚本和样式请求；必要时重新加载捕获首次异常。不要把截图窗口或辅助窗口误当成主窗口。
@@ -60,7 +60,7 @@ Get-Content "$env:USERPROFILE\.terax\logs\Terax.log" -Tail 100 -Wait
 裁剪宏读取生成的命令表，涉及 [sccache 对过程宏读取文件的缓存限制](https://github.com/mozilla/sccache/blob/v0.16.0/docs/Rust.md)。仅清理 Cargo 产物仍可能从 sccache 取回旧插件；应同时定向清理对应缓存条目，或强制刷新它们。以下命令从仓库根目录执行，仅清理剪贴板插件的 release 产物，并在本次构建后恢复缓存环境变量：
 
 ```powershell
-cargo clean --manifest-path src-tauri/Cargo.toml --release -p tauri-plugin-clipboard-manager
+cargo clean --release -p tauri-plugin-clipboard-manager
 $previousRecache = $env:SCCACHE_RECACHE
 try {
   $env:SCCACHE_RECACHE = "1"

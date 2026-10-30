@@ -29,7 +29,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
           key: windows-signpath-test
 
       - name: Install frontend dependencies
@@ -44,7 +44,7 @@ jobs:
       - name: Stage Windows artifacts
         shell: pwsh
         run: |
-          $bundleDir = "src-tauri/target/release/bundle"
+          $bundleDir = "target/release/bundle"
           $stagingDir = "signpath-staging"
           New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
           $exe = Get-ChildItem -Path "$bundleDir/nsis" -Filter "*.exe" -ErrorAction Stop | Select-Object -First 1

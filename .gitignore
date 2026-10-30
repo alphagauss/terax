@@ -30,3 +30,6 @@ stats.html
 .pnpm-store
 .cargo-test-target
 *.pyc
+
+# Cargo workspace 构建产物
+/target/

@@ -484,7 +484,7 @@ pub async fn screenshot_configure(window: WebviewWindow, patch: ConfigPatch) -> 
         parse_shortcut(shortcut)?;
     }
     shared_store::shared_store_mutate(
-        window.app_handle().clone(),
+        crate::adapters::tauri::store::DesktopStoreEvents(window.app_handle().clone()),
         "settings".into(),
         patch.into_mutations(),
     )

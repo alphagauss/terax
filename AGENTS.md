@@ -5,7 +5,7 @@
 ## 项目约定
 
 - Terax 是面向 macOS、Linux、Windows 的 AI 原生终端，当前优先开发桌面应用。
-- 依赖管理只使用 pnpm。检查命令和验证范围见 [测试](docs/contributing/testing.md)。
+- 前端依赖管理只使用 pnpm；Rust 从仓库根目录使用 [Cargo workspace](docs/architecture/native-workspace.md)。检查命令和验证范围见 [测试](docs/contributing/testing.md)。
 - Markdown 使用 UTF-8；新增或更新的代码注释使用中文。代码、注释、提交和文档不使用 emoji 或 em dash。
 - 前端跨模块导入使用 `@/...`。`src/components/ui/` 和 `src/components/ai-elements/` 只保留通过注册表管理的基础组件，不承载项目专属的深度定制。扩展优先通过属性、组合或业务包装实现；跨业务复用的定制实现迁入公共组件目录，业务专属实现迁入所属模块。确认无生产引用的注册表组件可以连同其专属测试删除。
 - 所有用户可见文本同步提供 `en` 与 `zh-CN` 翻译；`language` 设置是唯一语言状态来源。

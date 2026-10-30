@@ -40,7 +40,7 @@ pub async fn http_request(
         network_target,
         timeout_ms,
         max_response_bytes,
-        on_event,
+        DesktopHttpEvents(on_event),
     )
     .await
 }
@@ -55,9 +55,11 @@ pub fn http_cancel(
     state.cancel(window.label(), &request_id);
 }
 
-impl HttpEventSink for Channel<HttpEvent> {
+struct DesktopHttpEvents(Channel<HttpEvent>);
+
+impl HttpEventSink for DesktopHttpEvents {
     fn send(&self, event: HttpEvent) -> Result<(), String> {
-        Channel::send(self, event).map_err(|error| error.to_string())
+        Channel::send(&self.0, event).map_err(|error| error.to_string())
     }
 }
 
@@ -77,7 +79,7 @@ pub async fn http_prepare_file(
         .operation(
             window.label(),
             &request_id,
-            on_event,
+            DesktopHttpEvents(on_event),
             180_000,
             files::prepare(
                 &state,
@@ -117,7 +119,7 @@ pub async fn http_file_request(
         .operation(
             window.label(),
             &request_id,
-            on_event,
+            DesktopHttpEvents(on_event),
             request.timeout_ms.unwrap_or(120_000),
             files::request(&secrets, &registry, &state, window.label(), request),
         )

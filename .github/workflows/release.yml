@@ -58,7 +58,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
           key: ${{ matrix.platform }}-${{ matrix.rust-target }}
 
       - name: Install frontend dependencies
@@ -116,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          APPIMAGE=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -n1)
+          APPIMAGE=$(ls target/release/bundle/appimage/*.AppImage | head -n1)
           BASENAME=$(basename "$APPIMAGE")
           echo "Patching: $APPIMAGE"
 

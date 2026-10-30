@@ -78,31 +78,30 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
 
       - uses: taiki-e/install-action@v2.85.12
         with:
           tool: cargo-nextest,cargo-machete
 
       - name: cargo check
-        working-directory: src-tauri
-        run: cargo check --all-targets --locked
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Check standalone terminal host
+        run: cargo check -p terax-host --all-targets --locked
 
       - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Unused crates (advisory)
-        working-directory: src-tauri
         run: cargo machete
         continue-on-error: true
 
       - name: cargo nextest
-        working-directory: src-tauri
-        run: cargo nextest run --locked
+        run: cargo nextest run --workspace --locked
 
       - name: fish shell integration
-        run: fish --no-config src-tauri/src/modules/pty/scripts/init.test.fish
+        run: fish --no-config crates/terax-core/src/modules/shell/scripts/init.test.fish
 
   rust-platforms:
     name: rust-test (${{ matrix.os }})
@@ -118,19 +117,17 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
 
       - uses: taiki-e/install-action@v2.85.12
         with:
           tool: cargo-nextest
 
       - name: cargo check
-        working-directory: src-tauri
-        run: cargo check --all-targets --locked
+        run: cargo check --workspace --all-targets --locked
 
       - name: cargo nextest
-        working-directory: src-tauri
-        run: cargo nextest run --locked --retries 2
+        run: cargo nextest run --workspace --locked --retries 2
 
   coverage:
     runs-on: ubuntu-22.04
@@ -153,7 +150,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
           key: coverage
 
       - uses: taiki-e/install-action@v2.85.12
@@ -161,12 +158,11 @@ jobs:
           tool: cargo-llvm-cov,cargo-nextest
 
       - name: Generate coverage
-        working-directory: src-tauri
-        run: cargo llvm-cov nextest --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --locked --lcov --output-path lcov.info
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
           name: lcov-report
-          path: src-tauri/lcov.info
+          path: lcov.info
           if-no-files-found: error

@@ -1,14 +1,8 @@
-//! Terax 共享原生服务入口。
-//!
-//! 默认 desktop 特性注册 Tauri 宿主；无界面构建不链接 WebView 或窗口插件。
+//! 桌面宿主入口，接入原生核心并管理 Tauri 窗口、插件与命令。
 
-#[cfg(feature = "desktop")]
+pub mod adapters;
 mod desktop;
-#[cfg(feature = "desktop")]
 mod fullscreen;
-#[cfg(feature = "desktop")]
 pub mod menu;
 pub mod modules;
-#[cfg(feature = "desktop")]
 pub use desktop::run;
-pub mod adapters;

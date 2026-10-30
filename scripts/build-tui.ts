@@ -1,7 +1,7 @@
 /**
  * 本文件构建 Windows x64 的 Terax TUI 单文件发行物。
  * 独立模式嵌入 Bun runtime，外部运行时模式内嵌 Rust 与 OpenTUI 运行资源；两者
- * 均使用独立 artifacts 目录，绝不写入桌面应用使用的 src-tauri/target。
+ * 打包中间文件使用独立 artifacts 目录，Rust 产物统一来自根目录 target。
  */
 
 import { spawnSync } from "node:child_process";
@@ -15,7 +15,7 @@ type BuildMode = "runtime" | "standalone";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targetRoot = join(root, "artifacts", "tui", "windows-x64");
-const cargoTarget = join(targetRoot, "cargo");
+const cargoTarget = join(root, "target");
 const generatedRoot = join(targetRoot, ".build");
 const hostExecutable = join(cargoTarget, "release", "terax-host.exe");
 
@@ -143,21 +143,7 @@ await import(pathToFileURL(join(directory, "runtime.js")).href);
 async function build(mode: BuildMode) {
   assertWindowsX64();
   await mkdir(generatedRoot, { recursive: true });
-  run([
-    "cargo",
-    "build",
-    "--manifest-path",
-    "src-tauri/Cargo.toml",
-    "--no-default-features",
-    "--features",
-    "headless",
-    "--bin",
-    "terax-host",
-    "--release",
-    "--locked",
-    "--target-dir",
-    cargoTarget,
-  ]);
+  run(["cargo", "build", "-p", "terax-host", "--release", "--locked"]);
   const entry = await writeEntry(mode);
   const output = join(
     targetRoot,

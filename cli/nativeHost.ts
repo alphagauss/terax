@@ -43,7 +43,7 @@ function resolveNativeHost() {
     return {
       executable: fileURLToPath(
         new URL(
-          `../src-tauri/target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
+          `../target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
           import.meta.url,
         ),
       ),

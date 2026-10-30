@@ -2,6 +2,7 @@
 //!
 //! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
+use crate::adapters::tauri::host;
 use crate::modules::workspace_process::WorkspaceProcessState;
 use crate::modules::{secrets, secrets::SecretsState};
 
@@ -55,7 +56,7 @@ pub(crate) async fn connect_saved_profile(
     profile.validate()?;
     workspace.assert_ssh_runtime_owner(&profile)?;
     let request = connect_request(profile, credentials, secrets_state)?;
-    state.manager.connect(request, app).await
+    state.manager.connect(request, host::remote(&app)).await
 }
 
 /// 启动期先发布 connecting，再读取系统凭据并建立连接。
@@ -66,7 +67,10 @@ pub(crate) async fn connect_startup_profile(
     app: tauri::AppHandle,
     profile_id: String,
 ) -> Result<RemoteRuntimeSnapshot, String> {
-    let reserved = state.manager.reserve_connect(&profile_id, &app).await?;
+    let reserved = state
+        .manager
+        .reserve_connect(&profile_id, &host::remote(&app))
+        .await?;
     let request = match (|| {
         let profile = super::profile::load(&profile_id)?;
         profile.validate()?;
@@ -77,12 +81,15 @@ pub(crate) async fn connect_startup_profile(
         Err(error) => {
             state
                 .manager
-                .reject_reserved(&reserved, &app, error.clone())
+                .reject_reserved(&reserved, &host::remote(&app), error.clone())
                 .await;
             return Err(error);
         }
     };
-    state.manager.connect_reserved(request, reserved, app).await
+    state
+        .manager
+        .connect_reserved(request, reserved, host::remote(&app))
+        .await
 }
 
 #[tauri::command]
@@ -112,7 +119,7 @@ pub async fn ssh_runtime_disconnect(
     state: tauri::State<'_, RemoteState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    state.manager.disconnect(&app).await
+    state.manager.disconnect(&host::remote(&app)).await
 }
 
 #[tauri::command]
@@ -157,7 +164,7 @@ pub async fn ssh_capabilities_reprobe(
         .ssh_profile_id()
         .ok_or_else(|| "capability probe requires an SSH Workspace".to_string())?;
     let remote_workspace = state.manager.workspace(profile_id).await?;
-    super::tasks::capability_probe::probe(&remote_workspace, true).await
+    super::probe_capabilities(&remote_workspace, true).await
 }
 
 #[tauri::command]
@@ -166,7 +173,7 @@ pub async fn ssh_runtime_wake(
     state: tauri::State<'_, RemoteState>,
     app: tauri::AppHandle,
 ) -> Result<RemoteRuntimeSnapshot, String> {
-    state.manager.wake(&app).await
+    state.manager.wake(&host::remote(&app)).await
 }
 
 #[tauri::command]
@@ -231,7 +238,7 @@ pub async fn ssh_tunnel_start(
     match state.manager.start_tunnel(config).await {
         Ok(tunnel) => {
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Started,
                 &profile_id,
                 Some(tunnel.clone()),
@@ -242,7 +249,7 @@ pub async fn ssh_tunnel_start(
         Err(error) => {
             let message = error.message;
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Failed,
                 &profile_id,
                 error.info,
@@ -268,7 +275,7 @@ pub async fn ssh_tunnel_stop(
         Ok(Some(tunnel)) => {
             let profile_id = tunnel.profile_id.clone();
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Stopped,
                 &profile_id,
                 Some(tunnel),
@@ -279,7 +286,7 @@ pub async fn ssh_tunnel_stop(
         Err(error) => {
             let message = error.message;
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Failed,
                 &existing.profile_id,
                 error.info,
@@ -309,7 +316,7 @@ pub async fn ssh_tunnel_update(
     match state.manager.update_tunnel(id, config).await {
         Ok(tunnel) => {
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Updated,
                 &tunnel.profile_id,
                 Some(tunnel.clone()),
@@ -320,7 +327,7 @@ pub async fn ssh_tunnel_update(
         Err(error) => {
             let message = error.message;
             super::manager::RemoteManager::emit_tunnel_event(
-                &app,
+                &host::remote(&app),
                 TunnelEventKind::Failed,
                 &existing.profile_id,
                 error.info,

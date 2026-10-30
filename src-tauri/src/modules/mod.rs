@@ -2,54 +2,35 @@
 //!
 //! 每个子模块负责一类系统边界，具体 Tauri command 仍由 crate 入口显式注册。
 
-#[cfg(feature = "desktop")]
 pub mod agent;
-pub mod ai_sessions;
-pub mod app_data;
-#[cfg(feature = "desktop")]
+pub use terax_core::modules::ai_sessions;
+pub use terax_core::modules::app_data;
 pub mod auxiliary_window;
-#[cfg(feature = "desktop")]
 pub mod clipboard_files;
-#[cfg(feature = "desktop")]
 pub mod clipboard_images;
-#[cfg(all(feature = "desktop", windows))]
+#[cfg(windows)]
 pub mod editor_menu;
-#[cfg(feature = "desktop")]
 pub mod external_agent;
-#[cfg(feature = "desktop")]
 pub mod file_actions;
 pub mod fs;
-#[cfg(feature = "desktop")]
 pub mod git;
-#[cfg(feature = "desktop")]
 pub mod history;
-#[cfg(feature = "desktop")]
 pub mod lsp;
-#[cfg(feature = "desktop")]
 pub mod markdown_images;
-pub mod net;
-pub mod network_proxy;
-#[cfg(feature = "desktop")]
+pub use terax_core::modules::net;
+pub use terax_core::modules::network_proxy;
 pub mod notifications;
-#[cfg(feature = "desktop")]
 pub mod open_with;
-pub mod proc;
-#[cfg(feature = "desktop")]
+pub use terax_core::modules::proc;
 pub mod pty;
-#[cfg(feature = "desktop")]
 pub mod python;
-#[cfg(feature = "desktop")]
 pub mod remote;
-#[cfg(feature = "desktop")]
 pub mod screenshots;
-pub mod secrets;
-pub mod shared_store;
-pub mod shell;
-pub mod storage;
-#[cfg(feature = "desktop")]
+pub use terax_core::modules::secrets;
+pub use terax_core::modules::shared_store;
+pub use terax_core::modules::shell;
+pub use terax_core::modules::storage;
 pub mod transfers;
-pub mod workspace;
-#[cfg(feature = "desktop")]
+pub use terax_core::modules::workspace;
 pub mod workspace_process;
-#[cfg(feature = "desktop")]
 pub mod workspace_runtime;

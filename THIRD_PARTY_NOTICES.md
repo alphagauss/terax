@@ -95,9 +95,9 @@ The Apache License 2.0 text is included in the root `LICENSE` file.
 - License: Apache License 2.0
 - Used as the main reference for the SSH/SFTP/proxy/tunnel module boundaries,
   proxy transport, transfer operations, and connection/tunnel lifecycle.
-- Relevant Terax files: `src-tauri/src/modules/remote/proxy.rs`, `sftp.rs`,
+- Relevant Terax files: `crates/terax-core/src/modules/remote/proxy.rs`, `sftp.rs`,
   `tunnel.rs`, `manager.rs`, and `models.rs`, plus
-  `src-tauri/src/modules/transfers/archive.rs` and `transfers/ssh/archive.rs`.
+  `crates/terax-core/src/modules/transfers/archive.rs` and `transfers/ssh/archive.rs`.
 - Modifications: removed the GPUI/application persistence layers, consolidated
   the crates into the Terax backend, replaced project-specific DTOs, and wired
   the operations into Terax's existing commands and workspace model.
@@ -112,7 +112,7 @@ The Apache License 2.0 text is included in the root `LICENSE` file.
 - License: MIT
 - Used as the reference for the russh session/channel flow, host-key prompt,
   Tauri commands/events, and xterm-compatible terminal bridge.
-- Relevant Terax files: `src-tauri/src/modules/remote/session.rs`,
+- Relevant Terax files: `crates/terax-core/src/modules/remote/session.rs`,
   `host_key.rs`, `terminal.rs`, and `commands.rs`.
 - Modifications: replaced the Vue/event terminal path with Terax raw IPC
   channels, added shared SFTP/tunnel services, and adapted lifecycle and state
@@ -151,9 +151,9 @@ SOFTWARE.
 - Used as the reference for OpenSSH config parsing, known-host behavior,
   password/private-key/agent authentication details, recursive SFTP transfer,
   keepalive, outbound proxy options, and local/remote/dynamic forwarding.
-- Relevant Terax files: `src-tauri/src/modules/remote/ssh_config.rs`,
+- Relevant Terax files: `crates/terax-core/src/modules/remote/ssh_config.rs`,
   `host_key.rs`, `session.rs`, `sftp.rs`, and `tunnel.rs`, plus
-  `src-tauri/src/modules/transfers/ssh/`.
+  `crates/terax-core/src/modules/transfers/ssh/`.
 - Modifications: removed the Slint UI and all Telnet/serial/XMODEM features,
   moved secrets to Terax's OS credential-vault commands, and adapted the
   remaining behavior to russh and Terax's workspace APIs.

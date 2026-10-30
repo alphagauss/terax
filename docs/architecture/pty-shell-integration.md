@@ -1,6 +1,6 @@
 # PTY 与 Shell 集成
 
-终端是长生命周期交互式 PTY。其前端身份和窗口归属见 [进程模型](two-process-model.md)，原生实现位于 `src-tauri/src/modules/pty/`。
+终端是长生命周期交互式 PTY。其前端身份和窗口归属见 [进程模型](two-process-model.md)，原生运行时由 `terax-core` 持有，桌面命令负责通道适配，依赖边界见 [原生 workspace](native-workspace.md)。
 
 ## Shell 行为
 

@@ -54,7 +54,13 @@ pub async fn agent_file_commit_mutation(
     app: AppHandle,
     request: AgentMutationKeyRequest,
 ) -> Result<AgentMutationResult, String> {
-    service::agent_file_commit_mutation(state.inner(), registry.inner(), &app, request).await
+    service::agent_file_commit_mutation(
+        state.inner(),
+        registry.inner(),
+        &super::files::DesktopFileEvents(app),
+        request,
+    )
+    .await
 }
 
 /// 丢弃单个预备快照。
@@ -83,5 +89,11 @@ pub async fn agent_file_operation(
     app: AppHandle,
     request: AgentFileOperationRequest,
 ) -> Result<AgentFileOperationResponse, String> {
-    service::agent_file_operation(state.inner(), registry.inner(), &app, request).await
+    service::agent_file_operation(
+        state.inner(),
+        registry.inner(),
+        &super::files::DesktopFileEvents(app),
+        request,
+    )
+    .await
 }

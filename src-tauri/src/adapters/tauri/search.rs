@@ -27,3 +27,16 @@ pub async fn fs_glob(
 ) -> Result<GlobResponse, String> {
     service::fs_glob(pattern, root, max_results, workspace).await
 }
+
+/// 将桌面搜索请求交给核心的可取消搜索服务。
+#[tauri::command]
+pub async fn fs_search(
+    state: tauri::State<'_, crate::modules::fs::search::PathSearchState>,
+    root: String,
+    query: String,
+    limit: Option<usize>,
+    workspace: Option<crate::modules::workspace::WorkspaceEnv>,
+    show_hidden: Option<bool>,
+) -> Result<crate::modules::fs::search::SearchResult, String> {
+    crate::modules::fs::search::fs_search(&state, root, query, limit, workspace, show_hidden).await
+}

@@ -24,7 +24,7 @@ pub async fn secrets_set(
     password: String,
 ) -> Result<(), String> {
     service::secrets_set(state.inner(), service, account, password).await?;
-    crate::modules::shared_store::bump_keys_epoch(&app)
+    crate::modules::shared_store::bump_keys_epoch(&super::store::DesktopStoreEvents(app))
 }
 
 /// 将桌面参数交给共享服务。
@@ -36,7 +36,7 @@ pub async fn secrets_delete(
     account: String,
 ) -> Result<(), String> {
     service::secrets_delete(state.inner(), service, account).await?;
-    crate::modules::shared_store::bump_keys_epoch(&app)
+    crate::modules::shared_store::bump_keys_epoch(&super::store::DesktopStoreEvents(app))
 }
 
 /// 将桌面参数交给共享服务。

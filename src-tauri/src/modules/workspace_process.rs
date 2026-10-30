@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 use tauri::Manager;
+use terax_core::modules::workspace_identity::{
+    assert_ssh_runtime_owner, environment_identity, EnvironmentIdentity,
+};
 use uuid::Uuid;
 
 const ENV_ARG: &str = "--terax-workspace-env";
@@ -67,11 +70,6 @@ pub struct LaunchRequest {
     launch_dir: Option<PathBuf>,
     window_geometry: Option<WindowGeometry>,
     temporary_id: Option<Uuid>,
-}
-
-struct EnvironmentIdentity {
-    key: String,
-    filename_key: String,
 }
 
 enum StateKind {
@@ -315,45 +313,6 @@ fn canonical_launch_directory(path: &Path) -> Result<String, String> {
         .into_iter()
         .next()
         .expect("launch directory was provided"))
-}
-
-fn environment_identity(env: &WorkspaceEnv) -> Result<EnvironmentIdentity, String> {
-    let key = match env {
-        WorkspaceEnv::Local => "local".to_string(),
-        WorkspaceEnv::Wsl { distro } => format!("wsl:{distro}"),
-        WorkspaceEnv::Ssh { profile_id } => {
-            let profile = crate::modules::remote::profile::load(profile_id)?;
-            profile.endpoint_key()
-        }
-    };
-    let filename_key = match env {
-        WorkspaceEnv::Local => "local".to_string(),
-        WorkspaceEnv::Wsl { distro } => format!("wsl-{}", filename_component(distro)),
-        WorkspaceEnv::Ssh { .. } => format!("ssh-{}", filename_component(&key["ssh:".len()..])),
-    };
-    Ok(EnvironmentIdentity { key, filename_key })
-}
-
-/// 返回可安全用于持久化文件名前缀的 Workspace 环境标识。
-pub(crate) fn environment_filename_key(env: &WorkspaceEnv) -> Result<String, String> {
-    Ok(environment_identity(env)?.filename_key)
-}
-
-fn filename_component(value: &str) -> String {
-    let mut result = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {
-            result.push(char::from(byte));
-        } else {
-            result.push('_');
-            result.push_str(&format!("{byte:02x}"));
-        }
-    }
-    if result.len() <= 120 {
-        result
-    } else {
-        Uuid::new_v5(&Uuid::NAMESPACE_URL, value.as_bytes()).to_string()
-    }
 }
 
 /// 执行窗口创建前不需要启动外部环境的轻量校验。
@@ -678,25 +637,6 @@ impl WorkspaceProcessState {
 
     pub fn assert_ssh_tunnel_owner(&self, profile_id: &str) -> Result<(), String> {
         assert_ssh_tunnel_owner(self.bootstrap.is_primary, &self.bootstrap.env, profile_id)
-    }
-}
-
-fn assert_ssh_runtime_owner(
-    environment: &WorkspaceEnv,
-    environment_key: &str,
-    profile: &crate::modules::remote::models::SshProfile,
-) -> Result<(), String> {
-    match environment {
-        WorkspaceEnv::Ssh {
-            profile_id: active_profile,
-        } if active_profile == &profile.id && environment_key == profile.endpoint_key() => Ok(()),
-        WorkspaceEnv::Ssh {
-            profile_id: active_profile,
-        } if active_profile == &profile.id => {
-            Err("SSH endpoint changed; open a new Workspace for this profile".into())
-        }
-        WorkspaceEnv::Ssh { .. } => Err("SSH profile does not match this Workspace".into()),
-        _ => Err("SSH connection requires an SSH Workspace".into()),
     }
 }
 
@@ -1273,12 +1213,6 @@ mod tests {
         staging.id = "staging".to_string();
         assert!(assert_ssh_runtime_owner(&ssh, &environment_key, &staging).is_err());
         assert!(assert_ssh_runtime_owner(&WorkspaceEnv::Local, "local", &profile).is_err());
-    }
-
-    #[test]
-    fn filename_component_is_windows_safe_and_keeps_short_names_readable() {
-        assert_eq!(filename_component("Ubuntu"), "Ubuntu");
-        assert_eq!(filename_component("dev@example:22"), "dev_40example_3a22");
     }
 
     #[test]

@@ -61,7 +61,11 @@ pub fn ai_agent_delete(
     state: tauri::State<'_, AiSessionsState>,
     agent_id: String,
 ) -> Result<Vec<String>, String> {
-    service::ai_agent_delete(&app, state.inner(), agent_id)
+    service::ai_agent_delete(
+        &super::store::DesktopStoreEvents(app),
+        state.inner(),
+        agent_id,
+    )
 }
 
 /// 尝试为一次 AI 运行取得跨进程锁，重复取得同一锁视为成功。

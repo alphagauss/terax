@@ -27,6 +27,7 @@ fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
 /// 启动 Terax 原生进程并注册共享状态、插件和全部 IPC 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    terax_core::runtime::set_runtime(tauri::async_runtime::handle().inner().clone());
     #[cfg(windows)]
     {
         let args: Vec<String> = std::env::args().collect();
@@ -252,7 +253,7 @@ pub fn run() {
             lsp::lsp_spawn,
             lsp::lsp_send,
             lsp::lsp_kill,
-            fs::search::fs_search,
+            commands::search::fs_search,
             commands::search::fs_content_search,
             commands::search::fs_glob,
             commands::agent::agent_file_read,

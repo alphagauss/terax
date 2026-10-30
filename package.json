@@ -26,7 +26,7 @@
     "size": "size-limit",
     "knip": "knip",
     "agent": "bun cli/index.ts agent",
-    "build:host": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --bin terax-host --locked",
+    "build:host": "cargo build -p terax-host --locked",
     "check-types:terminal": "tsc --noEmit -p cli/tsconfig.json",
     "test:terminal": "bun scripts/terminal-smoke.ts",
     "test:tui": "bun scripts/terminal-ui-smoke.tsx",
