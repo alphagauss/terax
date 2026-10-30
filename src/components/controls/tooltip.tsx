@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 type TooltipGroupValue = {
   dismissEpoch: number;
@@ -199,6 +200,78 @@ export function TooltipContent({
       )}
       {...props}
     />
+  );
+}
+
+/** 列表共享一个提示实例，目标元素保持原有 DOM 和点击生命周期。 */
+export function TargetTooltip({
+  target,
+  children,
+}: {
+  target: HTMLElement | null;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TargetTooltipAnchor target={target} />
+      {target && <TooltipContent side="top">{children}</TooltipContent>}
+    </Tooltip>
+  );
+}
+
+function TargetTooltipAnchor({ target }: { target: HTMLElement | null }) {
+  const instance = useContext(TooltipInstance);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const previousTarget = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // 窗口失活更新分组时只关闭，不能因目标未变重新启动悬停计时。
+    const changed = previousTarget.current !== target;
+    previousTarget.current = target;
+    if (!target?.isConnected || !anchor.current || !instance) return;
+    let needsPosition = true;
+    const position = () => {
+      if (!needsPosition || !anchor.current) return;
+      const rect = target.getBoundingClientRect();
+      Object.assign(anchor.current.style, {
+        left: `${rect.left}px`,
+        top: `${rect.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      });
+      needsPosition = false;
+    };
+    position();
+    if (changed) instance.hover(target);
+    const hover = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse") return;
+      position();
+      instance.hover(target);
+    };
+    const dismiss = () => {
+      needsPosition = true;
+      instance.leave();
+      instance.dismiss();
+    };
+    target.addEventListener("pointermove", hover);
+    target.addEventListener("pointerleave", dismiss);
+    target.addEventListener("pointerdown", dismiss);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      dismiss();
+      target.removeEventListener("pointermove", hover);
+      target.removeEventListener("pointerleave", dismiss);
+      target.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
+  }, [target, instance]);
+  // 侧栏的位移动画会建立 fixed 包含块，锚点与弹层同放 body 才能使用视口坐标。
+  return createPortal(
+    <TooltipTrigger asChild>
+      <span ref={anchor} aria-hidden className="pointer-events-none fixed" />
+    </TooltipTrigger>,
+    document.body,
   );
 }
 

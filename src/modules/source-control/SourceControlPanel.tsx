@@ -1,7 +1,7 @@
 /**
  * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
  * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
- * Changes 使用普通文档流，侧栏切换保留展示树；open 控制面板手动刷新和 Graph 活动、展示，
+ * Changes 使用轻量普通行与共享菜单、提示，侧栏切换保留展示树；open 控制展示统计和 Graph，
  * 不停止共享仓库控制器的数据更新。
  */
 
@@ -21,6 +21,7 @@ import { Button } from "@/components/controls/button";
 import { Textarea } from "@/components/controls/textarea";
 import {
   Tooltip,
+  TargetTooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
@@ -401,6 +402,27 @@ function SourceControlViewContainerComponent({
     worktree: false,
   });
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
+  const [contextRowKey, setContextRowKey] = useState<string | null>(null);
+  const [hintTarget, setHintTarget] = useState<HTMLElement | null>(null);
+  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+  const clearHover = useCallback(() => {
+    setHintTarget(null);
+    setHoveredRowKey(null);
+  }, []);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) clearHover();
+    };
+    window.addEventListener("blur", clearHover);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", clearHover);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [clearHover]);
+  useEffect(() => {
+    if (!open) clearHover();
+  }, [open, clearHover]);
   const [graphRefreshToken, setGraphRefreshToken] = useState(0);
   const [graphSearchOpen, setGraphSearchOpen] = useState(false);
   const showUndoCommit = usePreferencesStore(
@@ -526,6 +548,14 @@ function SourceControlViewContainerComponent({
         .filter((group) => group.entries.length > 0),
     [scm.fileEntries],
   );
+  const hintRowKey =
+    hintTarget?.closest<HTMLElement>("[data-scm-row-key]")?.dataset.scmRowKey;
+  const hintEntry = hintRowKey
+    ? (scm.fileEntries.find((entry) => entry.key === hintRowKey) ?? null)
+    : null;
+  const contextEntry = contextRowKey
+    ? (scm.fileEntries.find((entry) => entry.key === contextRowKey) ?? null)
+    : null;
   const rows = useMemo(
     () =>
       groups.flatMap(({ side, entries }) =>
@@ -641,6 +671,17 @@ function SourceControlViewContainerComponent({
 
   return (
     <TooltipProvider>
+      <TargetTooltip target={open && hintEntry ? hintTarget : null}>
+        {!hintEntry?.lineStats ? (
+          t("lineStats.unavailable")
+        ) : hintEntry.lineStats.incomplete ? (
+          t("lineStats.incomplete")
+        ) : hintEntry.lineStats.isBinary ? (
+          t("lineStats.binary")
+        ) : (
+          <AnimatedDiffStats stats={hintEntry.lineStats} animate={false} />
+        )}
+      </TargetTooltip>
       <aside className="flex h-full min-w-0 flex-col bg-sidebar [contain:layout_style]">
         <SidebarSectionGroup
           id="source-control"
@@ -949,52 +990,116 @@ function SourceControlViewContainerComponent({
                             onKeyDown={handlePanelKeyDown}
                             className="relative min-h-0 flex-1 outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
                           >
-                            <div
-                              ref={scrollRef}
-                              data-reveal-boundary
-                              className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+                            <ContextMenu
+                              onOpenChange={(open) => {
+                                if (!open) setContextRowKey(null);
+                              }}
                             >
-                              {isDiverged && <DivergedBanner />}
-                              {groups.map(({ side, entries }) => (
-                                <div key={side}>
-                                  <ListHeader
-                                    side={side}
-                                    count={entries.length}
-                                    expanded={!collapsedGroups[side]}
-                                    onToggle={() =>
-                                      setCollapsedGroups((current) => ({
-                                        ...current,
-                                        [side]: !current[side],
-                                      }))
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  onContextMenuCapture={(event) => {
+                                    const row = (
+                                      event.target as HTMLElement
+                                    ).closest<HTMLElement>(
+                                      "[data-scm-row-key]",
+                                    );
+                                    const key = row?.dataset.scmRowKey ?? null;
+                                    if (!key) {
+                                      event.stopPropagation();
+                                      return;
                                     }
-                                    actionBusy={scm.actionBusy}
-                                    onStageAll={scm.stageAllEntries}
-                                    onUnstageAll={scm.unstageAllEntries}
-                                    onDiscardAll={scm.requestDiscardAll}
-                                  />
-                                  <ContentReveal
-                                    scrollRef={scrollRef}
-                                    open={!collapsedGroups[side]}
-                                    transitionKey={null}
-                                  >
-                                    {entries.map((entry) => (
-                                      <EntryRow
-                                        key={entry.key}
-                                        entry={entry}
-                                        focused={focusedRowKey === entry.key}
+                                    setContextRowKey(key);
+                                    setFocusedRowKey(key);
+                                  }}
+                                  onPointerMoveCapture={(event) => {
+                                    if (event.pointerType !== "mouse") return;
+                                    const row = (
+                                      event.target as HTMLElement
+                                    ).closest<HTMLElement>(
+                                      "[data-scm-row-key]",
+                                    );
+                                    setHoveredRowKey(
+                                      row?.dataset.scmRowKey ?? null,
+                                    );
+                                    const target = (
+                                      event.target as HTMLElement
+                                    ).closest<HTMLElement>("[data-scm-file]");
+                                    setHintTarget(target);
+                                  }}
+                                  onPointerLeave={clearHover}
+                                  onPointerDownCapture={() =>
+                                    setHintTarget(null)
+                                  }
+                                  onScroll={clearHover}
+                                  ref={scrollRef}
+                                  data-reveal-boundary
+                                  className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+                                >
+                                  {isDiverged && <DivergedBanner />}
+                                  {groups.map(({ side, entries }) => (
+                                    <div key={side}>
+                                      <ListHeader
+                                        side={side}
+                                        count={entries.length}
+                                        expanded={!collapsedGroups[side]}
+                                        onToggle={() =>
+                                          setCollapsedGroups((current) => ({
+                                            ...current,
+                                            [side]: !current[side],
+                                          }))
+                                        }
                                         actionBusy={scm.actionBusy}
-                                        repoRoot={scm.repo?.repoRoot ?? null}
-                                        onFocusRow={setFocusedRowKey}
-                                        onOpenFileDiff={scm.openFileDiff}
-                                        onToggleStageFile={scm.toggleStageFile}
-                                        onDiscardFile={scm.requestDiscardFile}
-                                        onOpenFile={onOpenFile}
+                                        onStageAll={scm.stageAllEntries}
+                                        onUnstageAll={scm.unstageAllEntries}
+                                        onDiscardAll={scm.requestDiscardAll}
                                       />
-                                    ))}
-                                  </ContentReveal>
+                                      <ContentReveal
+                                        scrollRef={scrollRef}
+                                        open={!collapsedGroups[side]}
+                                        transitionKey={null}
+                                      >
+                                        {entries.map((entry) => (
+                                          <EntryRow
+                                            key={entry.key}
+                                            entry={entry}
+                                            focused={
+                                              focusedRowKey === entry.key
+                                            }
+                                            hovered={
+                                              hoveredRowKey === entry.key
+                                            }
+                                            actionBusy={scm.actionBusy}
+                                            repoRoot={
+                                              scm.repo?.repoRoot ?? null
+                                            }
+                                            onFocusRow={setFocusedRowKey}
+                                            onOpenFileDiff={scm.openFileDiff}
+                                            onToggleStageFile={
+                                              scm.toggleStageFile
+                                            }
+                                            onDiscardFile={
+                                              scm.requestDiscardFile
+                                            }
+                                            onOpenFile={onOpenFile}
+                                          />
+                                        ))}
+                                      </ContentReveal>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
+                              </ContextMenuTrigger>
+                              {contextEntry && (
+                                <EntryContextMenu
+                                  entry={contextEntry}
+                                  repoRoot={scm.repo?.repoRoot ?? null}
+                                  disabled={scm.actionBusy !== null}
+                                  onOpenFileDiff={scm.openFileDiff}
+                                  onToggleStageFile={scm.toggleStageFile}
+                                  onDiscardFile={scm.requestDiscardFile}
+                                  onOpenFile={onOpenFile}
+                                />
+                              )}
+                            </ContextMenu>
                           </div>
                         )}
                       </>
@@ -1152,6 +1257,7 @@ function CleanTreeHint({ repoLabel }: { repoLabel: string }) {
 type EntryRowProps = {
   entry: SourceControlFileEntry;
   focused: boolean;
+  hovered: boolean;
   actionBusy: string | null;
   repoRoot: string | null;
   onFocusRow: (key: string | null) => void;
@@ -1260,6 +1366,7 @@ function ListHeader({
 const EntryRow = memo(function EntryRow({
   entry,
   focused,
+  hovered,
   actionBusy,
   repoRoot,
   onFocusRow,
@@ -1269,6 +1376,7 @@ const EntryRow = memo(function EntryRow({
   onOpenFile,
 }: EntryRowProps) {
   const { t } = useTranslation("sourceControl");
+  const interactive = hovered || focused;
   const fileName = basename(entry.path);
   const iconUrl = fileIconUrl(fileName);
   const pathLabel = entryPathLabel(entry);
@@ -1283,199 +1391,209 @@ const EntryRow = memo(function EntryRow({
   const absolutePath = repoRoot
     ? joinPath(repoRoot.replace(/\\/g, "/"), entry.path.replace(/\\/g, "/"))
     : null;
-  const revealLabel = IS_MAC
-    ? t("menu.revealInFinder")
-    : t("menu.revealInFileManager");
-
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          id={`scm-row-${entry.key}`}
-          data-focused={focused || undefined}
-          role="option"
-          aria-selected={focused}
-          tabIndex={-1}
-          onMouseDown={() => onFocusRow(entry.key)}
-          className={cn(
-            "group flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
-            focused ? "bg-interactive-active" : "hover:bg-interactive-hover",
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => {
-                  onFocusRow(entry.key);
-                  onOpenFileDiff(entry);
-                }}
-                className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-              >
-                {iconUrl ? (
-                  <img
-                    src={iconUrl}
-                    alt=""
-                    className="file-type-icon size-4 shrink-0"
-                  />
-                ) : (
-                  <span className="size-4 shrink-0" />
-                )}
-                <div className="flex min-w-0 flex-1 items-baseline gap-1 leading-none">
-                  <span
-                    className={cn(
-                      "truncate text-[13px] leading-none",
-                      focused
-                        ? "font-semibold text-foreground"
-                        : "font-medium text-foreground",
-                      "min-w-0 shrink",
-                      isDeleted && "line-through",
-                    )}
-                  >
-                    {fileName}
-                  </span>
-                  {pathLabel ? (
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground",
-                        isDeleted && "line-through",
-                      )}
-                    >
-                      {pathLabel}
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {!entry.lineStats ? (
-                t("lineStats.unavailable")
-              ) : entry.lineStats.incomplete ? (
-                t("lineStats.incomplete")
-              ) : entry.lineStats.isBinary ? (
-                t("lineStats.binary")
-              ) : (
-                <AnimatedDiffStats stats={entry.lineStats} animate={false} />
+    <div
+      id={`scm-row-${entry.key}`}
+      data-scm-row-key={entry.key}
+      data-focused={focused || undefined}
+      role="option"
+      aria-selected={focused}
+      tabIndex={-1}
+      onMouseDown={() => onFocusRow(entry.key)}
+      onFocusCapture={() => onFocusRow(entry.key)}
+      className={cn(
+        "group flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
+        focused ? "bg-interactive-active" : "hover:bg-interactive-hover",
+      )}
+    >
+      <button
+        data-scm-file
+        type="button"
+        onClick={() => {
+          onFocusRow(entry.key);
+          onOpenFileDiff(entry);
+        }}
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+      >
+        {iconUrl ? (
+          <img
+            src={iconUrl}
+            alt=""
+            className="file-type-icon size-4 shrink-0"
+          />
+        ) : (
+          <span className="size-4 shrink-0" />
+        )}
+        <div className="flex min-w-0 flex-1 items-baseline gap-1 leading-none">
+          <span
+            className={cn(
+              "truncate text-[13px] leading-none",
+              focused
+                ? "font-semibold text-foreground"
+                : "font-medium text-foreground",
+              "min-w-0 shrink",
+              isDeleted && "line-through",
+            )}
+          >
+            {fileName}
+          </span>
+          {pathLabel ? (
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground",
+                isDeleted && "line-through",
               )}
-            </TooltipContent>
-          </Tooltip>
-          <div className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">
-            {entry.canOpenFile && onOpenFile && absolutePath && (
-              <IconActionButton
-                label={t("menu.openFile")}
-                disabled={disabled}
-                side="top"
-                className="size-5"
-                onClick={() => onOpenFile(absolutePath)}
-              >
-                <HugeiconsIcon icon={FileEditIcon} size={13} />
-              </IconActionButton>
-            )}
-            {showDiscard && (
-              <IconActionButton
-                label={t("menu.discardChanges")}
-                disabled={disabled}
-                side="top"
-                className="size-5"
-                onClick={() => onDiscardFile(entry)}
-              >
-                {isDiscardBusy ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={13} />
-                )}
-              </IconActionButton>
-            )}
+            >
+              {pathLabel}
+            </span>
+          ) : null}
+        </div>
+      </button>
+
+      {interactive && (
+        <div className="flex shrink-0 items-center">
+          {entry.canOpenFile && onOpenFile && absolutePath && (
             <IconActionButton
-              label={t(entry.side === "index" ? "menu.unstage" : "menu.stage")}
+              label={t("menu.openFile")}
               disabled={disabled}
               side="top"
               className="size-5"
-              onClick={() => void onToggleStageFile(entry)}
+              onClick={() => onOpenFile(absolutePath)}
             >
-              {isStageBusy ? (
+              <HugeiconsIcon icon={FileEditIcon} size={13} />
+            </IconActionButton>
+          )}
+          {showDiscard && (
+            <IconActionButton
+              label={t("menu.discardChanges")}
+              disabled={disabled}
+              side="top"
+              className="size-5"
+              onClick={() => onDiscardFile(entry)}
+            >
+              {isDiscardBusy ? (
                 <Spinner className="size-3" />
               ) : (
-                <HugeiconsIcon
-                  icon={entry.side === "index" ? MinusSignIcon : Add01Icon}
-                  size={13}
-                />
+                <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={13} />
               )}
             </IconActionButton>
-          </div>
-          <span
-            className={cn(
-              "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
-              explorerGitTextClass(entry.statusCode),
-            )}
-          >
-            {entry.statusCode}
-          </span>
-        </div>
-      </ContextMenuTrigger>
-
-      <ContextMenuContent>
-        {/* Open actions */}
-        <ContextMenuItem
-          onSelect={() => {
-            onFocusRow(entry.key);
-            onOpenFileDiff(entry);
-          }}
-        >
-          {t("menu.openDiff")}
-        </ContextMenuItem>
-        {entry.canOpenFile && onOpenFile && absolutePath ? (
-          <ContextMenuItem onSelect={() => onOpenFile(absolutePath)}>
-            {t("menu.openFile")}
-          </ContextMenuItem>
-        ) : null}
-
-        <ContextMenuSeparator />
-
-        {/* Stage / Unstage */}
-        <ContextMenuItem
-          disabled={disabled}
-          onSelect={() => void onToggleStageFile(entry)}
-        >
-          {entry.side === "index" ? t("menu.unstage") : t("menu.stage")}
-        </ContextMenuItem>
-        {entry.side === "worktree" ? (
-          <ContextMenuItem
-            variant="destructive"
+          )}
+          <IconActionButton
+            label={t(entry.side === "index" ? "menu.unstage" : "menu.stage")}
             disabled={disabled}
-            onSelect={() => onDiscardFile(entry)}
+            side="top"
+            className="size-5"
+            onClick={() => void onToggleStageFile(entry)}
           >
-            {t("menu.discardChanges")}
-          </ContextMenuItem>
-        ) : null}
-
-        <ContextMenuSeparator />
-
-        {/* Copy paths */}
-        <ContextMenuItem
-          onSelect={() => void copyToClipboard(entry.path.replace(/\\/g, "/"))}
-        >
-          {t("menu.copyRelativePath")}
-        </ContextMenuItem>
-        {absolutePath ? (
-          <ContextMenuItem onSelect={() => void copyToClipboard(absolutePath)}>
-            {t("menu.copyAbsolutePath")}
-          </ContextMenuItem>
-        ) : null}
-
-        {/* Reveal in Finder — only for existing files */}
-        {entry.canOpenFile && absolutePath ? (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => void revealInFinder(absolutePath)}>
-              {revealLabel}
-            </ContextMenuItem>
-          </>
-        ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+            {isStageBusy ? (
+              <Spinner className="size-3" />
+            ) : (
+              <HugeiconsIcon
+                icon={entry.side === "index" ? MinusSignIcon : Add01Icon}
+                size={13}
+              />
+            )}
+          </IconActionButton>
+        </div>
+      )}
+      <span
+        className={cn(
+          "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
+          explorerGitTextClass(entry.statusCode),
+        )}
+      >
+        {entry.statusCode}
+      </span>
+    </div>
   );
 });
+
+/** 菜单由整个 Changes 列表共享，操作始终使用当前快照中的目标条目。 */
+function EntryContextMenu({
+  entry,
+  repoRoot,
+  disabled,
+  onOpenFileDiff,
+  onToggleStageFile,
+  onDiscardFile,
+  onOpenFile,
+}: Pick<
+  EntryRowProps,
+  | "entry"
+  | "repoRoot"
+  | "onOpenFileDiff"
+  | "onToggleStageFile"
+  | "onDiscardFile"
+  | "onOpenFile"
+> & { disabled: boolean }) {
+  const { t } = useTranslation("sourceControl");
+  const absolutePath = repoRoot
+    ? joinPath(repoRoot.replace(/\\/g, "/"), entry.path.replace(/\\/g, "/"))
+    : null;
+  const revealLabel = IS_MAC
+    ? t("menu.revealInFinder")
+    : t("menu.revealInFileManager");
+  return (
+    <ContextMenuContent>
+      {/* 打开操作 */}
+      <ContextMenuItem
+        onSelect={() => {
+          onOpenFileDiff(entry);
+        }}
+      >
+        {t("menu.openDiff")}
+      </ContextMenuItem>
+      {entry.canOpenFile && onOpenFile && absolutePath ? (
+        <ContextMenuItem onSelect={() => onOpenFile(absolutePath)}>
+          {t("menu.openFile")}
+        </ContextMenuItem>
+      ) : null}
+
+      <ContextMenuSeparator />
+
+      {/* 暂存与取消暂存 */}
+      <ContextMenuItem
+        disabled={disabled}
+        onSelect={() => void onToggleStageFile(entry)}
+      >
+        {entry.side === "index" ? t("menu.unstage") : t("menu.stage")}
+      </ContextMenuItem>
+      {entry.side === "worktree" ? (
+        <ContextMenuItem
+          variant="destructive"
+          disabled={disabled}
+          onSelect={() => onDiscardFile(entry)}
+        >
+          {t("menu.discardChanges")}
+        </ContextMenuItem>
+      ) : null}
+
+      <ContextMenuSeparator />
+
+      {/* 复制路径 */}
+      <ContextMenuItem
+        onSelect={() => void copyToClipboard(entry.path.replace(/\\/g, "/"))}
+      >
+        {t("menu.copyRelativePath")}
+      </ContextMenuItem>
+      {absolutePath ? (
+        <ContextMenuItem onSelect={() => void copyToClipboard(absolutePath)}>
+          {t("menu.copyAbsolutePath")}
+        </ContextMenuItem>
+      ) : null}
+
+      {/* 仅为仍存在的文件提供定位操作 */}
+      {entry.canOpenFile && absolutePath ? (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void revealInFinder(absolutePath)}>
+            {revealLabel}
+          </ContextMenuItem>
+        </>
+      ) : null}
+    </ContextMenuContent>
+  );
+}
 
 function IconActionButton({
   label,

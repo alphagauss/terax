@@ -156,7 +156,6 @@ pub fn panel_snapshot(
     ensure_git_available(&cwd.workspace)?;
     let Some(canonical_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
         return Ok(GitPanelSnapshot {
-            diff_stats: None,
             repo: None,
             status: None,
         });
@@ -168,14 +167,24 @@ pub fn panel_snapshot(
         upstream: status.upstream.clone(),
         is_detached: status.is_detached,
     };
-    let diff_stats = GitPanelDiffStats {
-        worktree: panel_line_stats(&canonical_root, &status, false).ok(),
-        index: panel_line_stats(&canonical_root, &status, true).ok(),
-    };
     Ok(GitPanelSnapshot {
-        diff_stats: Some(diff_stats),
         repo: Some(repo),
         status: Some(status),
+    })
+}
+
+/// 按需读取整批行数统计，与轻量状态快照分离，避免列表等待全文比较。
+pub fn panel_diff_stats(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<GitPanelDiffStats> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let status = status_inner(&repo_root)?;
+    Ok(GitPanelDiffStats {
+        worktree: panel_line_stats(&repo_root, &status, false).ok(),
+        index: panel_line_stats(&repo_root, &status, true).ok(),
     })
 }
 

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   gitStatus: vi.fn(),
   workspaceKey: "local",
   resumeListeners: new Set<() => void>(),
+  changeListeners: new Set<(paths: string[]) => void>(),
 }));
 
 vi.mock("@/modules/ai/lib/native", () => ({
@@ -33,7 +34,12 @@ vi.mock("@/modules/workspace", () => ({
   workspaceScopeKey: () => mocks.workspaceKey,
 }));
 vi.mock("@/modules/filesystem", () => ({
-  subscribeFileSystemChanges: vi.fn(() => vi.fn()),
+  subscribeFileSystemChanges: vi.fn(
+    (_workspace: unknown, listener: (paths: string[]) => void) => {
+      mocks.changeListeners.add(listener);
+      return () => mocks.changeListeners.delete(listener);
+    },
+  ),
   subscribeWorkspaceResume: vi.fn((listener: () => void) => {
     mocks.resumeListeners.add(listener);
     return () => mocks.resumeListeners.delete(listener);
@@ -65,7 +71,6 @@ function repositorySnapshot(repoRoot: string): GitPanelSnapshot {
       isDetached: status.isDetached,
     },
     status,
-    diffStats: null,
   };
 }
 
@@ -81,6 +86,7 @@ let root: Root | null = null;
 let controller: RepositoryController | null = null;
 
 beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mocks.workspaceKey = "local";
   mocks.gitGraphRevision.mockResolvedValue("refs-1");
 });
@@ -111,12 +117,72 @@ afterEach(async () => {
 });
 
 describe("useRepositoryController", () => {
+  it("consumes a debounced invalidation once and defers it if the window hides", async () => {
+    vi.useFakeTimers();
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible");
+    mocks.gitPanelSnapshot.mockImplementation(async () =>
+      repositorySnapshot("C:/parent/repo"),
+    );
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/parent/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    for (const listener of mocks.changeListeners)
+      listener(["C:/parent/repo/file.ts"]);
+    visibility.mockReturnValue("hidden");
+    await act(async () => vi.advanceTimersByTimeAsync(120));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      for (const listener of mocks.resumeListeners) listener();
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+
+    // 父目录批次也可能表示整个仓库被移动；恢复读取后不能再被旧定时器刷新一次。
+    for (const listener of mocks.changeListeners) listener(["C:/parent"]);
+    await act(async () => {
+      for (const listener of mocks.resumeListeners) listener();
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(120));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it("defers hidden file events and bypasses the passive TTL once on resume", async () => {
+    vi.useFakeTimers();
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible");
+    mocks.gitPanelSnapshot.mockImplementation(async () =>
+      repositorySnapshot("C:/repo"),
+    );
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () => {
+      for (const listener of mocks.resumeListeners) listener();
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+    visibility.mockReturnValue("hidden");
+    for (const listener of mocks.changeListeners)
+      listener(["C:/other/file.ts"]);
+    for (const listener of mocks.changeListeners) listener(["C:/repo/file.ts"]);
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      for (const listener of mocks.resumeListeners) listener();
+      for (const listener of mocks.resumeListeners) listener();
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+  });
   it("loads a new context independently after an empty result, workspace switch or re-enable", async () => {
     vi.useFakeTimers();
     const empty: GitPanelSnapshot = {
       repo: null,
       status: null,
-      diffStats: null,
     };
     mocks.gitPanelSnapshot.mockResolvedValue(empty);
     const container = document.createElement("div");
@@ -194,7 +260,7 @@ describe("useRepositoryController", () => {
     });
     expect(controller).toBe(failed);
     await act(async () => {
-      pending.resolve({ repo: null, status: null, diffStats: null });
+      pending.resolve({ repo: null, status: null });
       await refresh;
     });
     expect(controller?.localError).toBeNull();
@@ -234,24 +300,30 @@ describe("useRepositoryController", () => {
     });
     expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
     await act(async () => pending.resolve(repositorySnapshot("C:/repo")));
-    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    await act(async () => vi.advanceTimersByTimeAsync(12_000));
     expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it("advances revision after repeated real snapshots with identical status", async () => {
-    mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/repo"));
+    mocks.gitPanelSnapshot.mockImplementation(async () =>
+      repositorySnapshot("C:/repo"),
+    );
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
 
     await act(async () => root?.render(<Probe contextPath="C:/repo" />));
     await vi.waitFor(() => expect(container.textContent).toBe("C:/repo:1"));
+    const status = controller?.status;
+    const repo = controller?.repo;
 
     await act(async () => {
       await controller?.refresh();
     });
 
     expect(container.textContent).toBe("C:/repo:2");
+    expect(controller?.status).toBe(status);
+    expect(controller?.repo).toBe(repo);
     expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
   });
 

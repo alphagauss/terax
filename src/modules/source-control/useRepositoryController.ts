@@ -5,7 +5,6 @@
 
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
-  type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
   native,
@@ -22,10 +21,12 @@ import {
 } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRepositoryRefreshQueue } from "./repositoryRefresh";
+import { shareRepositorySnapshot } from "./repositorySharing";
 
 // 相同上下文在短时间内复用快照；路径一旦变化就重新发现仓库，避免漏掉嵌套仓库。
 const SC_STATUS_TTL_MS = 2000;
 const FOREGROUND_REFRESH_MS = 3000;
+const MAX_REFRESH_MS = 30000;
 
 type RepositoryRemoteAction = "fetch" | "pull" | "push";
 type RepositoryRemoteActionMode = "contextual" | RepositoryRemoteAction;
@@ -41,7 +42,6 @@ type RepositoryRemoteActionResult = {
 export type RepositoryController = {
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
-  diffStats: GitPanelDiffStats | null;
   changedCount: number;
   upstream: string | null;
   ahead: number;
@@ -68,7 +68,6 @@ type RepositoryControllerState = {
   contextPath: string | null;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
-  diffStats: GitPanelDiffStats | null;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
@@ -122,7 +121,6 @@ export function useRepositoryController(
     contextPath: null,
     repo: null,
     status: null,
-    diffStats: null,
     localError: null,
     busyAction: null,
     lastRemoteError: null,
@@ -135,6 +133,8 @@ export function useRepositoryController(
   const contextPathRef = useRef(contextPath);
   const workspaceKeyRef = useRef(workspaceKey);
   const lastRefreshAtRef = useRef(0);
+  const pollDelayRef = useRef(FOREGROUND_REFRESH_MS);
+  const dirtyRef = useRef(false);
 
   enabledRef.current = enabled;
   contextPathRef.current = contextPath;
@@ -163,7 +163,6 @@ export function useRepositoryController(
       contextPath: null,
       repo: null,
       status: null,
-      diffStats: null,
       localError: null,
       busyAction: null,
       lastRemoteError: null,
@@ -174,6 +173,7 @@ export function useRepositoryController(
 
   const doRefresh = useCallback(async (): Promise<void> => {
     if (!enabledRef.current) return;
+    const startedAt = Date.now();
     const requestId = ++requestIdRef.current;
     const requestedContext = contextPathRef.current;
     const requestedWorkspace = workspaceKeyRef.current;
@@ -192,7 +192,6 @@ export function useRepositoryController(
               contextPath: null,
               repo: null,
               status: null,
-              diffStats: null,
               localError: null,
               busyAction: null,
               lastRemoteError: null,
@@ -219,21 +218,30 @@ export function useRepositoryController(
                 contextPath: requestedContext,
                 repo: null,
                 status: null,
-                diffStats: null,
                 localError: null,
               },
         );
         return;
       }
-      const repo = snapshot.repo;
-      const status = snapshot.status;
+      const previous = stateRef.current;
+      const shared = shareRepositorySnapshot(previous, snapshot);
+      const repo = shared.repo ?? snapshot.repo;
+      const status = shared.status ?? snapshot.status;
+      const unchanged = previous.repo === repo && previous.status === status;
+      pollDelayRef.current = Math.min(
+        MAX_REFRESH_MS,
+        Math.max(
+          FOREGROUND_REFRESH_MS,
+          (Date.now() - startedAt) * 2,
+          unchanged ? pollDelayRef.current * 2 : FOREGROUND_REFRESH_MS,
+        ),
+      );
 
       updateState((current) => ({
         ...current,
         contextPath: requestedContext,
         repo,
         status,
-        diffStats: snapshot.diffStats,
         revision: current.revision + 1,
         graphRevision:
           current.repo?.repoRoot === repo.repoRoot
@@ -254,7 +262,6 @@ export function useRepositoryController(
           contextPath: requestedContext,
           repo: null,
           status: null,
-          diffStats: null,
           localError,
         };
       });
@@ -269,7 +276,22 @@ export function useRepositoryController(
     [doRefresh],
   );
 
-  const refresh = useCallback(() => refreshQueue.request(), [refreshQueue]);
+  const refresh = useCallback(() => {
+    pollDelayRef.current = FOREGROUND_REFRESH_MS;
+    dirtyRef.current = false;
+    return refreshQueue.request();
+  }, [refreshQueue]);
+
+  const check = useCallback(() => {
+    if (
+      stateRef.current.contextPath !== contextPathRef.current ||
+      dirtyRef.current
+    )
+      return refresh();
+    if (Date.now() - lastRefreshAtRef.current < SC_STATUS_TTL_MS)
+      return Promise.resolve();
+    return refreshQueue.request("check");
+  }, [refresh, refreshQueue]);
 
   const probeGraphRevision = useCallback(async (): Promise<void> => {
     const repoRoot = stateRef.current.repo?.repoRoot;
@@ -376,7 +398,6 @@ export function useRepositoryController(
         contextPath: null,
         repo: null,
         status: null,
-        diffStats: null,
         localError: null,
         busyAction: null,
         lastRemoteError: null,
@@ -435,11 +456,26 @@ export function useRepositoryController(
   useEffect(() => {
     if (!enabled) return;
     let timer = 0;
-    const schedule = () => {
+    const schedule = (paths: string[]) => {
+      const root = stateRef.current.repo?.repoRoot;
+      if (
+        root &&
+        !paths.some(
+          (path) =>
+            isPathInsideRepository(path, root, workspaceEnv) ||
+            isPathInsideRepository(root, path, workspaceEnv),
+        )
+      )
+        return;
+      dirtyRef.current = true;
+      pollDelayRef.current = FOREGROUND_REFRESH_MS;
       window.clearTimeout(timer);
+      if (document.visibilityState === "hidden") return;
       timer = window.setTimeout(() => {
         timer = 0;
-        void refresh();
+        // 恢复校验可能已消费此批失效；等待期间隐藏则留到下次恢复。
+        if (dirtyRef.current && document.visibilityState !== "hidden")
+          void refresh();
       }, 120);
     };
     const unsubscribe = subscribeFileSystemChanges(workspaceEnv, schedule);
@@ -462,13 +498,13 @@ export function useRepositoryController(
       timer = window.setTimeout(() => {
         timer = 0;
         void run();
-      }, FOREGROUND_REFRESH_MS);
+      }, pollDelayRef.current);
     };
     const run = async () => {
       if (!canRefresh() || running) return;
       running = true;
       try {
-        await Promise.all([refresh(), probeGraph()]);
+        await Promise.all([check(), graphProbeQueue.request("check")]);
       } finally {
         running = false;
         schedule();
@@ -485,7 +521,7 @@ export function useRepositoryController(
       if (timer) window.clearTimeout(timer);
       unsubscribeResume();
     };
-  }, [contextPath, enabled, probeGraph, refresh]);
+  }, [contextPath, enabled, check, graphProbeQueue]);
 
   return useMemo<RepositoryController>(() => {
     // 空 Space 没有仓库，不能在异步清理完成前继续暴露上一根目录的快照。
@@ -494,7 +530,6 @@ export function useRepositoryController(
     return {
       repo,
       status,
-      diffStats: status ? state.diffStats : null,
       changedCount: status?.changedFiles.length ?? 0,
       upstream: status?.upstream ?? repo?.upstream ?? null,
       ahead: status?.ahead ?? 0,

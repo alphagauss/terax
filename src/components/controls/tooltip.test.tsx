@@ -3,6 +3,7 @@
 import { Button } from "@/components/controls/button";
 import {
   Hint,
+  TargetTooltip,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -59,6 +60,57 @@ const dismiss = async () =>
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
   });
+
+it("shares a target hint without replacing row buttons and dismisses on blur and scroll", async () => {
+  const click = vi.fn();
+  let select!: (target: HTMLElement | null) => void;
+  function View() {
+    const [target, setTarget] = useState<HTMLElement | null>(null);
+    select = setTarget;
+    return (
+      <TooltipProvider>
+        <button type="button" onClick={click}>
+          file
+        </button>
+        <TargetTooltip target={target}>stats</TargetTooltip>
+      </TooltipProvider>
+    );
+  }
+  await act(async () => root.render(<View />));
+  const button = container.querySelector("button");
+  if (!button) throw new Error("Missing file button");
+  await act(async () => select(button));
+  expect(container.querySelector("button")).toBe(button);
+  await act(async () => button.click());
+  expect(click).toHaveBeenCalledTimes(1);
+  await wait(800);
+  expect(tooltip()?.textContent).toBe("stats");
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  await wait(1000);
+  expect(tooltip()).toBeNull();
+  await hover(button);
+  await wait(800);
+  expect(tooltip()?.textContent).toBe("stats");
+  await act(async () => window.dispatchEvent(new Event("scroll")));
+  expect(tooltip()).toBeNull();
+  const measure = vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+    left: 100,
+    top: 200,
+    width: 300,
+    height: 24,
+  } as DOMRect);
+  await hover(button);
+  const anchor = document.body.querySelector<HTMLElement>(
+    'span[data-slot="tooltip-trigger"][aria-hidden]',
+  );
+  expect(anchor?.style.left).toBe("100px");
+  expect(anchor?.style.top).toBe("200px");
+  await hover(button);
+  expect(measure).toHaveBeenCalledTimes(1);
+  measure.mockRestore();
+  await act(async () => select(null));
+  expect(container.querySelector("button")).toBe(button);
+});
 
 it("waits 800ms, skips the delay within 500ms, then restores it", async () => {
   await act(async () =>

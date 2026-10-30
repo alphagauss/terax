@@ -1,18 +1,21 @@
 /**
  * 本文件实现仓库状态刷新的串行合并队列。
- * 刷新期间到达的新请求会在当前请求结束后继续执行，避免文件事件或 Git 操作失效丢失。
+ * 被动校验复用进行中的读取；真实失效追加一次尾随读取，避免文件事件或 Git 操作丢失。
  */
 
 type RefreshRunner = () => Promise<void>;
 
-/** 创建一个串行刷新队列，并把进行中收到的请求合并为一次后续刷新。 */
+/** 创建串行队列；check 只加入当前任务，invalidate 保证读取期间的变化得到补查。 */
 export function createRepositoryRefreshQueue(run: RefreshRunner): {
-  request: () => Promise<void>;
+  request: (mode?: "invalidate" | "check") => Promise<void>;
 } {
   let pending = false;
   let inflight: Promise<void> | null = null;
 
-  const request = (): Promise<void> => {
+  const request = (
+    mode: "invalidate" | "check" = "invalidate",
+  ): Promise<void> => {
+    if (inflight && mode === "check") return inflight;
     pending = true;
     if (inflight) return inflight;
 
@@ -23,6 +26,8 @@ export function createRepositoryRefreshQueue(run: RefreshRunner): {
       }
     })().finally(() => {
       if (inflight === task) inflight = null;
+      // 最后一轮 await 与清理之间也可能收到失效，调用方须等待这次补查。
+      if (pending) return request();
     });
     inflight = task;
     return task;

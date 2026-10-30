@@ -295,7 +295,6 @@ export type GitPanelDiffStats = {
 };
 
 export type GitPanelSnapshot = {
-  diffStats: GitPanelDiffStats | null;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
 };
@@ -486,6 +485,8 @@ export const native = {
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
     }),
+  gitPanelDiffStats: (repoRoot: string) =>
+    invoke<GitPanelDiffStats>("git_panel_diff_stats", { repoRoot }),
   gitGraphRevision: (repoRoot: string) =>
     invoke<string>("git_graph_revision", { repoRoot }),
   gitStatus: (repoRoot: string) =>

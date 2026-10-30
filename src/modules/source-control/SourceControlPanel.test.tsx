@@ -11,6 +11,7 @@ import { useRepositoryController } from "./useRepositoryController";
 
 const io = vi.hoisted(() => ({
   snapshot: vi.fn(),
+  stats: vi.fn(async () => ({ index: null, worktree: null })),
   graphRevision: vi.fn(),
   stage: vi.fn(),
   unstage: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/modules/ai/lib/native", async (original) => {
     native: {
       ...module.native,
       gitPanelSnapshot: io.snapshot,
+      gitPanelDiffStats: io.stats,
       gitGraphRevision: io.graphRevision,
       gitStage: io.stage,
       gitUnstage: io.unstage,
@@ -79,7 +81,6 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
         statusLabel: "Modified",
       })),
     },
-    diffStats: null,
     changedCount: 40,
     upstream: null,
     ahead: 0,
@@ -121,6 +122,25 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
     expect(input).not.toBeNull();
     const rows = [...container.querySelectorAll('[role="option"]')];
     expect(rows).toHaveLength(40);
+    expect(
+      rows.flatMap((row) => [...row.querySelectorAll("button")]),
+    ).toHaveLength(40);
+    expect(
+      container.querySelectorAll('[data-slot="context-menu-trigger"]'),
+    ).toHaveLength(1);
+    await act(async () =>
+      rows[0].dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
+    );
+    expect(rows[0].querySelectorAll("button").length).toBeGreaterThan(1);
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(
+      rows.flatMap((row) => [...row.querySelectorAll("button")]),
+    ).toHaveLength(40);
     input?.setSelectionRange(2, 7);
 
     // 检查隐藏期间的真实节点，避免仅在恢复后重建相同内容也通过测试。
@@ -166,7 +186,7 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-  const empty: GitPanelSnapshot = { repo: null, status: null, diffStats: null };
+  const empty: GitPanelSnapshot = { repo: null, status: null };
   let complete!: (snapshot: GitPanelSnapshot) => void;
   const pending = () =>
     new Promise<GitPanelSnapshot>((resolve) => {
@@ -248,7 +268,6 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
           truncated: false,
           changedFiles: [],
         },
-        diffStats: null,
       }),
     );
     expect(container.querySelector("textarea")).not.toBeNull();
@@ -292,7 +311,6 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
       truncated: false,
       changedFiles: [],
     },
-    diffStats: null,
   };
   io.snapshot.mockResolvedValue(snapshot);
   io.graphRevision.mockResolvedValue("refs-1");
@@ -426,7 +444,6 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
         },
       ],
     },
-    diffStats: null,
     changedCount: 1,
     upstream: null,
     ahead: 0,
@@ -449,10 +466,10 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     incomplete: false,
     isBinary: false,
   });
-  controller.diffStats = {
+  io.stats.mockResolvedValue({
     index: { ...counts(3), files: { "a.ts": counts(3) } },
     worktree: { ...counts(7), files: { "a.ts": counts(7) } },
-  };
+  } as never);
   const onOpenDiff = vi.fn();
   const onOpenFile = vi.fn();
   const render = () =>
@@ -479,6 +496,15 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     ] as const) {
       const fileRow = row(side);
       if (!fileRow) throw new Error(`Missing ${side} row`);
+      await act(async () =>
+        fileRow.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            pointerType: "mouse",
+          }),
+        ),
+      );
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
       expect(
         [...fileRow.querySelectorAll("button[aria-label]")].map((button) =>
           button.getAttribute("aria-label"),
@@ -488,6 +514,7 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
       await click(fileRow.querySelector("button"));
       await click(fileRow.querySelector("button"));
       expect(onOpenDiff).toHaveBeenCalledTimes(opened + 2);
+      expect(controller.refresh).not.toHaveBeenCalled();
       expect(onOpenDiff).toHaveBeenLastCalledWith(
         expect.objectContaining({ path: "a.ts", side }),
       );
@@ -502,8 +529,8 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
             pointerType: "mouse",
           }),
         );
-        await vi.advanceTimersByTimeAsync(850);
       });
+      await act(async () => vi.advanceTimersByTimeAsync(850));
       expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
         `+${added}`,
       );
@@ -532,6 +559,14 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     expect(stagedToggle?.getAttribute("aria-expanded")).toBe("true");
     expect(row("index")).not.toBeNull();
     const openedBeforeStaging = onOpenDiff.mock.calls.length;
+    await act(async () =>
+      row("index")?.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
+    );
     await click(row("index")?.querySelector('[aria-label="menu.unstage"]'));
     expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts"]);
     await click(row("worktree")?.querySelector('[aria-label="menu.stage"]'));
@@ -552,6 +587,14 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
       })),
     };
     await render();
+    await act(async () =>
+      row("index")?.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
+    );
     await click(row("index")?.querySelector('[aria-label="menu.unstage"]'));
     expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts", "old.ts"]);
     await click(container.querySelector('[aria-label="groups.unstageAll"]'));

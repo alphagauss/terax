@@ -50,7 +50,6 @@ pub struct GitStatusSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPanelSnapshot {
-    pub diff_stats: Option<GitPanelDiffStats>,
     pub repo: Option<GitRepoInfo>,
     pub status: Option<GitStatusSnapshot>,
 }

@@ -7,8 +7,8 @@ use tauri::{AppHandle, Manager};
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitLogEntry, GitPanelSnapshot, GitPushResult,
-    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
+    GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitLogEntry, GitPanelDiffStats,
+    GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -47,6 +47,19 @@ pub async fn git_panel_snapshot(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::panel_snapshot(r, &cwd, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_panel_diff_stats(
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<GitPanelDiffStats, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::panel_diff_stats(r, &repo_root, &workspace).map_err(Into::into)
     })
     .await
 }

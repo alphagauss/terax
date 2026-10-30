@@ -28,7 +28,9 @@ import {
   generateRepositoryCommitMessage,
   setCommitMessageDraft,
 } from "@/modules/source-control/commitMessage";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useRepositoryDiffStats } from "./useRepositoryDiffStats";
+import { shareEqual } from "./repositorySharing";
 import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
@@ -176,6 +178,15 @@ export function useSourceControlPanel(
   );
   const repo = controller.repo;
   const status = controller.status;
+  const refreshRepository = controller.refresh;
+  const busyAction = controller.busyAction;
+  const runRemoteAction = controller.runRemoteAction;
+  const diffStats = useRepositoryDiffStats(
+    repo?.repoRoot ?? null,
+    controller.revision,
+    isOpen,
+  );
+  const previousEntries = useRef(new Map<string, SourceControlFileEntry>());
   // 可见性不改变数据状态，避免普通侧栏切换卸载 Changes 滚动节点。
   const panelState: PanelState = controller.isLoading
     ? "loading"
@@ -220,22 +231,27 @@ export function useSourceControlPanel(
     [status],
   );
 
-  const fileEntries = useMemo<SourceControlFileEntry[]>(
-    () =>
-      (["index", "worktree"] as const).flatMap((side) =>
-        (status?.changedFiles ?? [])
-          .filter((file) => (side === "index" ? file.staged : file.unstaged))
-          .map((file) => ({
+  const fileEntries = useMemo<SourceControlFileEntry[]>(() => {
+    const entries = (["index", "worktree"] as const).flatMap((side) =>
+      (status?.changedFiles ?? [])
+        .filter((file) => (side === "index" ? file.staged : file.unstaged))
+        .map((file) => {
+          const entry: SourceControlFileEntry = {
             ...makeEntry(file, side),
             key: `${side}:${file.path}`,
             side,
             canOpenFile:
               file.indexStatus !== "D" && file.worktreeStatus !== "D",
-            lineStats: controller.diffStats?.[side]?.files[file.path] ?? null,
-          })),
-      ),
-    [status, controller.diffStats],
-  );
+            lineStats: diffStats?.[side]?.files[file.path] ?? null,
+          };
+          return shareEqual(previousEntries.current.get(entry.key), entry);
+        }),
+    );
+    previousEntries.current = new Map(
+      entries.map((entry) => [entry.key, entry]),
+    );
+    return entries;
+  }, [status?.changedFiles, diffStats]);
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
   const canPush = !!status?.upstream && status.behind === 0;
@@ -261,9 +277,7 @@ export function useSourceControlPanel(
       )
     : false;
   const anyActionBusy =
-    localActionBusy !== null ||
-    controller.busyAction !== null ||
-    messageState.running;
+    localActionBusy !== null || busyAction !== null || messageState.running;
   const aiUnavailableReason = useMemo(() => {
     if (stagedEntries.length === 0) {
       return t("generation.stageFirst");
@@ -296,35 +310,35 @@ export function useSourceControlPanel(
 
   const refresh = useCallback(async () => {
     if (!isOpen) return;
-    await controller.refresh();
-  }, [controller, isOpen]);
+    await refreshRepository();
+  }, [refreshRepository, isOpen]);
 
   const runMutation = useCallback(
     async (busyKey: string, ipc: () => Promise<void>) => {
-      if (!repo || controller.busyAction) return;
+      if (!repo || busyAction) return;
       setLocalActionBusy(busyKey);
       setActionMessage(null);
       setActionError(null);
       try {
         await ipc();
-        await controller.refresh();
+        await refreshRepository();
       } catch (error) {
         reportError(t("common:errors.operationFailed"), {
           error,
           source: repo.repoRoot,
         });
-        await controller.refresh().catch(() => {});
+        await refreshRepository().catch(() => {});
       } finally {
         setLocalActionBusy(null);
       }
     },
-    [controller, repo, t],
+    [busyAction, refreshRepository, repo, t],
   );
 
   const requestDiscardAll = useCallback(() => {
-    if (!repo || controller.busyAction || unstagedEntries.length === 0) return;
+    if (!repo || busyAction || unstagedEntries.length === 0) return;
     setPendingDiscard({ scope: "all", entries: unstagedEntries });
-  }, [controller.busyAction, repo, unstagedEntries]);
+  }, [busyAction, repo, unstagedEntries]);
 
   const cancelPendingDiscard = useCallback(() => {
     setPendingDiscard(null);
@@ -378,9 +392,8 @@ export function useSourceControlPanel(
           originalPath: entry.originalPath,
         });
       }
-      void controller.refresh();
     },
-    [controller, onOpenDiff, repo],
+    [onOpenDiff, repo],
   );
 
   const toggleStageFile = useCallback(
@@ -408,7 +421,7 @@ export function useSourceControlPanel(
 
   const requestDiscardFile = useCallback(
     (entry: SourceControlFileEntry) => {
-      if (!repo || controller.busyAction) return;
+      if (!repo || busyAction) return;
       setPendingDiscard({
         scope: "single",
         entry: {
@@ -419,7 +432,7 @@ export function useSourceControlPanel(
         },
       });
     },
-    [controller.busyAction, repo],
+    [busyAction, repo],
   );
 
   const generateCommitMessage = useCallback(async () => {
@@ -458,7 +471,7 @@ export function useSourceControlPanel(
   }, [anyActionBusy, repo, stagedEntries, t]);
 
   const commit = useCallback(async () => {
-    if (!repo || controller.busyAction || messageState.running) return;
+    if (!repo || busyAction || messageState.running) return;
     setLocalActionBusy("commit");
     setActionMessage(null);
     setActionError(null);
@@ -468,7 +481,7 @@ export function useSourceControlPanel(
       setActionMessage(
         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
       );
-      await controller.refresh();
+      await refreshRepository();
     } catch (error) {
       reportError(t("common:errors.operationFailed"), {
         error,
@@ -479,7 +492,8 @@ export function useSourceControlPanel(
     }
   }, [
     commitMessage,
-    controller,
+    refreshRepository,
+    busyAction,
     repo,
     messageState.running,
     setCommitMessage,
@@ -490,7 +504,7 @@ export function useSourceControlPanel(
     if (!repo) return;
     setActionMessage(null);
     setActionError(null);
-    const result = await controller.runRemoteAction("push");
+    const result = await runRemoteAction("push");
     if (result.ok) {
       setActionMessage(
         status?.upstream ? `Pushed to ${status.upstream}` : "Push completed",
@@ -503,7 +517,7 @@ export function useSourceControlPanel(
         source: repo.repoRoot,
       });
     }
-  }, [controller, repo, status?.upstream, t]);
+  }, [runRemoteAction, repo, status?.upstream, t]);
 
   const pendingDiscardView = useMemo<PendingDiscard | null>(() => {
     if (!pendingDiscard) return null;
@@ -525,13 +539,13 @@ export function useSourceControlPanel(
 
   return {
     panelState,
-    diffStats: controller.diffStats,
+    diffStats,
     repo,
     status,
     commitMessage,
     actionBusy: messageState.running
       ? "generate-message"
-      : (localActionBusy ?? controller.busyAction),
+      : (localActionBusy ?? busyAction),
     statusError: controller.localError,
     actionError:
       actionError ??

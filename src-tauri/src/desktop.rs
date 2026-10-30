@@ -266,6 +266,7 @@ pub fn run() {
             commands::agent::agent_file_operation,
             git::commands::git_resolve_repo,
             git::commands::git_panel_snapshot,
+            git::commands::git_panel_diff_stats,
             git::commands::git_graph_revision,
             git::commands::git_status,
             git::commands::git_diff,
