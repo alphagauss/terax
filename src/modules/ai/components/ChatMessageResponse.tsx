@@ -1,35 +1,36 @@
 /** 会话正文的业务渲染入口，连接文件引用菜单与宿主导航。 */
-import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
-import { MarkdownCode } from "@/modules/markdown/markdown-code";
-import {
-  streamdownPlugins,
-  streamdownRemarkPlugins,
-} from "@/modules/markdown/streamdown-plugins";
-import { cn } from "@/lib/utils";
+import { Hint } from "@/components/controls/tooltip";
+import { reportError } from "@/lib/errors";
 import { IS_WINDOWS } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
-import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { currentWorkspaceEnv } from "@/modules/workspace";
 import { FileReferenceLink } from "@/modules/file-actions/FileReferenceLink";
 import {
   decodeFileReference,
   rehypeFileReferences,
   withFileReferenceProtocol,
 } from "@/modules/file-actions/references";
+import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
+import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
+import { MarkdownCode } from "@/modules/markdown/markdown-code";
+import {
+  streamdownPlugins,
+  streamdownRemarkPlugins,
+} from "@/modules/markdown/streamdown-plugins";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   createContext,
   memo,
+  type ReactNode,
   useContext,
   useMemo,
-  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { reportError } from "@/lib/errors";
 import {
-  Streamdown,
   defaultRehypePlugins,
+  Streamdown,
   type StreamdownProps,
 } from "streamdown";
 
@@ -77,7 +78,7 @@ function buildChatRehypePlugins(baseDirectory: string | null) {
 }
 
 /** 按目标隔离菜单状态，流式正文改写链接时不复用旧路径的异步结果。 */
-function ChatLink({ href, children }: React.ComponentProps<"a">) {
+function ChatLink({ href, title, children }: React.ComponentProps<"a">) {
   const reference = decodeFileReference(href ?? "");
   const { t } = useTranslation("common");
   if (reference && href)
@@ -97,19 +98,21 @@ function ChatLink({ href, children }: React.ComponentProps<"a">) {
       </FileReferenceLink>
     );
   return href && /^(https?:|mailto:)/i.test(href) ? (
-    <a
-      href={href}
-      data-streamdown="link"
-      onAuxClick={(event) => event.preventDefault()}
-      onClick={(event) => {
-        event.preventDefault();
-        void openUrl(href).catch((error) =>
-          reportError(t("fileActions.failed"), { error }),
-        );
-      }}
-    >
-      {children}
-    </a>
+    <Hint content={title ?? href}>
+      <a
+        href={href}
+        data-streamdown="link"
+        onAuxClick={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.preventDefault();
+          void openUrl(href).catch((error) =>
+            reportError(t("fileActions.failed"), { error }),
+          );
+        }}
+      >
+        {children}
+      </a>
+    </Hint>
   ) : (
     <span>{children}</span>
   );

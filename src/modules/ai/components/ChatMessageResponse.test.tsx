@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
+
+import { MessageResponse } from "@/components/ai-elements/message";
+import { TOOLTIP_DELAY_MS } from "@/components/controls/tooltip";
 import {
   ChatFileReferenceBaseProvider,
   ChatMessageResponse,
 } from "@/modules/ai/components/ChatMessageResponse";
-import { MessageResponse } from "@/components/ai-elements/message";
-import { act } from "react";
 import { decodeFileReference } from "@/modules/file-actions/references";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -480,6 +482,55 @@ describe("chat file references", () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it.each([
+    { streaming: false, title: undefined },
+    { streaming: true, title: undefined },
+    { streaming: false, title: "Terax docs" },
+    { streaming: true, title: "Terax docs" },
+  ])(
+    "shows the shared external link hint (streaming=$streaming, title=$title)",
+    async ({ streaming, title }) => {
+      vi.useFakeTimers();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      const url = "https://example.com/docs?q=terax#links";
+      try {
+        await act(async () =>
+          root.render(
+            <ChatMessageResponse streaming={streaming}>
+              {`[docs](${url}${title ? ` "${title}"` : ""})`}
+            </ChatMessageResponse>,
+          ),
+        );
+        const link = container.querySelector("a");
+        expect(link?.getAttribute("href")).toBe(url);
+        expect(link?.getAttribute("title")).toBeNull();
+        await act(async () => {
+          link?.dispatchEvent(
+            new PointerEvent("pointermove", {
+              bubbles: true,
+              pointerType: "mouse",
+            }),
+          );
+          await vi.advanceTimersByTimeAsync(TOOLTIP_DELAY_MS);
+        });
+        expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+          title ?? url,
+        );
+
+        mocks.url.mockResolvedValueOnce(undefined);
+        await act(async () => link?.click());
+        expect(mocks.url).toHaveBeenCalledWith(url);
+        expect(mocks.invoke).not.toHaveBeenCalled();
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("does not activate incomplete links, code literals or unsafe protocols", async () => {
     const container = document.createElement("div");
