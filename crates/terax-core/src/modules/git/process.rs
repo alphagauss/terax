@@ -1,3 +1,6 @@
+//! Git 进程启动、输出收集和超时管理，统一覆盖本地、WSL 与 SSH。
+//! 索引写操作仅在明确的锁占用错误上退避重试，不移除其他进程的锁。
+
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
@@ -92,7 +95,7 @@ pub fn ensure_git_available(workspace: &WorkspaceEnv) -> Result<()> {
 }
 
 fn check_git_availability(workspace: &WorkspaceEnv) -> Availability {
-    let output = match run_git_uncached(workspace, None, ["--version"], 10) {
+    let output = match run_git_uncached(workspace, None, ["--version"], Duration::from_secs(10)) {
         Ok(o) => o,
         Err(_) => return Availability::NotInstalled,
     };
@@ -232,10 +235,17 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    run_git_uncached(workspace, cwd, args, timeout_secs)
+    run_git_uncached(
+        workspace,
+        cwd,
+        args,
+        Duration::from_secs(timeout_secs.clamp(1, MAX_TIMEOUT_SECS)),
+    )
 }
 
-fn run_git_uncached<I, S>(
+/// 仅供暂存、取消暂存和恢复等索引操作使用；重试当前命令，不重放已完成批次。
+/// 锁等待与各次进程执行共享原有超时预算，其他错误直接返回。
+pub(super) fn run_git_index_mutation<I, S>(
     workspace: &WorkspaceEnv,
     cwd: Option<&str>,
     args: I,
@@ -245,7 +255,53 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let dur = Duration::from_secs(timeout_secs.clamp(1, MAX_TIMEOUT_SECS));
+    let args: Vec<OsString> = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_os_string())
+        .collect();
+    let timeout = Duration::from_secs(timeout_secs.clamp(1, MAX_TIMEOUT_SECS));
+    let started = Instant::now();
+    let mut remaining = timeout;
+    let mut attempt = 0;
+    loop {
+        let output = run_git_uncached(workspace, cwd, &args, remaining)?;
+        if !index_is_locked(&output) || attempt >= 10 {
+            return Ok(output);
+        }
+        attempt += 1;
+        let delay = Duration::from_millis(attempt * attempt * 50);
+        if timeout.saturating_sub(started.elapsed()) <= delay {
+            return Ok(output);
+        }
+        thread::sleep(delay);
+        remaining = timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Ok(output);
+        }
+    }
+}
+
+fn index_is_locked(output: &GitOutput) -> bool {
+    if output.timed_out || output.exit_code == Some(0) {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stderr).lines().any(|line| {
+        line.strip_prefix("fatal: Unable to create '")
+            .and_then(|path| path.strip_suffix("': File exists."))
+            .is_some_and(|path| path.rsplit(['/', '\\']).next() == Some("index.lock"))
+    })
+}
+
+fn run_git_uncached<I, S>(
+    workspace: &WorkspaceEnv,
+    cwd: Option<&str>,
+    args: I,
+    dur: Duration,
+) -> Result<GitOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let args: Vec<OsString> = args
         .into_iter()
         .map(|arg| arg.as_ref().to_os_string())
@@ -433,15 +489,87 @@ mod tests {
     #[cfg(windows)]
     use super::build_git_command;
     use super::{
-        parse_git_version, prune_expired_availability_entries, version_meets_minimum, Availability,
-        AvailabilityCache, AVAILABILITY_TTL,
+        index_is_locked, parse_git_version, prune_expired_availability_entries,
+        run_git_index_mutation, version_meets_minimum, Availability, AvailabilityCache,
+        AVAILABILITY_TTL,
     };
-    #[cfg(windows)]
+    use crate::modules::git::types::GitOutput;
     use crate::modules::workspace::WorkspaceEnv;
     use std::collections::HashMap;
     #[cfg(windows)]
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn index_lock_retry_only_matches_file_exists_for_the_index_lock() {
+        let mut output = GitOutput {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: Some(128),
+            timed_out: false,
+            truncated: false,
+        };
+        for path in [
+            "/repo/.git/index.lock",
+            "D:/repo/.git/index.lock",
+            "D:\\repo\\.git\\worktrees\\branch\\index.lock",
+        ] {
+            output.stderr =
+                format!("fatal: Unable to create '{path}': File exists.\n").into_bytes();
+            assert!(index_is_locked(&output));
+        }
+        for stderr in [
+            "fatal: Unable to create '/repo/.git/index.lock': Permission denied.",
+            "fatal: Unable to create '/repo/.git/HEAD.lock': File exists.",
+            "fatal: Unable to create '/repo/.git/index.lock': No such file or directory.",
+            "fatal: pathspec 'index.lock' did not match any files",
+        ] {
+            output.stderr = stderr.as_bytes().to_vec();
+            assert!(!index_is_locked(&output));
+        }
+        output.stderr = b"fatal: Unable to create 'index.lock': File exists.".to_vec();
+        output.timed_out = true;
+        assert!(!index_is_locked(&output));
+        output.timed_out = false;
+        output.exit_code = Some(0);
+        assert!(!index_is_locked(&output));
+    }
+
+    #[test]
+    fn persistent_index_lock_respects_timeout_and_is_never_removed() {
+        if !std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            return;
+        }
+        let repo = tempfile::TempDir::new().unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        std::fs::write(repo.path().join("a.txt"), "new\n").unwrap();
+        let lock_path = repo.path().join(".git/index.lock");
+        std::fs::write(&lock_path, "lock owned elsewhere").unwrap();
+        let started = Instant::now();
+        let output = run_git_index_mutation(
+            &WorkspaceEnv::Local,
+            Some(repo.path().to_str().unwrap()),
+            ["add", "--", "a.txt"],
+            1,
+        )
+        .unwrap();
+        assert!(index_is_locked(&output));
+        assert!(started.elapsed() >= Duration::from_millis(250));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(
+            std::fs::read_to_string(lock_path).unwrap(),
+            "lock owned elsewhere"
+        );
+    }
 
     #[test]
     fn extracts_simple_version() {

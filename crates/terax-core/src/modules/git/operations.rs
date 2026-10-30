@@ -12,7 +12,7 @@ use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::parse_porcelain_v2;
 use crate::modules::git::process::{
     ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt, git_stdout_lines,
-    read_text_file, run_git,
+    read_text_file, run_git, run_git_index_mutation,
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
@@ -602,7 +602,7 @@ pub fn stage(
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
     for batch in path_batches(&resolved) {
-        let output = run_git(
+        let output = run_git_index_mutation(
             &repo_root.workspace,
             Some(&repo_root.git_path),
             ["add", "--"]
@@ -628,7 +628,7 @@ pub fn unstage(
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
     for batch in path_batches(&resolved) {
-        let output = run_git(
+        let output = run_git_index_mutation(
             &repo_root.workspace,
             Some(&repo_root.git_path),
             ["reset", "HEAD", "--"]
@@ -642,7 +642,7 @@ pub fn unstage(
         if output.timed_out || !looks_like_no_head(&output) {
             return ensure_success(&output, "git reset failed");
         }
-        let output = run_git(
+        let output = run_git_index_mutation(
             &repo_root.workspace,
             Some(&repo_root.git_path),
             ["rm", "--cached", "-r", "--"]
@@ -687,7 +687,7 @@ pub fn discard(
     }
 
     for batch in path_batches(&tracked) {
-        let output = run_git(
+        let output = run_git_index_mutation(
             &repo_root.workspace,
             Some(&repo_root.git_path),
             ["restore", "--worktree", "--"]

@@ -5,7 +5,8 @@
 mod common;
 
 use common::{git_available, GitRepoFixture};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use terax_core::modules::fs::to_canon;
 use terax_core::modules::git::errors::GitError;
@@ -476,6 +477,111 @@ fn unstage_clears_index_entry() {
         .expect("a.txt present");
     assert!(!entry.staged);
     assert!(entry.unstaged);
+}
+
+#[test]
+fn index_mutations_retry_while_another_git_process_temporarily_holds_the_lock() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "base\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    fx.write_file("a.txt", "modified\n");
+    with_git_index_lock(&fx, || {
+        operations::stage(
+            &fx.registry,
+            &fx.repo_str(),
+            &["a.txt".into()],
+            &fx.workspace,
+        )
+        .expect("stage retries the temporary lock");
+    });
+    assert_eq!(git_stdout(&fx, &["show", ":a.txt"]), "modified");
+    with_git_index_lock(&fx, || {
+        operations::unstage(
+            &fx.registry,
+            &fx.repo_str(),
+            &["a.txt".into()],
+            &fx.workspace,
+        )
+        .expect("reset retries the temporary lock");
+    });
+    assert_eq!(git_stdout(&fx, &["show", ":a.txt"]), "base");
+    with_git_index_lock(&fx, || {
+        operations::discard(
+            &fx.registry,
+            &fx.repo_str(),
+            &[DiscardEntry {
+                path: "a.txt".into(),
+                untracked: false,
+            }],
+            &fx.workspace,
+        )
+        .expect("restore retries the temporary lock");
+    });
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_path.join("a.txt")).unwrap(),
+        "base\n"
+    );
+
+    let unborn = GitRepoFixture::new();
+    unborn.write_file("a.txt", "new\n");
+    unborn.run_git(&["add", "."]);
+    with_git_index_lock(&unborn, || {
+        operations::unstage(
+            &unborn.registry,
+            &unborn.repo_str(),
+            &["a.txt".into()],
+            &unborn.workspace,
+        )
+        .expect("rm --cached retries the temporary lock without HEAD");
+    });
+    assert!(git_stdout(&unborn, &["ls-files"]).is_empty());
+    assert_eq!(
+        std::fs::read_to_string(unborn.repo_path.join("a.txt")).unwrap(),
+        "new\n"
+    );
+}
+
+/// update-index 在等待标准输入时持有真实索引锁，用 EOF 控制其正常退出和释放。
+fn with_git_index_lock(fx: &GitRepoFixture, operation: impl FnOnce()) {
+    let mut holder = Command::new("git")
+        .args(["update-index", "--index-info"])
+        .current_dir(&fx.repo_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    while !fx.repo_path.join(".git/index.lock").exists() {
+        if started.elapsed() > Duration::from_secs(5) || holder.try_wait().unwrap().is_some() {
+            let _ = holder.kill();
+            let output = holder.wait_with_output().unwrap();
+            panic!(
+                "git did not acquire index lock: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::scope(|scope| {
+        let release = scope.spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            drop(holder.stdin.take());
+            let output = holder.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        });
+        operation();
+        release.join().unwrap();
+    });
+    assert!(!fx.repo_path.join(".git/index.lock").exists());
 }
 
 #[test]
