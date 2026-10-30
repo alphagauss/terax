@@ -107,8 +107,7 @@ export function WorkbenchRegisteredView({
         "workspace-surface absolute inset-0",
         tab.kind === "terminal" &&
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
-        tab.kind !== "terminal" &&
-          "pt-2 pr-0 pb-2 pl-3",
+        tab.kind !== "terminal" && "pt-2 pr-0 pb-2 pl-3",
       )}
     >
       {tab.kind === "terminal" && (

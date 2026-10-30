@@ -799,7 +799,6 @@ html *::-webkit-scrollbar {
   transition: none;
 }
 
-
 @media (prefers-reduced-motion: reduce) {
   :root {
     --scrollbar-show-duration: 0.01ms;

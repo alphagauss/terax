@@ -212,7 +212,11 @@ export function useSpacesBoot({
           const restored = persisted
             ? persisted.workbench === null
               ? null
-              : hydrateSpaceWorkbench(persisted.workbench, spaceMeta.id, allocId)
+              : hydrateSpaceWorkbench(
+                  persisted.workbench,
+                  spaceMeta.id,
+                  allocId,
+                )
             : null;
           const workbench =
             restored ??
