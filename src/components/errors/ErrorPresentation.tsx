@@ -167,6 +167,7 @@ export class ErrorPresentation extends Component<
     this.restores = [];
     this.query?.removeEventListener("change", this.reduce);
     window.removeEventListener("resize", this.finish);
+    document.removeEventListener("visibilitychange", this.hide);
     this.query = null;
   }
 
@@ -189,6 +190,10 @@ export class ErrorPresentation extends Component<
         else this.stop();
       },
     );
+  };
+
+  private hide = () => {
+    if (document.hidden) this.finish();
   };
 
   private reduce = () => {
@@ -225,13 +230,18 @@ export class ErrorPresentation extends Component<
     this.stop();
     const root = this.root.current;
     if (!root) return;
-    if (!root.animate || !readMotionDurationMs("--dur-control", 160)) {
+    if (
+      document.hidden ||
+      !root.animate ||
+      !readMotionDurationMs("--dur-control", 160)
+    ) {
       this.finish();
       return;
     }
     this.query = window.matchMedia("(prefers-reduced-motion: reduce)");
     this.query.addEventListener("change", this.reduce);
     window.addEventListener("resize", this.finish);
+    document.addEventListener("visibilitychange", this.hide);
     const reports = visibleReports(this.props);
     const ids = new Set(reports.map((report) => report.id));
     const closing = reports.length === 0;

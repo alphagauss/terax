@@ -5,6 +5,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type RefObject,
@@ -32,6 +33,14 @@ import {
   setErrorHistoryOpen,
   type ErrorReport,
 } from "@/lib/errors";
+
+import {
+  captureFocusReturn,
+  restoreFocus,
+  type FocusReturn,
+} from "@/lib/focusReturn";
+
+const COPY_FEEDBACK_MS = 3000;
 
 function ErrorCard({
   report,
@@ -79,18 +88,29 @@ function ErrorCard({
     "copy",
   );
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyDeadline = useRef<number | null>(null);
   const copying = useRef(false);
+  const expireCopy = useCallback(() => {
+    if (copyDeadline.current !== null && Date.now() >= copyDeadline.current) {
+      copyDeadline.current = null;
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = null;
+      setCopyState("copy");
+    }
+  }, []);
   useEffect(() => {
-    pause(report.id, expanded || hovered || focused || historical);
+    if (historical) return;
+    pause(report.id, expanded || hovered || focused);
     return () => pause(report.id, false);
   }, [report.id, expanded, hovered, focused, historical, pause]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    document.addEventListener("visibilitychange", expireCopy);
+    return () => {
       copying.current = false;
       if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
+      document.removeEventListener("visibilitychange", expireCopy);
+    };
+  }, [expireCopy]);
 
   const copy = async () => {
     if (copying.current) return;
@@ -107,7 +127,10 @@ function ErrorCard({
     copying.current = false;
     setCopyState(result);
     if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopyState("copy"), 2500);
+    copyDeadline.current =
+      result === "copied" ? Date.now() + COPY_FEEDBACK_MS : null;
+    copyTimer.current =
+      result === "copied" ? setTimeout(expireCopy, COPY_FEEDBACK_MS) : null;
   };
 
   return (
@@ -260,6 +283,21 @@ export function ErrorHost() {
   const [present, setPresent] = useState(showing);
   const attached = showing || present;
   const [mount] = useState(() => document.createElement("div"));
+  const returnPoint = useRef<FocusReturn | null>(null);
+  const focused = useRef<HTMLElement | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 展示提交后检查原聚焦节点是否已退出，引用本身不会触发更新。
+  useLayoutEffect(() => {
+    const element = focused.current;
+    if (
+      element &&
+      (!element.isConnected ||
+        element.closest('[inert], [hidden], [aria-hidden="true"]'))
+    ) {
+      restoreFocus(returnPoint.current, mount);
+      focused.current = null;
+      returnPoint.current = null;
+    }
+  }, [reports, history, present, mount]);
   const paused = useRef(new Set<string>());
   const [pause] = useState(() => (id: string, value: boolean) => {
     if (value) paused.current.add(id);
@@ -399,44 +437,73 @@ export function ErrorHost() {
   }, [history, hasVisibleErrors, mount]);
 
   return createPortal(
-    <ErrorPresentation
-      reports={reports}
-      history={history}
-      label={t("errors.region")}
-      onPresentChange={setPresent}
-      renderHeader={(count) => (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2 text-xs text-popover-foreground shadow-sm">
-          <span className="mr-auto">{t("errors.history", { count })}</span>
-          <Button type="button" size="xs" variant="ghost" onClick={clearErrors}>
-            {t("errors.clear")}
-          </Button>
-          <Hint content={t("close")}>
-            <button
+    <div
+      className="contents"
+      onFocusCapture={(event) => {
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          returnPoint.current = captureFocusReturn(
+            event.relatedTarget instanceof Element ? event.relatedTarget : null,
+          );
+        }
+        focused.current = event.target;
+      }}
+      onBlurCapture={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          focused.current = null;
+          returnPoint.current = null;
+        }
+      }}
+    >
+      <ErrorPresentation
+        reports={reports}
+        history={history}
+        label={t("errors.region")}
+        onPresentChange={setPresent}
+        renderHeader={(count) => (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2 text-xs text-popover-foreground shadow-sm">
+            <span className="mr-auto">{t("errors.history", { count })}</span>
+            <Button
               type="button"
-              aria-label={t("close")}
-              className={dialogCloseIconButtonClassName}
-              onClick={() => setErrorHistoryOpen(false)}
+              size="xs"
+              variant="ghost"
+              onClick={clearErrors}
             >
-              <HugeiconsIcon
-                icon={Cancel01Icon}
-                size={14}
-                strokeWidth={2}
-                aria-hidden="true"
-              />
-            </button>
-          </Hint>
-        </div>
-      )}
-      renderCard={(report, historical, scrollRef) => (
-        <ErrorCard
-          report={report}
-          historical={historical}
-          reveal={history && target?.id === report.id ? target : null}
-          pause={pause}
-          scrollRef={scrollRef}
-        />
-      )}
-    />,
+              {t("errors.clear")}
+            </Button>
+            <Hint content={t("close")}>
+              <button
+                type="button"
+                aria-label={t("close")}
+                className={dialogCloseIconButtonClassName}
+                onClick={() => setErrorHistoryOpen(false)}
+              >
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
+              </button>
+            </Hint>
+          </div>
+        )}
+        renderCard={(report, historical, scrollRef) => (
+          <ErrorCard
+            report={report}
+            historical={historical}
+            reveal={history && target?.id === report.id ? target : null}
+            pause={pause}
+            scrollRef={scrollRef}
+          />
+        )}
+      />
+    </div>,
     mount,
   );
 }

@@ -111,6 +111,16 @@ it("可见错误最多三条，历史有界且不会挤掉仍在阅读的错误"
   expect(reports).toHaveLength(50);
   expect(reports.filter((item) => item.visible)).toHaveLength(3);
   expect(reports.some((item) => item.id === pinned)).toBe(true);
+  for (let i = 0; i < 600; i++)
+    reportErrorNotice(`bounded-run-${i}`, "failed", {});
+  expect(errorStore.getState().notices.size).toBe(500);
+  const raw = reportError("ignored", { identity: "bounded-ignored" });
+  ignoreError(raw);
+  expect(errorStore.getState().notices.size).toBe(500);
+  expect(errorStore.getState().notices.get("bounded-ignored")).toBe("reported");
+  clearErrors();
+  reportErrorNotice("bounded-ignored", "ignored", {});
+  expect(errorStore.getState().reports).toHaveLength(0);
 });
 
 it("诊断保留原因链但不包含密钥、请求正文或循环对象", () => {

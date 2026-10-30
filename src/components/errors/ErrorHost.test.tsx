@@ -747,3 +747,64 @@ it("历史中的右键菜单在浮层内获得焦点，Escape 只关闭菜单", 
   expect(host.querySelector('[role="menu"]')).toBeNull();
   expect(errorStore.getState().historyOpen).toBe(true);
 });
+
+it("关闭含焦点的错误内容返回原位置，主动移到外部控件时不抢回", async () => {
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 0, 100, 24),
+  ] as unknown as DOMRectList);
+  await act(async () => {
+    root.render(<ErrorHost />);
+    reportError("focused error");
+  });
+  const origin = document.createElement("button");
+  const outside = document.createElement("button");
+  container.append(origin, outside);
+  origin.focus();
+  await act(async () => setErrorHistoryOpen(true));
+  await act(async () => button("errors.copy").focus());
+  const id = errorStore.getState().reports[0].id;
+  await act(async () => ignoreError(id));
+  expect(document.activeElement).toBe(origin);
+  await act(async () => {
+    reportError("another error");
+    setErrorHistoryOpen(true);
+  });
+  await act(async () => button("errors.copy").focus());
+  await act(async () => outside.focus());
+  expect(document.activeElement).toBe(outside);
+});
+
+it("隐藏时立即结束退场动画并释放错误宿主", async () => {
+  const { animations } = enableAnimations();
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  await mount();
+  await advance(240);
+  await act(async () => clearErrors());
+  expect(document.querySelector("[data-error-host]")).not.toBeNull();
+  hidden.mockReturnValue(true);
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+  expect(document.querySelector("[data-error-host]")).toBeNull();
+  expect(
+    animations.every(
+      ({ animation }) => vi.mocked(animation.cancel).mock.calls.length > 0,
+    ),
+  ).toBe(true);
+});
+
+it("复制失败保持原位，重试成功后显示三秒确认且不新增错误", async () => {
+  await mount();
+  mocks.copy.mockRejectedValueOnce(new Error("clipboard unavailable"));
+  await act(async () => button("errors.copy").click());
+  await advance(3000);
+  expect(button("errors.copyFailed")).toBeDefined();
+  expect(errorStore.getState().reports).toHaveLength(1);
+  await act(async () => button("errors.copyFailed").click());
+  await advance(2999);
+  expect(button("errors.copied")).toBeDefined();
+  // 后台定时器可能被节流，恢复可见时按真实到期时间收尾。
+  await act(async () => {
+    vi.setSystemTime(Date.now() + 1);
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(button("errors.copy")).toBeDefined();
+});

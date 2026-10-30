@@ -80,7 +80,9 @@ export function ignoreError(id: string): void {
         state.historyTarget?.id === id ? null : state.historyTarget,
       ...(identity !== undefined &&
         !state.notices.has(identity) && {
-          notices: new Map(state.notices).set(identity, "reported" as const),
+          notices: new Map(
+            [...state.notices, [identity, "reported"] as const].slice(-500),
+          ),
         }),
     };
   });
@@ -88,11 +90,11 @@ export function ignoreError(id: string): void {
 
 function setNotice(identity: string, notice: ErrorNoticeState): void {
   errorStore.setState(({ notices }) => ({
-    notices: new Map(notices).set(identity, notice),
+    notices: new Map([...new Map(notices).set(identity, notice)].slice(-500)),
   }));
 }
 
-/** 同一次失败只主动提醒一次，清空或淘汰历史后也不由轮询恢复。 */
+/** 身份仍在记忆中时只主动提醒一次，清空历史不重置身份记忆。 */
 export function reportErrorNotice(
   identity: string,
   title: string,
