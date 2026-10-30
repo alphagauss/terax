@@ -493,6 +493,7 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
       );
       await click(fileRow.querySelector('[aria-label="menu.openFile"]'));
       expect(onOpenFile).toHaveBeenLastCalledWith("/repo/a.ts");
+      expect(onOpenDiff).toHaveBeenCalledTimes(opened + 2);
       vi.useFakeTimers();
       await act(async () => {
         fileRow.querySelector("button")?.dispatchEvent(
@@ -530,10 +531,12 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     await click(stagedToggle);
     expect(stagedToggle?.getAttribute("aria-expanded")).toBe("true");
     expect(row("index")).not.toBeNull();
+    const openedBeforeStaging = onOpenDiff.mock.calls.length;
     await click(row("index")?.querySelector('[aria-label="menu.unstage"]'));
     expect(io.unstage).toHaveBeenLastCalledWith("/repo", ["a.ts"]);
     await click(row("worktree")?.querySelector('[aria-label="menu.stage"]'));
     expect(io.stage).toHaveBeenLastCalledWith("/repo", ["a.ts"]);
+    expect(onOpenDiff).toHaveBeenCalledTimes(openedBeforeStaging);
     await click(container.querySelector('[aria-label="groups.unstageAll"]'));
     expect(io.unstage).toHaveBeenCalledTimes(2);
     await click(container.querySelector('[aria-label="groups.stageAll"]'));
