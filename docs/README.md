@@ -26,4 +26,4 @@
 - [桌面样式](contributing/ui-style.md)、[主题](contributing/themes.md)
 - [Tauri 运行时调试](contributing/ui-runtime-debugging.md)
 - [侧边栏虚拟列表顶部缺行调查](contributing/sidebar-virtual-list-investigation.md)
-- [public 发布](contributing/public-release.md)、[上游移植](../FORK_NOTES.md)
+- [上游移植](../FORK_NOTES.md)
