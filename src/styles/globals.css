@@ -184,7 +184,7 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
   --secondary-foreground: #333333;
   --muted: #f8f8f8;
   --muted-foreground: #595959;
-  --accent: #f2f2f2;
+  --accent: #dedede;
   --accent-foreground: #333333;
   --destructive: #f85149;
   --success: #188038;

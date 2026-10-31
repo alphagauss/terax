@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useNavigationIndicator } from "./useNavigationIndicator";
+import { useNavigationIndicator } from "@/components/controls/use-navigation-indicator";
 
 let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
@@ -18,9 +18,11 @@ let zoom: number;
 function Harness({
   active,
   layout,
+  tabs,
 }: {
   active: string | null;
   layout: string;
+  tabs: boolean;
 }) {
   const { hostRef, indicatorRef } = useNavigationIndicator(active, layout);
   return (
@@ -28,18 +30,31 @@ function Harness({
       <span ref={indicatorRef} data-indicator style={{ opacity: 0 }} />
       {["files", "search", "git"].map((id, index) => (
         <div key={id} data-item-index={index}>
-          <button type="button" aria-pressed={active === id}>
-            <span data-sidebar-button-surface={index} />
-            {id}
-          </button>
+          {tabs ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active === id}
+              data-navigation-indicator-target={index}
+            >
+              {id}
+            </button>
+          ) : (
+            <button type="button" aria-pressed={active === id}>
+              <span data-navigation-indicator-target={index} />
+              {id}
+            </button>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-function render(active: string | null, layout = "vertical") {
-  act(() => root.render(<Harness active={active} layout={layout} />));
+function render(active: string | null, layout = "vertical", tabs = false) {
+  act(() =>
+    root.render(<Harness active={active} layout={layout} tabs={tabs} />),
+  );
 }
 
 function indicator() {
@@ -97,7 +112,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
       if (!visible) return new DOMRect();
-      const index = this.getAttribute("data-sidebar-button-surface");
+      const index = this.getAttribute("data-navigation-indicator-target");
       if (index === null)
         return new DOMRect(100 * zoom, 200 * zoom, 44 * zoom, 300 * zoom);
       return horizontal
@@ -123,7 +138,7 @@ beforeEach(() => {
   });
   vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(
     function (this: HTMLElement) {
-      if (this.hasAttribute("data-sidebar-button-surface"))
+      if (this.hasAttribute("data-navigation-indicator-target"))
         return horizontal ? 0 : 4;
       const index = this.getAttribute("data-item-index");
       return horizontal && index !== null ? Number(index) * 80 + offset : 0;
@@ -131,7 +146,7 @@ beforeEach(() => {
   );
   vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(
     function (this: HTMLElement) {
-      if (this.hasAttribute("data-sidebar-button-surface"))
+      if (this.hasAttribute("data-navigation-indicator-target"))
         return horizontal ? 0 : 4;
       const index = this.getAttribute("data-item-index");
       return !horizontal && index !== null ? Number(index) * 48 + offset : 0;
@@ -141,7 +156,8 @@ beforeEach(() => {
     function (this: HTMLElement) {
       return visible
         ? horizontal
-          ? 80 + Number(this.getAttribute("data-sidebar-button-surface")) * 10
+          ? 80 +
+            Number(this.getAttribute("data-navigation-indicator-target")) * 10
           : 36
         : 0;
     },
@@ -217,21 +233,30 @@ it("滑动中取消停留在当前视觉位置淡出，不跳到旧目标", () =
   expect(animate.mock.calls[1][0]).toEqual([{ opacity: "1" }, { opacity: 0 }]);
 });
 
-it("横向不等宽标签只缩放底块，位置或尺寸改变直接提交", () => {
-  horizontal = true;
-  render("files", "horizontal");
-  render("git", "horizontal");
-  expect(animate.mock.calls[0][0]).toEqual([
-    { transform: "translate(0px, 0px) scale(0.8, 1)" },
-    { transform: "translate(160px, 0px)" },
-  ]);
-  offset = 10;
-  resize();
-  expect(animations[0].cancel).toHaveBeenCalledOnce();
-  expect(indicator().style.transform).toBe("translate(170px, 0px)");
-  render("search", "compact");
-  expect(animate).toHaveBeenCalledTimes(1);
-});
+it.each([false, true])(
+  "横向不等宽导航（Tab：%s）只缩放底块，位置或尺寸改变直接提交",
+  (tabs) => {
+    horizontal = true;
+    render("files", "horizontal", tabs);
+    render("git", "horizontal", tabs);
+    if (tabs) {
+      expect(
+        host.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
+      ).toBe("git");
+      expect(host.querySelector('[aria-pressed="true"]')).toBeNull();
+    }
+    expect(animate.mock.calls[0][0]).toEqual([
+      { transform: "translate(0px, 0px) scale(0.8, 1)" },
+      { transform: "translate(160px, 0px)" },
+    ]);
+    offset = 10;
+    resize();
+    expect(animations[0].cancel).toHaveBeenCalledOnce();
+    expect(indicator().style.transform).toBe("translate(170px, 0px)");
+    render("search", "compact", tabs);
+    expect(animate).toHaveBeenCalledTimes(1);
+  },
+);
 
 it.each([0.8, 1.25, 1.5])(
   "UI 缩放为 %s 时底块仍使用布局坐标，不重复应用缩放",

@@ -1,7 +1,11 @@
-/** 活动栏共用选中底块；只管理展示，取消选中淡出且连续切换接续当前画面。 */
+/**
+ * 活动栏与标签导航共用选中底块，只管理展示，不改变选择语义或滚动位置。
+ * 宿主提供相对定位容器，目标以 data-navigation-indicator-target 标记，支持自身 aria-selected 或祖先 aria-pressed。
+ */
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { RevealMotion } from "@/lib/revealMotion";
 
+/** 取消选中时淡出，连续切换接续当前画面；布局变化和隐藏恢复直接定位。 */
 export function useNavigationIndicator(
   activeId: string | null,
   layoutKey: string,
@@ -33,7 +37,7 @@ export function useNavigationIndicator(
       continuing && before?.layoutKey === layoutKey && !document.hidden;
     previous.current = { activeId, layoutKey };
     const surface = host.querySelector<HTMLElement>(
-      '[aria-pressed="true"] [data-sidebar-button-surface]',
+      '[data-navigation-indicator-target][aria-selected="true"], [aria-pressed="true"] [data-navigation-indicator-target]',
     );
 
     if (!surface) {
@@ -110,7 +114,9 @@ export function useNavigationIndicator(
     place(animate && before?.activeId !== activeId);
     const observer = new ResizeObserver(() => place(false));
     observer.observe(host);
-    for (const item of host.querySelectorAll("[data-sidebar-button-surface]"))
+    for (const item of host.querySelectorAll(
+      "[data-navigation-indicator-target]",
+    ))
       observer.observe(item);
     return () => observer.disconnect();
   }, [activeId, layoutKey]);

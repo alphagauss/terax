@@ -130,7 +130,7 @@ export const lightModernVariant: CompleteThemeVariant = {
     secondaryForeground: "#333333",
     muted: "#f8f8f8",
     mutedForeground: "#595959",
-    accent: "#f2f2f2",
+    accent: "#dedede",
     accentForeground: "#333333",
     destructive: "#f85149",
     success: "#188038",

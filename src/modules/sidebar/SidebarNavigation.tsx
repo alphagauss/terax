@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
+import { useNavigationIndicator } from "@/components/controls/use-navigation-indicator";
 import { cn } from "@/lib/utils";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import FullScreenIcon from "@hugeicons/core-free-icons/FullScreenIcon";
@@ -36,7 +37,6 @@ import {
   updateSidebarDrag,
   useSidebarDragSnapshot,
 } from "./dragSession";
-import { useNavigationIndicator } from "./useNavigationIndicator";
 import type {
   ActivityBarPosition,
   ActivityBarSettings,
@@ -532,7 +532,7 @@ function NavigationItems({
               >
                 <span
                   aria-hidden="true"
-                  data-sidebar-button-surface
+                  data-navigation-indicator-target
                   className={cn(
                     "pointer-events-none absolute rounded-md transition-colors duration-control ease-standard motion-reduce:transition-none",
                     // 选中反馈覆盖滑动底块，取消后悬停层退到淡出底块下方。

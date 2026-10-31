@@ -5,6 +5,7 @@
 
 import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
 import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
+import { useNavigationIndicator } from "@/components/controls/use-navigation-indicator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
@@ -80,6 +81,10 @@ export function SettingsWindowPage() {
   const { t } = useTranslation("settings");
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
   const navigationRef = useRef<HTMLDivElement>(null);
+  const { hostRef, indicatorRef } = useNavigationIndicator(
+    active,
+    "horizontal",
+  );
   const openEnvelope = useAuxiliaryOpenRequest();
   const init = usePreferencesStore((state) => state.init);
   const ActiveSection = TABS.find((tab) => tab.id === active)?.component;
@@ -139,13 +144,23 @@ export function SettingsWindowPage() {
           viewport.scrollBy({ left: event.deltaY * unit });
         }}
       >
-        <TabsList className="mx-auto flex h-7 w-max justify-start gap-0.5 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-7">
+        <TabsList
+          ref={hostRef}
+          className="relative isolate mx-auto flex h-7 w-max justify-start gap-0.5 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-7"
+        >
+          <span
+            ref={indicatorRef}
+            aria-hidden="true"
+            style={{ opacity: 0 }}
+            className="pointer-events-none invisible absolute top-0 left-0 origin-top-left rounded-md bg-accent"
+          />
           {TABS.map((tab) => (
             <TabsTrigger
               key={tab.id}
               value={tab.id}
               data-settings-tab={tab.id}
-              className="h-7 flex-none gap-1.5 rounded-md bg-transparent px-2 text-xs duration-control ease-standard focus-visible:ring-0 focus-visible:outline-none data-active:bg-accent dark:data-active:bg-accent"
+              data-navigation-indicator-target
+              className="z-10 h-7 flex-none gap-1.5 rounded-md bg-transparent px-2 text-xs duration-control ease-standard focus-visible:ring-0 focus-visible:outline-none data-active:bg-transparent dark:data-active:bg-transparent"
             >
               <HugeiconsIcon icon={tab.icon} size={12} strokeWidth={1.75} />
               <span>{t(`tabs.${tab.id}`)}</span>
