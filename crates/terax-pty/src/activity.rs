@@ -11,7 +11,7 @@ pub async fn query_posix_tasks(
     command.args(["-e", "-o", "pid=,ppid=,pgid=,stat="]);
     command.kill_on_drop(true);
     #[cfg(windows)]
-    crate::modules::proc::hide_console(command.as_std_mut());
+    terax_core::modules::proc::hide_console(command.as_std_mut());
     let output = tokio::time::timeout(std::time::Duration::from_secs(2), command.output())
         .await
         .map_err(|_| "terminal process check timed out".to_string())?
@@ -110,7 +110,7 @@ mod tests {
         let profile = directory.path().join("profile.ps1");
         std::fs::write(
             &profile,
-            include_str!("../../../../../resources/shell-integration/profile.ps1"),
+            include_str!("../../../resources/shell-integration/profile.ps1"),
         )
         .unwrap();
         let script = format!(
@@ -125,7 +125,7 @@ mod tests {
             "-Command",
             &script,
         ]);
-        crate::modules::proc::hide_console(&mut command);
+        terax_core::modules::proc::hide_console(&mut command);
         let output = command.output().unwrap();
         assert!(
             output.status.success(),

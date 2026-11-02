@@ -7,8 +7,6 @@ pub mod net;
 pub mod network_proxy;
 pub mod proc;
 #[cfg(feature = "workspace-runtime")]
-pub mod pty;
-#[cfg(feature = "workspace-runtime")]
 pub mod remote;
 pub mod secrets;
 pub mod shared_store;

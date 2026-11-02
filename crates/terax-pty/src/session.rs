@@ -6,12 +6,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::events::{EventSink, OutputSink};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use terax_core::events::{EventSink, OutputSink};
 
 use super::agent_detect::AgentDetector;
 use super::da_filter::DaFilter;
-use crate::modules::workspace::WorkspaceEnv;
+use terax_core::modules::workspace::WorkspaceEnv;
 
 const AGENT_EVENT: &str = "terax:agent-signal";
 
@@ -45,7 +45,7 @@ pub struct Session {
     //   4. `master` — last; ClosePseudoConsole on Windows. By now the child
     //      is dead and conhost has nothing left to drain.
     #[cfg(windows)]
-    _job: Option<crate::modules::proc::job::ProcessJob>,
+    _job: Option<terax_core::modules::proc::job::ProcessJob>,
     /// PTY 直接启动进程的 PID，可能是 WSL 或 Git Bash 包装器；0 表示未知。
     pub shell_pid: u32,
     pub killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -146,7 +146,7 @@ pub fn spawn(
 
     #[cfg(windows)]
     let job = match child.process_id() {
-        Some(pid) => match crate::modules::proc::job::ProcessJob::create_for(pid) {
+        Some(pid) => match terax_core::modules::proc::job::ProcessJob::create_for(pid) {
             Ok(j) => Some(j),
             Err(e) => {
                 log::warn!("pty job-object setup failed for pid={pid}: {e}");

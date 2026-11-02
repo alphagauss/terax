@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 terax-git = { path = "../crates/terax-git" }
+terax-pty = { path = "../crates/terax-pty" }
 terax-transfers = { path = "../crates/terax-transfers" }
 terax-core = { path = "../crates/terax-core", features = ["workspace-runtime"] }
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }

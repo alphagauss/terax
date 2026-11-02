@@ -6741,6 +6741,7 @@ dependencies = [
  "tempfile",
  "terax-core",
  "terax-git",
+ "terax-pty",
  "terax-transfers",
  "tokio",
  "tokio-util",
@@ -6780,7 +6781,6 @@ dependencies = [
  "notify",
  "nucleo-matcher",
  "percent-encoding",
- "portable-pty",
  "proptest",
  "reqwest 0.12.28",
  "russh",
@@ -6825,6 +6825,21 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tempfile",
+ "terax-core",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "terax-pty"
+version = "0.8.2"
+dependencies = [
+ "dirs 6.0.0",
+ "libc",
+ "log",
+ "portable-pty",
+ "serde",
  "tempfile",
  "terax-core",
  "tokio",

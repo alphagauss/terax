@@ -8,7 +8,6 @@ publish = false
 default = ["workspace-runtime"]
 workspace-runtime = [
     "dep:notify",
-    "dep:portable-pty",
     "dep:nucleo-matcher",
     "dep:russh",
     "dep:russh-sftp",
@@ -57,7 +56,6 @@ which = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v5", "serde"] }
 fs2 = "0.4"
 zeroize = "1"
-portable-pty = { version = "0.9", optional = true }
 nucleo-matcher = { version = "0.3", optional = true }
 russh = { version = "0.61.2", optional = true, default-features = false, features = [
     "ring",

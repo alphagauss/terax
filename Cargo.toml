@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/terax-core", "crates/terax-git", "crates/terax-host", "crates/terax-transfers", "src-tauri"]
+members = ["crates/terax-core", "crates/terax-git", "crates/terax-host", "crates/terax-pty", "crates/terax-transfers", "src-tauri"]
 default-members = ["src-tauri"]
 resolver = "2"
 

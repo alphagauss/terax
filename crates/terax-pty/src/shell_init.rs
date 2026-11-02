@@ -6,20 +6,19 @@ use std::path::PathBuf;
 
 use portable_pty::CommandBuilder;
 
-use crate::modules::workspace::{self, WorkspaceEnv};
+use terax_core::modules::workspace::{self, WorkspaceEnv};
 
-const BASHRC_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/bashrc.bash");
+const BASHRC_SCRIPT: &str = include_str!("../../../resources/shell-integration/bashrc.bash");
 #[cfg(windows)]
-const ZSHENV_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zshenv.zsh");
+const ZSHENV_SCRIPT: &str = include_str!("../../../resources/shell-integration/zshenv.zsh");
 #[cfg(windows)]
-const ZPROFILE_SCRIPT: &str =
-    include_str!("../../../../../resources/shell-integration/zprofile.zsh");
+const ZPROFILE_SCRIPT: &str = include_str!("../../../resources/shell-integration/zprofile.zsh");
 #[cfg(windows)]
-const ZLOGIN_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zlogin.zsh");
+const ZLOGIN_SCRIPT: &str = include_str!("../../../resources/shell-integration/zlogin.zsh");
 #[cfg(windows)]
-const ZSHRC_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zshrc.zsh");
+const ZSHRC_SCRIPT: &str = include_str!("../../../resources/shell-integration/zshrc.zsh");
 #[cfg(windows)]
-const FISH_INIT_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/init.fish");
+const FISH_INIT_SCRIPT: &str = include_str!("../../../resources/shell-integration/init.fish");
 const FISH_INIT_COMMAND: &str =
     "source \"$TERAX_FISH_INIT\"; functions -q __terax_install_prompt; and __terax_install_prompt";
 
@@ -187,11 +186,11 @@ mod unix {
 
     use portable_pty::CommandBuilder;
 
-    const ZSHENV: &str = include_str!("../../../../../resources/shell-integration/zshenv.zsh");
-    const ZPROFILE: &str = include_str!("../../../../../resources/shell-integration/zprofile.zsh");
-    const ZLOGIN: &str = include_str!("../../../../../resources/shell-integration/zlogin.zsh");
-    const ZSHRC: &str = include_str!("../../../../../resources/shell-integration/zshrc.zsh");
-    const FISH_INIT: &str = include_str!("../../../../../resources/shell-integration/init.fish");
+    const ZSHENV: &str = include_str!("../../../resources/shell-integration/zshenv.zsh");
+    const ZPROFILE: &str = include_str!("../../../resources/shell-integration/zprofile.zsh");
+    const ZLOGIN: &str = include_str!("../../../resources/shell-integration/zlogin.zsh");
+    const ZSHRC: &str = include_str!("../../../resources/shell-integration/zshrc.zsh");
+    const FISH_INIT: &str = include_str!("../../../resources/shell-integration/init.fish");
 
     pub enum Shell {
         Zsh,
@@ -351,8 +350,8 @@ mod unix {
     }
 
     fn integration_root() -> Result<PathBuf, String> {
-        let root = crate::modules::app_data::directory(
-            crate::modules::app_data::Directory::ShellIntegration,
+        let root = terax_core::modules::app_data::directory(
+            terax_core::modules::app_data::Directory::ShellIntegration,
         )?;
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
@@ -455,11 +454,10 @@ mod windows {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use crate::modules::workspace::WorkspaceEnv;
     use portable_pty::CommandBuilder;
+    use terax_core::modules::workspace::WorkspaceEnv;
 
-    const PROFILE_PS1: &str =
-        include_str!("../../../../../resources/shell-integration/profile.ps1");
+    const PROFILE_PS1: &str = include_str!("../../../resources/shell-integration/profile.ps1");
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum ShellKind {
@@ -615,14 +613,14 @@ mod windows {
         distro: String,
         blocks: bool,
     ) -> Result<CommandBuilder, String> {
-        crate::modules::workspace::validate_wsl_distro_name(&distro)?;
-        let shell_path = crate::modules::workspace::wsl_login_shell(distro.clone())?;
+        terax_core::modules::workspace::validate_wsl_distro_name(&distro)?;
+        let shell_path = terax_core::modules::workspace::wsl_login_shell(distro.clone())?;
         let shell_kind = ShellKind::from_path(&shell_path);
         let integration = match shell_kind {
             ShellKind::Zsh => match prepare_wsl_zdotdir(&distro) {
                 Ok(zdotdir) => {
                     let user_zdotdir =
-                        match crate::modules::workspace::wsl_zdotdir(&distro, &shell_path) {
+                        match terax_core::modules::workspace::wsl_zdotdir(&distro, &shell_path) {
                             Ok(path) if !path.is_empty() && path != zdotdir => Some(path),
                             Ok(_) => None,
                             Err(e) => {
@@ -752,12 +750,12 @@ mod windows {
     }
 
     fn prepare_wsl_integration_dir(distro: &str, shell: &str) -> Result<(String, PathBuf), String> {
-        let home = crate::modules::workspace::wsl_home(distro.to_string())?;
+        let home = terax_core::modules::workspace::wsl_home(distro.to_string())?;
         let linux_dir = format!(
             "{}/.terax/shell-integration/{shell}",
             home.trim_end_matches('/')
         );
-        let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
+        let unc_dir = terax_core::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
         fs::create_dir_all(&unc_dir).map_err(|e| format!("create {}: {e}", unc_dir.display()))?;
         Ok((linux_dir, unc_dir))
     }
@@ -786,7 +784,7 @@ mod windows {
     fn prepare_wsl_bash_rcfile(distro: &str) -> Result<String, String> {
         let (linux_dir, _unc_dir) = prepare_wsl_integration_dir(distro, "bash")?;
         let linux_rc = format!("{linux_dir}/bashrc");
-        let unc_file = crate::modules::workspace::wsl_path_to_unc(distro, &linux_rc);
+        let unc_file = terax_core::modules::workspace::wsl_path_to_unc(distro, &linux_rc);
         let content = super::normalize_script(super::BASHRC_SCRIPT);
         write_if_changed(&unc_file, &content)?;
         Ok(linux_rc)
@@ -802,8 +800,8 @@ mod windows {
     }
 
     fn integration_root() -> Result<PathBuf, String> {
-        let root = crate::modules::app_data::directory(
-            crate::modules::app_data::Directory::ShellIntegration,
+        let root = terax_core::modules::app_data::directory(
+            terax_core::modules::app_data::Directory::ShellIntegration,
         )?;
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
@@ -837,7 +835,7 @@ mod windows {
         }
 
         let mut out = Vec::new();
-        if let Some(path) = crate::modules::proc::powershell_7_path() {
+        if let Some(path) = terax_core::modules::proc::powershell_7_path() {
             add(&mut out, "PowerShell", path, true);
         }
         let system32 = std::env::var_os("SystemRoot")
@@ -907,7 +905,7 @@ mod windows {
             let script = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../resources/shell-integration/profile.test.ps1");
             let mut command = std::process::Command::new(shell);
-            crate::modules::proc::hide_console(&mut command);
+            terax_core::modules::proc::hide_console(&mut command);
             let output = command
                 .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
                 .arg(script)
@@ -1177,7 +1175,7 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use crate::modules::proc::windows_shell_path;
+pub use terax_core::modules::proc::windows_shell_path;
 
 #[cfg(test)]
 mod tests {

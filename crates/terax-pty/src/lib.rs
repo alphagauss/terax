@@ -4,7 +4,9 @@ mod activity;
 mod agent_detect;
 mod da_filter;
 mod session;
-use crate::modules::shell::init as shell_init;
+mod shell_init;
+
+pub use shell_init::ShellInfo;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -12,12 +14,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use crate::events::{EventSink, OutputSink};
 use portable_pty::PtySize;
+use terax_core::events::{EventSink, OutputSink};
 
-use crate::modules::remote::{self, RemoteState};
-use crate::modules::workspace::{user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry};
 use session::Session;
+use terax_core::modules::remote::{self, RemoteState};
+use terax_core::modules::workspace::{user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry};
 
 pub struct PtyState {
     sessions: Arc<RwLock<HashMap<u32, Arc<Session>>>>,
@@ -38,7 +40,7 @@ impl Default for PtyState {
 }
 
 impl PtyState {
-    pub(super) fn take(&self, id: u32) -> Option<Arc<Session>> {
+    fn take(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.write().unwrap().remove(&id)
     }
 }
@@ -76,7 +78,7 @@ pub async fn pty_open(
     }
     let cwd = user_spawn_cwd_or_home(registry, cwd.as_deref(), &workspace);
     let sessions = state.sessions.clone();
-    let session = crate::runtime::spawn_blocking(move || {
+    let session = terax_core::runtime::spawn_blocking(move || {
         let command = shell_init::build_command(cwd, workspace.clone(), blocks, shell)?;
         session::spawn(
             id, app, sessions, cols, rows, workspace, command, on_data, on_exit,
@@ -268,7 +270,7 @@ pub async fn pty_has_running_tasks(
         let pid = shell_pid
             .filter(|pid| *pid > 0)
             .unwrap_or(session.shell_pid);
-        crate::runtime::spawn_blocking(move || shell_has_children(pid).map(Some))
+        terax_core::runtime::spawn_blocking(move || shell_has_children(pid).map(Some))
             .await
             .map_err(|e| e.to_string())?
     }
@@ -377,6 +379,6 @@ pub fn pty_shell_name() -> String {
     shell_init::detect_shell_name()
 }
 
-pub fn pty_list_shells() -> Vec<shell_init::ShellInfo> {
+pub fn pty_list_shells() -> Vec<ShellInfo> {
     shell_init::list_shells()
 }

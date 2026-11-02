@@ -3,9 +3,6 @@
 //! Agent 命令统一登记为可交互进程，并按调用访问级别校验启动 cwd，在 Local、WSL、
 //! SSH 后端共享输出、超时、stdin 和生命周期契约。非 AI 调用方继续使用有界的一次性命令接口。
 
-#[cfg(feature = "workspace-runtime")]
-pub mod init;
-
 mod output;
 mod process;
 pub mod quote;
