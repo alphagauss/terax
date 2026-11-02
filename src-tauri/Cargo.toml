@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 terax-git = { path = "../crates/terax-git" }
 terax-http = { path = "../crates/terax-http" }
+terax-lsp = { path = "../crates/terax-lsp" }
 terax-pty = { path = "../crates/terax-pty" }
 terax-transfers = { path = "../crates/terax-transfers" }
 terax-core = { path = "../crates/terax-core", features = ["workspace-runtime"] }
@@ -91,7 +92,6 @@ windows-sys = { workspace = true, features = [
     "Win32_Security",
     "Win32_System_Console",
     "Win32_System_JobObjects",
-    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_Storage_FileSystem",

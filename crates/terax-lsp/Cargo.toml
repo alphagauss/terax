@@ -1,0 +1,23 @@
+[package]
+name = "terax-lsp"
+version = "0.8.2"
+edition = "2021"
+publish = false
+
+[dependencies]
+terax-core = { path = "../terax-core", default-features = false }
+dirs = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+shared_child = { workspace = true }
+which = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
