@@ -1,13 +1,14 @@
+//! 启动语言服务器并监管 stdin、输出读取、内存上限与进程退出。
+
 use std::io::{Read, Write};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use shared_child::SharedChild;
-use tauri::ipc::{Channel, Response};
-use tauri::Manager;
+use terax_core::events::OutputSink;
 
 use super::framing::{encode_frame, FrameDecoder};
 
@@ -30,7 +31,7 @@ pub struct LspExit {
 
 pub struct LspSession {
     #[cfg(windows)]
-    _job: Option<crate::modules::proc::job::ProcessJob>,
+    job: Mutex<Option<terax_core::modules::proc::job::ProcessJob>>,
     child: Arc<SharedChild>,
     stdin: Mutex<Option<ChildStdin>>,
     pub(super) exited: Arc<AtomicBool>,
@@ -50,12 +51,17 @@ impl LspSession {
     // only the leader leaves them burning CPU. Unix: signal the process
     // group. Windows: the Job Object covers the tree.
     pub fn kill(&self) {
-        *self.stdin.lock().unwrap() = None;
+        // 管道写满时写线程会持锁阻塞，先终止进程树才能让写入返回。
+        if let Ok(mut stdin) = self.stdin.try_lock() {
+            stdin.take();
+        }
         #[cfg(unix)]
         unsafe {
             libc::kill(-(self.child.id() as libc::pid_t), libc::SIGKILL);
         }
         let _ = self.child.kill();
+        #[cfg(windows)]
+        self.job.lock().unwrap().take();
     }
 }
 
@@ -68,14 +74,14 @@ impl Drop for LspSession {
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     id: u32,
-    app: tauri::AppHandle,
+    state: Weak<super::LspState>,
     binary: &std::path::Path,
     args: &[String],
     extra_env: &std::collections::HashMap<String, String>,
     root: &std::path::Path,
     max_rss_mb: Option<u64>,
-    on_message: Channel<Response>,
-    on_exit: Channel<LspExit>,
+    on_message: OutputSink<Vec<u8>>,
+    on_exit: OutputSink<LspExit>,
 ) -> Result<Arc<LspSession>, String> {
     let mut cmd = Command::new(binary);
     cmd.args(args)
@@ -85,7 +91,7 @@ pub fn spawn(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    crate::modules::proc::hide_console(&mut cmd);
+    terax_core::modules::proc::hide_console(&mut cmd);
     #[cfg(unix)]
     unsafe {
         use std::os::unix::process::CommandExt;
@@ -116,7 +122,7 @@ pub fn spawn(
     })?;
 
     #[cfg(windows)]
-    let job = match crate::modules::proc::job::ProcessJob::create_for(child.id()) {
+    let job = match terax_core::modules::proc::job::ProcessJob::create_for(child.id()) {
         Ok(j) => Some(j),
         Err(e) => {
             log::warn!("lsp job-object setup failed for pid={}: {e}", child.id());
@@ -127,12 +133,19 @@ pub fn spawn(
     let exited = Arc::new(AtomicBool::new(false));
     let session = Arc::new(LspSession {
         #[cfg(windows)]
-        _job: job,
+        job: Mutex::new(job),
         child: child.clone(),
         stdin: Mutex::new(Some(stdin)),
         exited: exited.clone(),
     });
 
+    // 后续线程启动失败时没有完整的等待线程负责回收，先停止监控再终止并回收子进程。
+    let thread_error = |error: std::io::Error| {
+        exited.store(true, Ordering::Release);
+        session.kill();
+        let _ = session.child.wait();
+        error.to_string()
+    };
     let session_reader = session.clone();
     let reader_thread = thread::Builder::new()
         .name(format!("terax-lsp-reader-{id}"))
@@ -145,7 +158,7 @@ pub fn spawn(
                     Ok(n) => match decoder.push(&buf[..n]) {
                         Ok(messages) => {
                             for msg in messages {
-                                if on_message.send(Response::new(msg.into_bytes())).is_err() {
+                                if on_message.send(msg.into_bytes()).is_err() {
                                     log::info!("lsp id={id}: channel closed; killing server");
                                     session_reader.kill();
                                     return;
@@ -165,7 +178,7 @@ pub fn spawn(
                 }
             }
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(thread_error)?;
 
     let stderr_tail: Arc<Mutex<std::collections::VecDeque<String>>> =
         Arc::new(Mutex::new(std::collections::VecDeque::new()));
@@ -202,7 +215,7 @@ pub fn spawn(
             }
             push_line(&mut line);
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(thread_error)?;
 
     let kill_reason: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     {
@@ -241,11 +254,11 @@ pub fn spawn(
                     thread::sleep(MEM_POLL_INTERVAL);
                 }
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(thread_error)?;
     }
 
     let child_waiter = child;
-    let exited_w = exited;
+    let exited_w = exited.clone();
     thread::Builder::new()
         .name(format!("terax-lsp-waiter-{id}"))
         .spawn(move || {
@@ -263,7 +276,7 @@ pub fn spawn(
             while Instant::now() < deadline && !reader_thread.is_finished() {
                 thread::sleep(Duration::from_millis(10));
             }
-            if let Some(state) = app.try_state::<super::LspState>() {
+            if let Some(state) = state.upgrade() {
                 state.take(id);
             }
             log::info!("lsp id={id} exited code={code:?}");
@@ -277,23 +290,52 @@ pub fn spawn(
                 log::debug!("lsp id={id} exit send failed (channel closed)");
             }
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(thread_error)?;
 
     Ok(session)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn dummy_session(child: Arc<SharedChild>, stdin: Option<ChildStdin>) -> LspSession {
         LspSession {
+            #[cfg(windows)]
+            job: Mutex::new(None),
             child,
             stdin: Mutex::new(stdin),
             exited: Arc::new(AtomicBool::new(false)),
         }
     }
 
+    #[test]
+    fn kill_does_not_wait_for_the_stdin_writer() {
+        #[cfg(windows)]
+        let mut cmd = Command::new("cmd.exe");
+        #[cfg(unix)]
+        let mut cmd = Command::new("/bin/cat");
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null());
+        terax_core::modules::proc::hide_console(&mut cmd);
+        let child = Arc::new(SharedChild::spawn(&mut cmd).unwrap());
+        let stdin = child.take_stdin();
+        let session = Arc::new(dummy_session(child.clone(), stdin));
+        // 持锁模拟管道写满；终止必须先打断进程，不能依赖写线程释放锁。
+        let writer = session.stdin.lock().unwrap();
+        let (killed, receipt) = std::sync::mpsc::channel();
+        let worker = session.clone();
+        let killer = thread::spawn(move || {
+            worker.kill();
+            killed.send(()).unwrap();
+        });
+        let result = receipt.recv_timeout(Duration::from_secs(3));
+        drop(writer);
+        killer.join().unwrap();
+        child.wait().unwrap();
+        result.expect("kill blocked on the writer");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn drop_kills_child() {
         let mut cmd = Command::new("/bin/sh");
@@ -315,6 +357,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn kill_takes_down_process_group() {
         let mut cmd = Command::new("/bin/sh");
@@ -354,6 +397,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn write_after_kill_errors() {
         let mut cmd = Command::new("/bin/cat");

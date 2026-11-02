@@ -11,7 +11,7 @@ use modules::{
     markdown_images, notifications, open_with, pty, python, remote, secrets, shell, transfers,
     workspace, workspace_process, workspace_runtime,
 };
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State};
 use tauri_plugin_window_state::StateFlags;
 
@@ -146,7 +146,7 @@ pub fn run() {
         .manage(fs::watch::FsWatchState::default())
         .manage(fs::properties::FilePropertiesState::default())
         .manage(history::HistoryState::default())
-        .manage(lsp::LspState::default())
+        .manage(Arc::new(lsp::LspState::default()))
         .manage(markdown_images::MarkdownImageState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage(fs::search::PathSearchState::default())
@@ -420,8 +420,8 @@ pub fn run() {
                         log::warn!("cannot unregister Workspace runtime window: {error}");
                     }
                 }
-                if let Some(state) = app.try_state::<lsp::LspState>() {
-                    state.kill_all();
+                if let Some(state) = app.try_state::<Arc<lsp::LspState>>() {
+                    state.shutdown();
                 }
             }
             #[cfg(target_os = "macos")]
