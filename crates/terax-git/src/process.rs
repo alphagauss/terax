@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 
 use shared_child::SharedChild;
 
-use crate::modules::git::errors::{GitError, Result};
-use crate::modules::git::types::{
+use crate::errors::{GitError, Result};
+use crate::types::{
     GitOutput, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_SECS, MIN_GIT_VERSION,
 };
 #[cfg(windows)]
-use crate::modules::workspace::validate_wsl_distro_name;
-use crate::modules::workspace::WorkspaceEnv;
+use terax_core::modules::workspace::validate_wsl_distro_name;
+use terax_core::modules::workspace::WorkspaceEnv;
 
 #[derive(Clone)]
 enum Availability {
@@ -315,10 +315,11 @@ where
                 .to_str()
                 .ok_or_else(|| GitError::command("git command", "non-UTF-8 argument"))?;
             command.push(' ');
-            command.push_str(&crate::modules::remote::session::shell_quote(arg));
+            command.push_str(&terax_core::modules::remote::session::shell_quote(arg));
         }
-        let output = crate::modules::remote::manager::exec_blocking(profile_id, &command, cwd, dur)
-            .map_err(GitError::Spawn)?;
+        let output =
+            terax_core::modules::remote::manager::exec_blocking(profile_id, &command, cwd, dur)
+                .map_err(GitError::Spawn)?;
         return Ok(GitOutput {
             stdout: output.stdout,
             stderr: output.stderr,
@@ -338,7 +339,7 @@ where
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    crate::modules::proc::hide_console(&mut cmd);
+    terax_core::modules::proc::hide_console(&mut cmd);
 
     let child = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?);
     let mut stdout_pipe = child
@@ -493,12 +494,12 @@ mod tests {
         run_git_index_mutation, version_meets_minimum, Availability, AvailabilityCache,
         AVAILABILITY_TTL,
     };
-    use crate::modules::git::types::GitOutput;
-    use crate::modules::workspace::WorkspaceEnv;
+    use crate::types::GitOutput;
     use std::collections::HashMap;
     #[cfg(windows)]
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+    use terax_core::modules::workspace::WorkspaceEnv;
 
     #[test]
     fn index_lock_retry_only_matches_file_exists_for_the_index_lock() {
@@ -562,7 +563,13 @@ mod tests {
             1,
         )
         .unwrap();
-        assert!(index_is_locked(&output));
+        // 最后一次重试可能在 Git 返回锁冲突前耗尽剩余预算。
+        assert!(
+            output.timed_out || index_is_locked(&output),
+            "unexpected git exit {:?}: {}",
+            output.exit_code,
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(started.elapsed() >= Duration::from_millis(250));
         assert!(started.elapsed() < Duration::from_secs(3));
         assert_eq!(

@@ -9,10 +9,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use terax_core::modules::fs::to_canon;
-use terax_core::modules::git::errors::GitError;
-use terax_core::modules::git::operations;
-use terax_core::modules::git::types::{DiscardEntry, GitDiffSide, GitQuickDiffBaseline};
 use terax_core::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+use terax_git::errors::GitError;
+use terax_git::operations;
+use terax_git::types::{DiscardEntry, GitDiffSide, GitQuickDiffBaseline};
 
 fn skip_if_no_git() -> bool {
     if !git_available() {
@@ -1020,7 +1020,7 @@ fn log_includes_current_upstream_and_excludes_unrelated_refs() {
         .expect("remote-only commit present");
     assert!(remote.refs.iter().any(|reference| {
         reference.label == "origin/main"
-            && reference.kind == terax_core::modules::git::types::GitLogRefKind::Remote
+            && reference.kind == terax_git::types::GitLogRefKind::Remote
     }));
     let local = entries
         .iter()

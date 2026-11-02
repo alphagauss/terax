@@ -4,13 +4,13 @@
 
 use tauri::{AppHandle, Manager};
 
-use crate::modules::git::operations;
-use crate::modules::git::types::{
+use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+use terax_git::operations;
+use terax_git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
     GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitLogEntry, GitPanelDiffStats,
     GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
 };
-use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 async fn blocking<F, T>(app: AppHandle, f: F) -> Result<T, String>
 where

@@ -5,8 +5,8 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::modules::git::errors::{GitError, Result};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::errors::{GitError, Result};
+use terax_core::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 #[derive(Clone, Debug)]
 pub struct ResolvedGitDirectory {
@@ -24,7 +24,7 @@ pub fn split_upstream(upstream: &str) -> (Option<String>, Option<String>) {
 }
 
 pub fn display_path(path: &Path) -> String {
-    crate::modules::fs::to_canon(path)
+    terax_core::modules::fs::to_canon(path)
 }
 
 fn normalize_git_path(path: &str) -> String {
@@ -37,14 +37,16 @@ pub fn canonical_dir(
     workspace: &WorkspaceEnv,
 ) -> Result<ResolvedGitDirectory> {
     if let WorkspaceEnv::Ssh { profile_id } = workspace {
-        let manager = crate::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
+        let manager =
+            terax_core::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
         let profile_id = profile_id.clone();
         let path = path.to_string();
-        let canonical = crate::runtime::block_on(async move {
+        let canonical = terax_core::runtime::block_on(async move {
             let workspace = manager.workspace(&profile_id).await?;
-            let canonical = crate::modules::remote::sftp::canonicalize(&workspace, &path).await?;
-            let stat = crate::modules::remote::sftp::stat(&workspace, &canonical).await?;
-            if stat.kind != crate::modules::remote::sftp::RemoteEntryKind::Dir {
+            let canonical =
+                terax_core::modules::remote::sftp::canonicalize(&workspace, &path).await?;
+            let stat = terax_core::modules::remote::sftp::stat(&workspace, &canonical).await?;
+            if stat.kind != terax_core::modules::remote::sftp::RemoteEntryKind::Dir {
                 return Err(format!("not a remote directory: {canonical}"));
             }
             Ok::<_, String>(canonical)

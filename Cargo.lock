@@ -6740,6 +6740,7 @@ dependencies = [
  "tauri-winrt-notification",
  "tempfile",
  "terax-core",
+ "terax-git",
  "tokio",
  "tokio-util",
  "uuid",
@@ -6803,6 +6804,18 @@ dependencies = [
  "windows-sys 0.61.2",
  "winreg 0.55.0",
  "zeroize",
+]
+
+[[package]]
+name = "terax-git"
+version = "0.8.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "shared_child",
+ "tempfile",
+ "terax-core",
 ]
 
 [[package]]

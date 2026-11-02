@@ -4,7 +4,8 @@
 
 mod common;
 
-use common::{git_available, FsFixture, GitRepoFixture};
+use common::FsFixture;
+use std::process::Command;
 use terax_core::modules::fs::grep::{
     fs_glob, search_content, ContentSearchCaseMode, ContentSearchRequest, ContentSearchSyntax,
 };
@@ -303,16 +304,22 @@ async fn read_dir_hides_dotfiles_by_default() {
 
 #[tokio::test]
 async fn read_dir_flags_gitignored_entries_only_when_requested() {
-    if !git_available() {
-        return;
+    let fx = FsFixture::new();
+    match Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&fx.root)
+        .status()
+    {
+        Ok(status) => assert!(status.success(), "git init failed"),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => panic!("git init failed: {err}"),
     }
-    let fx = GitRepoFixture::new();
-    fx.write_file(".gitignore", "ignored.txt\nbuild/\n");
-    fx.write_file("kept.txt", "");
-    fx.write_file("ignored.txt", "");
-    fx.write_file("build/out.o", "");
+    fx.write(".gitignore", "ignored.txt\nbuild/\n");
+    fx.write("kept.txt", "");
+    fx.write("ignored.txt", "");
+    fx.write("build/out.o", "");
 
-    let entries = fs_read_dir(fx.repo_str(), false, Some(true), None)
+    let entries = fs_read_dir(fx.root_str(), false, Some(true), None)
         .await
         .expect("read_dir");
     let flag = |name: &str| {
@@ -326,7 +333,7 @@ async fn read_dir_flags_gitignored_entries_only_when_requested() {
     assert!(flag("ignored.txt"));
     assert!(flag("build"));
 
-    let plain = fs_read_dir(fx.repo_str(), false, None, None)
+    let plain = fs_read_dir(fx.root_str(), false, None, None)
         .await
         .expect("read_dir");
     assert!(plain.iter().all(|e| !e.gitignored));

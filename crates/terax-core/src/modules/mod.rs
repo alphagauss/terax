@@ -3,8 +3,6 @@
 pub mod ai_sessions;
 pub mod app_data;
 pub mod fs;
-#[cfg(feature = "workspace-runtime")]
-pub mod git;
 pub mod net;
 pub mod network_proxy;
 pub mod proc;

@@ -41,7 +41,7 @@ md5 = "0.8"
 percent-encoding = "2"
 futures-util = { workspace = true }
 filetime = "0.2"
-sha2 = "0.10"
+sha2 = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "rt-multi-thread",
     "macros",
@@ -104,10 +104,6 @@ proptest = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 junction = { workspace = true }
-
-[[test]]
-name = "git_operations"
-required-features = ["workspace-runtime"]
 
 [[test]]
 name = "fs_search"

@@ -8,24 +8,24 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::modules::git::errors::{GitError, Result};
-use crate::modules::git::parser::parse_porcelain_v2;
-use crate::modules::git::process::{
+use crate::errors::{GitError, Result};
+use crate::parser::parse_porcelain_v2;
+use crate::process::{
     ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt, git_stdout_lines,
     read_text_file, run_git, run_git_index_mutation,
 };
-use crate::modules::git::types::{
+use crate::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
     GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitFileLineStats,
     GitLineStats, GitLogEntry, GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats,
     GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
     TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
-use crate::modules::git::utils::{
+use crate::utils::{
     authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
     ResolvedGitDirectory,
 };
-use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+use terax_core::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 const DIFF_VIEW_TEXT_LIMIT: usize = 256 * 1024;
 
@@ -1628,20 +1628,21 @@ fn read_worktree_text(
     let WorkspaceEnv::Ssh { profile_id } = &repo_root.workspace else {
         return read_text_file(local_path);
     };
-    let manager = crate::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
+    let manager =
+        terax_core::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
     let profile_id = profile_id.clone();
-    let path = crate::modules::remote::session::join_remote(&repo_root.git_path, relative);
+    let path = terax_core::modules::remote::session::join_remote(&repo_root.git_path, relative);
     let symlink_path = Path::new(&path).to_path_buf();
-    let bytes = crate::runtime::block_on(async move {
+    let bytes = terax_core::runtime::block_on(async move {
         let workspace = manager.workspace(&profile_id).await?;
-        let stat = crate::modules::remote::sftp::stat(&workspace, &path).await?;
-        if stat.kind == crate::modules::remote::sftp::RemoteEntryKind::Symlink {
+        let stat = terax_core::modules::remote::sftp::stat(&workspace, &path).await?;
+        if stat.kind == terax_core::modules::remote::sftp::RemoteEntryKind::Symlink {
             return Ok(None);
         }
         if stat.size > MAX_FILE_BYTES {
             return Err(format!("remote file is too large: {} bytes", stat.size));
         }
-        crate::modules::remote::sftp::read_file(&workspace, &path, MAX_FILE_BYTES)
+        terax_core::modules::remote::sftp::read_file(&workspace, &path, MAX_FILE_BYTES)
             .await
             .map(Some)
     })

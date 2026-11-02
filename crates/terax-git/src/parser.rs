@@ -1,4 +1,4 @@
-use crate::modules::git::types::GitChangedFile;
+use crate::types::GitChangedFile;
 
 #[derive(Default)]
 pub struct PorcelainV2 {
