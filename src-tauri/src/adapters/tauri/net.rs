@@ -2,10 +2,10 @@
 //!
 //! 只转换 Tauri 上下文与输出通道，业务规则由共享服务负责。
 
-use crate::modules::net::{self as service, *};
 use crate::modules::network_proxy::NetworkTarget;
 use std::collections::HashMap;
 use tauri::{ipc::Channel, Manager};
+use terax_http::{self as service, *};
 
 /// 执行通用、有界且可取消的 HTTP 请求；AI 流与长轮询共用同一安全边界。
 #[tauri::command]

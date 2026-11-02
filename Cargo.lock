@@ -6741,6 +6741,7 @@ dependencies = [
  "tempfile",
  "terax-core",
  "terax-git",
+ "terax-http",
  "terax-pty",
  "terax-transfers",
  "tokio",
@@ -6759,7 +6760,6 @@ dependencies = [
 name = "terax-core"
 version = "0.8.2"
 dependencies = [
- "aes",
  "base64 0.22.1",
  "bytes",
  "core-foundation 0.9.4",
@@ -6777,7 +6777,6 @@ dependencies = [
  "keyring",
  "libc",
  "log",
- "md5",
  "notify",
  "nucleo-matcher",
  "percent-encoding",
@@ -6827,8 +6826,26 @@ dependencies = [
  "serde_json",
  "tempfile",
  "terax-core",
+ "terax-http",
  "tokio",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "terax-http"
+version = "0.8.2"
+dependencies = [
+ "aes",
+ "futures-util",
+ "md5",
+ "reqwest 0.12.28",
+ "serde",
+ "sha2 0.10.9",
+ "tempfile",
+ "terax-core",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]

@@ -17,7 +17,6 @@ pub mod git;
 pub mod history;
 pub mod lsp;
 pub mod markdown_images;
-pub use terax_core::modules::net;
 pub use terax_core::modules::network_proxy;
 pub mod notifications;
 pub mod open_with;

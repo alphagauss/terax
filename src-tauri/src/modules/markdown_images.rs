@@ -16,7 +16,6 @@ use tauri_plugin_dialog::DialogExt;
 use tempfile::{Builder as TempFileBuilder, NamedTempFile};
 use uuid::Uuid;
 
-use crate::modules::net;
 use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
@@ -381,7 +380,7 @@ async fn load_network_image(
     url: String,
     user_agent: &str,
 ) -> Result<LoadedImage, String> {
-    let downloaded = net::download_public_image(
+    let downloaded = terax_http::download_public_image(
         &app.state::<crate::modules::secrets::SecretsState>(),
         &url,
         MAX_IMAGE_BYTES as usize,

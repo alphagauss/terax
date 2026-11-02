@@ -9,12 +9,12 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::modules::network_proxy::{self, NetworkTarget, ResolvedRoute};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::header::{ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+use terax_core::modules::network_proxy::{self, NetworkTarget, ResolvedRoute};
 use tokio_util::sync::CancellationToken;
 pub mod files;
 
@@ -388,7 +388,7 @@ fn remaining_image_request_time(started: Instant) -> Result<Duration, String> {
 
 /// 下载公开网络图片，并对每次重定向重新执行地址校验和体积限制。
 pub async fn download_public_image(
-    secrets: &crate::modules::secrets::SecretsState,
+    secrets: &terax_core::modules::secrets::SecretsState,
     url: &str,
     max_bytes: usize,
     user_agent: &str,
@@ -599,7 +599,7 @@ pub enum HttpEvent {
 /// 在宿主隔离身份下执行相同的地址校验、出口选择、流式传输和取消。
 #[allow(clippy::too_many_arguments)]
 pub async fn http_request(
-    secrets: &crate::modules::secrets::SecretsState,
+    secrets: &terax_core::modules::secrets::SecretsState,
     owner: &str,
     state: &HttpState,
     request_id: String,
@@ -641,7 +641,7 @@ pub async fn http_request(
 /// 统一 HTTP 传输内核；调用方拥有取消与总时限，正文出口可以是 WebView 或原生文件。
 #[allow(clippy::too_many_arguments)]
 async fn exchange(
-    secrets: &crate::modules::secrets::SecretsState,
+    secrets: &terax_core::modules::secrets::SecretsState,
     url: String,
     method: String,
     redirect: Option<HttpRedirectMode>,
@@ -832,7 +832,7 @@ mod tests {
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "modules::net::tests::explicit_routes_ignore_environment_and_never_fall_back",
+                    "tests::explicit_routes_ignore_environment_and_never_fall_back",
                     "--nocapture",
                 ])
                 .env(MARKER, "1")
@@ -847,9 +847,10 @@ mod tests {
                 .output()
                 .unwrap();
             assert!(
-                result.status.success(),
-                "{}",
-                String::from_utf8_lossy(&result.stdout)
+                result.status.success() && String::from_utf8_lossy(&result.stdout).contains(MARKER),
+                "child stdout: {}\nchild stderr: {}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
             );
             return;
         }
@@ -917,6 +918,8 @@ mod tests {
                     .is_err()
             );
         });
+        // 测试名失效时 --exact 会成功退出但执行零项，要求子进程确认完成了网络断言。
+        println!("{MARKER}");
     }
     use std::net::Ipv4Addr;
 

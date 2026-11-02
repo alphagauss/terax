@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/terax-core", "crates/terax-git", "crates/terax-host", "crates/terax-pty", "crates/terax-transfers", "src-tauri"]
+members = ["crates/terax-core", "crates/terax-git", "crates/terax-host", "crates/terax-http", "crates/terax-pty", "crates/terax-transfers", "src-tauri"]
 default-members = ["src-tauri"]
 resolver = "2"
 
@@ -13,6 +13,7 @@ shared_child = "1"
 filetime = "0.2"
 ignore = "0.4"
 russh-sftp = "2.3.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "socks"] }
 sha2 = "0.10"
 bytes = "1"
 futures-util = "0.3"

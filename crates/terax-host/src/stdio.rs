@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex};
 use terax_core::modules::{
-    ai_sessions, fs, net, network_proxy, secrets, shared_store, shell, workspace,
+    ai_sessions, fs, network_proxy, secrets, shared_store, shell, workspace,
 };
 
 const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -29,7 +29,7 @@ struct Host {
     shell: shell::ShellState,
     sessions: ai_sessions::AiSessionsState,
     registry: workspace::WorkspaceRegistry,
-    http: net::HttpState,
+    http: terax_http::HttpState,
     secrets: secrets::SecretsState,
 }
 
@@ -255,7 +255,7 @@ impl Host {
             "http_request" => {
                 let id = request.id;
                 value(
-                    net::http_request(
+                    terax_http::http_request(
                         &self.secrets,
                         OWNER,
                         &self.http,

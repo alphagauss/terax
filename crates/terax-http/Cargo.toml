@@ -1,0 +1,22 @@
+[package]
+name = "terax-http"
+version = "0.8.2"
+edition = "2021"
+publish = false
+
+[dependencies]
+terax-core = { path = "../terax-core", default-features = false }
+aes = "0.9"
+futures-util = { workspace = true }
+md5 = "0.8"
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+uuid = { workspace = true, features = ["v4"] }

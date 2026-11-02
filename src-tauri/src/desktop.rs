@@ -8,7 +8,7 @@ use crate::{fullscreen, menu, modules};
 use modules::screenshots;
 use modules::{
     agent, ai_sessions, app_data, auxiliary_window, external_agent, fs, git, history, lsp,
-    markdown_images, net, notifications, open_with, pty, python, remote, secrets, shell, transfers,
+    markdown_images, notifications, open_with, pty, python, remote, secrets, shell, transfers,
     workspace, workspace_process, workspace_runtime,
 };
 use std::sync::Mutex;
@@ -138,7 +138,7 @@ pub fn run() {
         .manage(notifications::NotificationState::default())
         .manage(screenshots::ScreenshotState::default())
         .manage(ai_sessions::AiSessionsState::default())
-        .manage(net::HttpState::default())
+        .manage(terax_http::HttpState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
         .manage(terax_transfers::TransferState::default())
@@ -374,7 +374,7 @@ pub fn run() {
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     #[cfg(windows)]
                     crate::modules::editor_menu::window_destroyed(label);
-                    app.state::<net::HttpState>().cancel_owner(label);
+                    app.state::<terax_http::HttpState>().cancel_owner(label);
                 }
                 if label == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                     screenshots::shutdown(app);

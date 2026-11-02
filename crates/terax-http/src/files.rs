@@ -1,14 +1,5 @@
 //! HTTP 文件请求复用通用网络服务与文件授权。仅处理快照、字节变换和落盘，不解释平台协议。
 use super::{HttpEvent, HttpRedirectMode, HttpState};
-use crate::modules::{
-    fs::{
-        agent::{self, AgentFileState, AgentPermissionMode},
-        file,
-    },
-    network_proxy::NetworkTarget,
-    secrets::SecretsState,
-    workspace::WorkspaceRegistry,
-};
 use aes::{
     cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit},
     Aes128,
@@ -20,6 +11,15 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
+};
+use terax_core::modules::{
+    fs::{
+        agent::{self, AgentFileState, AgentPermissionMode},
+        file,
+    },
+    network_proxy::NetworkTarget,
+    secrets::SecretsState,
+    workspace::WorkspaceRegistry,
 };
 
 const MAX_BYTES: usize = super::HTTP_RESPONSE_MAX_BYTES;

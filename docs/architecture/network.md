@@ -1,6 +1,6 @@
 # 内置网络与代理
 
-内置 HTTP 经 `src/lib/http.ts` 与 Rust `net.rs`。所有网络 Provider SDK 注入原生 fetch；模型目录、推理与 SDK 附件下载共用传输，供应商协议仍由 SDK 处理。
+内置 HTTP 经 `src/lib/http.ts` 与 `terax-http`。所有网络 Provider SDK 注入原生 fetch；模型目录、推理与 SDK 附件下载共用传输，供应商协议仍由 SDK 处理。
 
 ## 配置与生效
 

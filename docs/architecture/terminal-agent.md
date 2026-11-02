@@ -23,7 +23,7 @@ pnpm agent --resume SESSION_UUID
 
 桌面与终端共享业务规则和原生服务，各自拥有运行实例；桌面与 Channels 尚未统一到 TUI 会话控制器。会话锁、checkpoint、授权与收尾继续由共享实现拥有。
 
-共享服务由 `terax-core` 提供，私有管道接入位于 `terax-host`，依赖边界见 [原生 workspace](native-workspace.md)。私有管道不监听端口，不是稳定外部协议；EOF 和终止取消请求并清理进程与锁。终端宿主不启用完整 Workspace 能力，不增加 PTY、SSH 入口；daemon 与远程服务不在当前范围。
+原生服务由 `terax-core` 和 `terax-http` 提供，私有管道接入位于 `terax-host`，依赖边界见 [原生 workspace](native-workspace.md)。私有管道不监听端口，不是稳定外部协议；EOF 和终止取消请求并清理进程与锁。终端宿主不启用完整 Workspace 能力，不增加 PTY、SSH 入口；daemon 与远程服务不在当前范围。
 
 ## 构建与验证
 
