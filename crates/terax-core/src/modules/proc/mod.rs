@@ -23,15 +23,8 @@ use std::path::PathBuf;
 /// 按当前平台既有优先级定位 PowerShell 或系统命令解释器。
 #[cfg(windows)]
 pub fn windows_shell_path() -> PathBuf {
-    if let Some(p) = which_in_path("pwsh.exe") {
-        return p;
-    }
-
-    if let Some(pf) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
-        let candidate = pf.join("PowerShell").join("7").join("pwsh.exe");
-        if candidate.is_file() {
-            return candidate;
-        }
+    if let Some(path) = powershell_7_path() {
+        return path;
     }
 
     let system32 = std::env::var_os("SystemRoot")
@@ -49,8 +42,25 @@ pub fn windows_shell_path() -> PathBuf {
     system32.join("cmd.exe")
 }
 
+/// 按 PATH、标准安装目录的顺序定位 PowerShell 7。
 #[cfg(windows)]
-pub(crate) fn which_in_path(name: &str) -> Option<PathBuf> {
+pub fn powershell_7_path() -> Option<PathBuf> {
+    if let Some(p) = which_in_path("pwsh.exe") {
+        return Some(p);
+    }
+
+    if let Some(pf) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
+        let candidate = pf.join("PowerShell").join("7").join("pwsh.exe");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn which_in_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);

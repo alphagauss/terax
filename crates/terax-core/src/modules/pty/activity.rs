@@ -2,8 +2,6 @@
 
 use std::collections::HashSet;
 
-pub const PROCESS_LIST_COMMAND: &str = "ps -e -o pid=,ppid=,pgid=,stat=";
-
 /// 本机 Unix 和 WSL 共用查询超时、子进程回收及快照解析。
 pub async fn query_posix_tasks(
     mut command: tokio::process::Command,
@@ -110,7 +108,11 @@ mod tests {
     fn powershell_reports_root_identity_and_command_boundaries() {
         let directory = tempfile::tempdir().unwrap();
         let profile = directory.path().join("profile.ps1");
-        std::fs::write(&profile, include_str!("../shell/scripts/profile.ps1")).unwrap();
+        std::fs::write(
+            &profile,
+            include_str!("../../../../../resources/shell-integration/profile.ps1"),
+        )
+        .unwrap();
         let script = format!(
             "function global:PSConsoleHostReadLine {{ 'Start-Sleep -Seconds 1' }}; . '{}'; prompt | Out-Null; PSConsoleHostReadLine | Out-Null; prompt | Out-Null",
             profile.to_string_lossy().replace('\'', "''"),

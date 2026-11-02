@@ -8,25 +8,23 @@ use portable_pty::CommandBuilder;
 
 use crate::modules::workspace::{self, WorkspaceEnv};
 
-pub(crate) const BASHRC_SCRIPT: &str = include_str!("scripts/bashrc.bash");
+const BASHRC_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/bashrc.bash");
 #[cfg(windows)]
-const ZSHENV_SCRIPT: &str = include_str!("scripts/zshenv.zsh");
+const ZSHENV_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zshenv.zsh");
 #[cfg(windows)]
-const ZPROFILE_SCRIPT: &str = include_str!("scripts/zprofile.zsh");
+const ZPROFILE_SCRIPT: &str =
+    include_str!("../../../../../resources/shell-integration/zprofile.zsh");
 #[cfg(windows)]
-const ZLOGIN_SCRIPT: &str = include_str!("scripts/zlogin.zsh");
+const ZLOGIN_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zlogin.zsh");
 #[cfg(windows)]
-const ZSHRC_SCRIPT: &str = include_str!("scripts/zshrc.zsh");
+const ZSHRC_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/zshrc.zsh");
 #[cfg(windows)]
-const FISH_INIT_SCRIPT: &str = include_str!("scripts/init.fish");
+const FISH_INIT_SCRIPT: &str = include_str!("../../../../../resources/shell-integration/init.fish");
 const FISH_INIT_COMMAND: &str =
     "source \"$TERAX_FISH_INIT\"; functions -q __terax_install_prompt; and __terax_install_prompt";
 
-pub(crate) fn bashrc_script() -> &'static str {
-    BASHRC_SCRIPT
-}
-
-pub(crate) fn normalize_script(content: &str) -> String {
+#[cfg(windows)]
+fn normalize_script(content: &str) -> String {
     content.replace("\r\n", "\n")
 }
 
@@ -189,11 +187,11 @@ mod unix {
 
     use portable_pty::CommandBuilder;
 
-    const ZSHENV: &str = include_str!("scripts/zshenv.zsh");
-    const ZPROFILE: &str = include_str!("scripts/zprofile.zsh");
-    const ZLOGIN: &str = include_str!("scripts/zlogin.zsh");
-    const ZSHRC: &str = include_str!("scripts/zshrc.zsh");
-    const FISH_INIT: &str = include_str!("scripts/init.fish");
+    const ZSHENV: &str = include_str!("../../../../../resources/shell-integration/zshenv.zsh");
+    const ZPROFILE: &str = include_str!("../../../../../resources/shell-integration/zprofile.zsh");
+    const ZLOGIN: &str = include_str!("../../../../../resources/shell-integration/zlogin.zsh");
+    const ZSHRC: &str = include_str!("../../../../../resources/shell-integration/zshrc.zsh");
+    const FISH_INIT: &str = include_str!("../../../../../resources/shell-integration/init.fish");
 
     pub enum Shell {
         Zsh,
@@ -460,7 +458,8 @@ mod windows {
     use crate::modules::workspace::WorkspaceEnv;
     use portable_pty::CommandBuilder;
 
-    const PROFILE_PS1: &str = include_str!("scripts/profile.ps1");
+    const PROFILE_PS1: &str =
+        include_str!("../../../../../resources/shell-integration/profile.ps1");
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum ShellKind {
@@ -622,14 +621,15 @@ mod windows {
         let integration = match shell_kind {
             ShellKind::Zsh => match prepare_wsl_zdotdir(&distro) {
                 Ok(zdotdir) => {
-                    let user_zdotdir = match probe_wsl_zdotdir(&distro, &shell_path) {
-                        Ok(path) if !path.is_empty() && path != zdotdir => Some(path),
-                        Ok(_) => None,
-                        Err(e) => {
-                            log::warn!("WSL zsh ZDOTDIR probe failed for {distro}: {e}");
-                            None
-                        }
-                    };
+                    let user_zdotdir =
+                        match crate::modules::workspace::wsl_zdotdir(&distro, &shell_path) {
+                            Ok(path) if !path.is_empty() && path != zdotdir => Some(path),
+                            Ok(_) => None,
+                            Err(e) => {
+                                log::warn!("WSL zsh ZDOTDIR probe failed for {distro}: {e}");
+                                None
+                            }
+                        };
                     WslShellIntegration::Zsh {
                         zdotdir,
                         user_zdotdir,
@@ -751,15 +751,6 @@ mod windows {
         WslLaunchSpec { args }
     }
 
-    fn probe_wsl_zdotdir(distro: &str, shell_path: &str) -> Result<String, String> {
-        let out = crate::modules::workspace::wsl_exec_capture(
-            distro,
-            shell_path,
-            &["-c", r#"printf %s "${ZDOTDIR:-$HOME}""#],
-        )?;
-        Ok(crate::modules::workspace::normalize_wsl_value(out, ""))
-    }
-
     fn prepare_wsl_integration_dir(distro: &str, shell: &str) -> Result<(String, PathBuf), String> {
         let home = crate::modules::workspace::wsl_home(distro.to_string())?;
         let linux_dir = format!(
@@ -796,7 +787,7 @@ mod windows {
         let (linux_dir, _unc_dir) = prepare_wsl_integration_dir(distro, "bash")?;
         let linux_rc = format!("{linux_dir}/bashrc");
         let unc_file = crate::modules::workspace::wsl_path_to_unc(distro, &linux_rc);
-        let content = super::normalize_script(super::bashrc_script());
+        let content = super::normalize_script(super::BASHRC_SCRIPT);
         write_if_changed(&unc_file, &content)?;
         Ok(linux_rc)
     }
@@ -830,7 +821,7 @@ mod windows {
         let dir = integration_root()?.join("bash");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
         let rc = dir.join("bashrc");
-        write_if_changed(&rc, &super::normalize_script(super::bashrc_script()))?;
+        write_if_changed(&rc, &super::normalize_script(super::BASHRC_SCRIPT))?;
         Ok(rc)
     }
 
@@ -846,15 +837,8 @@ mod windows {
         }
 
         let mut out = Vec::new();
-        if let Some(p) = super::which_in_path("pwsh.exe") {
-            add(&mut out, "PowerShell", p, true);
-        } else if let Some(pf) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
-            add(
-                &mut out,
-                "PowerShell",
-                pf.join("PowerShell").join("7").join("pwsh.exe"),
-                true,
-            );
+        if let Some(path) = crate::modules::proc::powershell_7_path() {
+            add(&mut out, "PowerShell", path, true);
         }
         let system32 = std::env::var_os("SystemRoot")
             .map(PathBuf::from)
@@ -921,7 +905,7 @@ mod windows {
         fn powershell_preserves_commands_and_reports_exit_status() {
             let shell = resolve_powershell_executable(super::super::windows_shell_path());
             let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src/modules/shell/scripts/profile.test.ps1");
+                .join("../../resources/shell-integration/profile.test.ps1");
             let mut command = std::process::Command::new(shell);
             crate::modules::proc::hide_console(&mut command);
             let output = command
@@ -1194,9 +1178,6 @@ mod windows {
 
 #[cfg(windows)]
 pub use crate::modules::proc::windows_shell_path;
-
-#[cfg(windows)]
-use crate::modules::proc::which_in_path;
 
 #[cfg(test)]
 mod tests {

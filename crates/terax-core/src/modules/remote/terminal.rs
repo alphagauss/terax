@@ -11,14 +11,13 @@ use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use super::session::{shell_quote, signal_exit_code, validate_remote_path, RemoteWorkspace};
-use crate::modules::shell::init::{bashrc_script, normalize_script};
 
 /// 底层 SSH transport 已关闭时向前端返回的专用退出码。
 pub const TRANSPORT_CLOSED_EXIT_CODE: i32 = -255;
 
 /// 一条远端交互式 PTY channel 的输入、尺寸和关闭控制句柄。
 pub struct RemoteTerminalHandle {
-    pub(crate) workspace: std::sync::Arc<RemoteWorkspace>,
+    workspace: std::sync::Arc<RemoteWorkspace>,
     input: mpsc::Sender<Vec<u8>>,
     resize: watch::Sender<(u16, u16)>,
     close: std::sync::Mutex<Option<oneshot::Sender<()>>>,
@@ -68,6 +67,32 @@ impl RemoteTerminalHandle {
             .map_err(|_| "remote terminal resize channel closed".to_string())
     }
 
+    /// 读取终端所在连接上的进程快照，关闭保护由 PTY 根据 Shell 身份判定。
+    pub async fn process_snapshot(&self) -> Result<String, String> {
+        let timeout = Duration::from_secs(2);
+        let result = tokio::time::timeout(
+            timeout,
+            self.workspace
+                .exec("ps -e -o pid=,ppid=,pgid=,stat=", None, timeout),
+        )
+        .await
+        .map_err(|_| "terminal process check timed out".to_string())??;
+        if result.exit_code != Some(0) || result.timed_out || result.truncated {
+            return Err("terminal process check failed".into());
+        }
+        Ok(String::from_utf8_lossy(&result.stdout).into_owned())
+    }
+
+    /// 关闭指定 PTY 并记录当前连接代际，以便追踪 SSH 会话回收。
+    pub fn close_pty(&self, id: u32, reclaimed: bool) {
+        self.close();
+        log::info!(
+            "SSH_SESSION event=terminal_close epoch={} pty={id} reclaimed={}",
+            self.workspace.epoch(),
+            reclaimed
+        );
+    }
+
     pub fn close(&self) {
         if let Ok(mut close) = self.close.lock() {
             if let Some(sender) = close.take() {
@@ -79,7 +104,7 @@ impl RemoteTerminalHandle {
 
 #[allow(clippy::too_many_arguments)]
 /// 在已连接 workspace 上创建远端交互式 bash，并将数据桥接到前端。
-pub async fn open(
+pub(super) async fn open(
     workspace: std::sync::Arc<RemoteWorkspace>,
     cols: u16,
     rows: u16,
@@ -170,7 +195,7 @@ pub(crate) async fn prepare(
 }
 
 /// 将预启动 PTY 绑定到前端 IPC channel，并应用真实终端尺寸。
-pub async fn attach_prepared(
+pub(super) async fn attach_prepared(
     workspace: std::sync::Arc<RemoteWorkspace>,
     prepared: PreparedTerminal,
     cols: u16,
@@ -352,13 +377,20 @@ fn classify_exit(exit_code: Option<i32>, closed_by_client: bool, transport_close
     })
 }
 
+fn quoted_bashrc() -> String {
+    shell_quote(
+        &include_str!("../../../../../resources/shell-integration/bashrc.bash")
+            .replace("\r\n", "\n"),
+    )
+}
+
 fn integrated_bash_command(cwd: &str, blocks: bool) -> String {
     let blocks = if blocks { " TERAX_BLOCKS=1" } else { "" };
     format!(
         "cd -- {} && exec env TERAX_TERMINAL=1{} /bin/bash --rcfile <(printf %s {}) -i",
         shell_quote(cwd),
         blocks,
-        shell_quote(&normalize_script(bashrc_script())),
+        quoted_bashrc(),
     )
 }
 
@@ -370,7 +402,7 @@ fn bootstrap_bash_command(root_assignment: &str, cwd: Option<&str>, blocks: bool
     let blocks = if blocks { " TERAX_BLOCKS=1" } else { "" };
     format!(
         "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; {terminal_cwd}; cd -- \"$terminal_cwd\" 2>/dev/null || cd -- \"$root\" || exit 96; printf '\\000TERAX-SSH-BOOT\\000%s\\000%s\\000%s\\000%s\\000TERAX-SSH-READY\\000' \"$os\" \"$SHELL\" \"$HOME\" \"$root\"; exec env TERAX_TERMINAL=1{blocks} /bin/bash --rcfile <(printf %s {}) -i",
-        shell_quote(&normalize_script(bashrc_script()))
+        quoted_bashrc()
     )
 }
 

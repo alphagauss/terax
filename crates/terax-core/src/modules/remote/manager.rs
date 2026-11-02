@@ -821,8 +821,36 @@ impl RemoteManager {
         Ok(self.workspace_with_epoch(profile_id).await?.0)
     }
 
+    /// 优先接管匹配的预启动终端；新开的后台终端按连接策略等待前台文件访问。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_terminal(
+        &self,
+        profile_id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<String>,
+        blocks: bool,
+        on_data: crate::events::OutputSink<Vec<u8>>,
+        on_exit: crate::events::OutputSink<i32>,
+    ) -> Result<super::terminal::RemoteTerminalHandle, String> {
+        let workspace = self.workspace(profile_id).await?;
+        let prepared = self
+            .take_prepared_terminal(profile_id, cwd.as_deref(), blocks)
+            .await;
+        if let Some(prepared) = prepared {
+            return super::terminal::attach_prepared(
+                workspace, prepared, cols, rows, on_data, on_exit,
+            )
+            .await;
+        }
+        if self.prepared_terminal_priority.load(Ordering::Acquire) {
+            workspace.wait_for_foreground_filesystem().await;
+        }
+        super::terminal::open(workspace, cols, rows, cwd, blocks, on_data, on_exit).await
+    }
+
     /// 取出与首次前端 PTY 请求一致的预启动终端。
-    pub async fn take_prepared_terminal(
+    async fn take_prepared_terminal(
         &self,
         profile_id: &str,
         cwd: Option<&str>,
@@ -837,11 +865,6 @@ impl RemoteManager {
         } else {
             None
         }
-    }
-
-    /// 返回后续终端是否需要让 Explorer 首目录先完成。
-    pub fn should_gate_background_terminal(&self) -> bool {
-        self.prepared_terminal_priority.load(Ordering::Acquire)
     }
 
     /// 原子返回当前 workspace 及其连接代际，供新建资源绑定正确 epoch。

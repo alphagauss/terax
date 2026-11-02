@@ -62,31 +62,10 @@ pub async fn pty_open(
     let blocks = blocks.unwrap_or(false);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     if let WorkspaceEnv::Ssh { profile_id } = &workspace {
-        let remote_workspace = remote.manager.workspace(profile_id).await?;
-        let prepared = remote
+        let session = remote
             .manager
-            .take_prepared_terminal(profile_id, cwd.as_deref(), blocks)
-            .await;
-        if prepared.is_none() && remote.manager.should_gate_background_terminal() {
-            remote_workspace.wait_for_foreground_filesystem().await;
-        }
-        let session = match prepared {
-            Some(prepared) => {
-                remote::terminal::attach_prepared(
-                    remote_workspace,
-                    prepared,
-                    cols,
-                    rows,
-                    on_data,
-                    on_exit,
-                )
-                .await?
-            }
-            None => {
-                remote::terminal::open(remote_workspace, cols, rows, cwd, blocks, on_data, on_exit)
-                    .await?
-            }
-        };
+            .open_terminal(profile_id, cols, rows, cwd, blocks, on_data, on_exit)
+            .await?;
         state
             .remote_sessions
             .write()
@@ -207,12 +186,7 @@ pub fn pty_resize(state: &PtyState, id: u32, cols: u16, rows: u16) -> Result<(),
 
 pub fn pty_close(state: &PtyState, id: u32, reclaimed: Option<bool>) -> Result<(), String> {
     if let Some(remote) = state.remote_sessions.write().unwrap().remove(&id) {
-        remote.close();
-        log::info!(
-            "SSH_SESSION event=terminal_close epoch={} pty={id} reclaimed={}",
-            remote.workspace.epoch(),
-            reclaimed.unwrap_or(false)
-        );
+        remote.close_pty(id, reclaimed.unwrap_or(false));
         return Ok(());
     }
     let session = state.sessions.write().unwrap().remove(&id);
@@ -254,25 +228,8 @@ pub async fn pty_has_running_tasks(
         let Some(pid) = shell_pid.filter(|pid| *pid > 0) else {
             return Ok(None);
         };
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            remote.workspace.exec(
-                activity::PROCESS_LIST_COMMAND,
-                None,
-                std::time::Duration::from_secs(2),
-            ),
-        )
-        .await
-        .map_err(|_| "terminal process check timed out".to_string())??;
-        if result.exit_code != Some(0) || result.timed_out || result.truncated {
-            return Err("terminal process check failed".into());
-        }
-        return activity::has_posix_tasks(
-            &String::from_utf8_lossy(&result.stdout),
-            pid,
-            background_pids.as_deref(),
-        )
-        .map(Some);
+        let snapshot = remote.process_snapshot().await?;
+        return activity::has_posix_tasks(&snapshot, pid, background_pids.as_deref()).map(Some);
     }
     let session = state
         .sessions

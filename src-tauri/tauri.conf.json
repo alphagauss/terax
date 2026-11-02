@@ -8,7 +8,8 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist",
-    "removeUnusedCommands": true
+    "removeUnusedCommands": true,
+    "additionalWatchFolders": ["../resources/shell-integration"]
   },
   "app": {
     "windows": [

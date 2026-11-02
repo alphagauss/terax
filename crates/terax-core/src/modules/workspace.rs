@@ -736,9 +736,20 @@ fn wsl_runtime_info(distro: &str) -> Result<WslRuntimeInfo, String> {
     Ok(info)
 }
 
+/// 用指定 Zsh 探测 WSL 用户原有的 ZDOTDIR，保留登录输出中的最后一个非空值。
+#[cfg(all(windows, feature = "workspace-runtime"))]
+pub fn wsl_zdotdir(distro: &str, shell_path: &str) -> Result<String, String> {
+    let out = wsl_exec_capture(
+        distro,
+        shell_path,
+        &["-c", r#"printf %s "${ZDOTDIR:-$HOME}""#],
+    )?;
+    Ok(normalize_wsl_value(out, ""))
+}
+
 #[cfg(windows)]
 #[cfg(any(feature = "workspace-runtime", test))]
-pub(crate) fn normalize_wsl_value(output: String, fallback: &str) -> String {
+fn normalize_wsl_value(output: String, fallback: &str) -> String {
     let value = output
         .lines()
         .rev()

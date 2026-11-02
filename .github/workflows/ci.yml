@@ -101,7 +101,7 @@ jobs:
         run: cargo nextest run --workspace --locked
 
       - name: fish shell integration
-        run: fish --no-config crates/terax-core/src/modules/shell/scripts/init.test.fish
+        run: fish --no-config resources/shell-integration/init.test.fish
 
   rust-platforms:
     name: rust-test (${{ matrix.os }})
