@@ -34,7 +34,7 @@ pub fn output<T: serde::Serialize + Send + Sync + 'static>(
 
 struct DesktopTransferSettings(tauri::AppHandle);
 
-impl terax_core::modules::transfers::TransferSettings for DesktopTransferSettings {
+impl terax_transfers::TransferSettings for DesktopTransferSettings {
     fn get(&self, key: &str) -> Result<Option<serde_json::Value>, String> {
         use crate::modules::workspace_process::WorkspaceProcessState;
         use tauri_plugin_store::StoreExt;
@@ -70,8 +70,8 @@ impl terax_core::modules::transfers::TransferSettings for DesktopTransferSetting
 }
 
 /// 使用与 WebView 相同的 Store 实例，失败时恢复之前的内存值。
-pub fn transfer(app: &tauri::AppHandle) -> terax_core::modules::transfers::TransferHost {
-    terax_core::modules::transfers::TransferHost {
+pub fn transfer(app: &tauri::AppHandle) -> terax_transfers::TransferHost {
+    terax_transfers::TransferHost {
         events: events(app),
         settings: std::sync::Arc::new(DesktopTransferSettings(app.clone())),
     }

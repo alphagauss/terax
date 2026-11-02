@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use russh_sftp::client::{Config, RawSftpSession, SftpSession};
 
-use crate::modules::remote::session::RemoteWorkspace;
-use crate::modules::remote::transfer::TransferSftpKind;
-use crate::modules::transfers::manager::TransferRunError;
+use crate::manager::TransferRunError;
+use terax_core::modules::remote::session::RemoteWorkspace;
+use terax_core::modules::remote::transfer::TransferSftpKind;
 
 /// 打开任务独占的高层 SFTP 会话。
 ///

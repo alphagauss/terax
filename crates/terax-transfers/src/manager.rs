@@ -16,8 +16,8 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::modules::remote::transfer::SshTransferError;
-use crate::modules::workspace::WorkspaceEnv;
+use terax_core::modules::remote::transfer::SshTransferError;
+use terax_core::modules::workspace::WorkspaceEnv;
 
 use super::cleanup_ticket::{CleanupTicket, CleanupTicketState, CleanupTicketTarget};
 use super::errors::{TransferErrorCode, TransferFailure};
@@ -382,7 +382,7 @@ impl TransferManager {
         if let WorkspaceEnv::Ssh { profile_id } = workspace {
             self.ssh_scheduler
                 .run(control, async {
-                    let manager = crate::modules::remote::manager::global_manager()?;
+                    let manager = terax_core::modules::remote::manager::global_manager()?;
                     let remote = manager.workspace(profile_id).await.map_err(|error| {
                         TransferRunError::failed(TransferErrorCode::ConnectionLost, error)
                     })?;
@@ -537,7 +537,7 @@ impl TransferManager {
         emit_snapshot(&app, &snapshot);
 
         let manager = self.clone();
-        crate::runtime::spawn(async move {
+        terax_core::runtime::spawn(async move {
             manager.run_task(app, workspace, request, id, control).await;
         });
         Ok(snapshot)
@@ -807,7 +807,7 @@ impl TransferManager {
         let manager = self.clone();
         let task_id = id.to_string();
         let failure_id = failure_id.to_string();
-        crate::runtime::spawn(async move {
+        terax_core::runtime::spawn(async move {
             manager
                 .run_file_retry(app, workspace, request, task_id, failure_id, control)
                 .await;
@@ -965,7 +965,7 @@ impl TransferManager {
             emit_snapshot(&app, &snapshot);
             let manager = self.clone();
             let id = id.to_string();
-            crate::runtime::spawn(async move {
+            terax_core::runtime::spawn(async move {
                 manager.run_task(app, workspace, request, id, control).await;
             });
             return Ok(snapshot);
@@ -1588,7 +1588,7 @@ impl TransferManager {
 fn recover_disposable_cleanup(journal_path: PathBuf, ticket: CleanupTicket) {
     let owner_task_id = ticket.owner_task_id().to_string();
     begin_deferred_cleanup(&owner_task_id);
-    crate::runtime::spawn(async move {
+    terax_core::runtime::spawn(async move {
         let _ownership = RecoveredCleanupOwnership(owner_task_id);
         match &ticket.target {
             CleanupTicketTarget::Local {
@@ -1613,7 +1613,7 @@ fn recover_disposable_cleanup(journal_path: PathBuf, ticket: CleanupTicket) {
                 else {
                     return;
                 };
-                let workspace = match crate::modules::remote::manager::global_manager() {
+                let workspace = match terax_core::modules::remote::manager::global_manager() {
                     Ok(manager) => manager.workspace(scope.profile_id()).await.ok(),
                     Err(_) => None,
                 };
@@ -1987,7 +1987,7 @@ mod tests {
         control.pause();
         let waiter = {
             let control = control.clone();
-            crate::runtime::spawn(async move { control.checkpoint().await })
+            terax_core::runtime::spawn(async move { control.checkpoint().await })
         };
         tokio::task::yield_now().await;
         control.resume();
@@ -1996,7 +1996,7 @@ mod tests {
         control.pause();
         let canceled = {
             let control = control.clone();
-            crate::runtime::spawn(async move { control.checkpoint().await })
+            terax_core::runtime::spawn(async move { control.checkpoint().await })
         };
         tokio::task::yield_now().await;
         control.cancel();

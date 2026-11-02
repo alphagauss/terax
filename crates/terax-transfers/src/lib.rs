@@ -42,6 +42,6 @@ pub trait TransferSettings: Send + Sync {
 /// 传输任务使用的宿主出口，不持有窗口或 UI 生命周期。
 #[derive(Clone)]
 pub struct TransferHost {
-    pub events: crate::events::EventSink,
+    pub events: terax_core::events::EventSink,
     pub settings: std::sync::Arc<dyn TransferSettings>,
 }

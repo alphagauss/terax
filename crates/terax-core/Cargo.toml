@@ -20,13 +20,11 @@ workspace-runtime = [
 
 [dependencies]
 notify = { workspace = true, optional = true }
-flate2 = "1"
-tar = "0.4"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 dirs = { workspace = true }
 log = { workspace = true }
-ignore = "0.4"
+ignore = { workspace = true }
 grep-regex = "0.1"
 grep-searcher = "0.1"
 grep-matcher = "0.1"
@@ -40,7 +38,6 @@ aes = "0.9"
 md5 = "0.8"
 percent-encoding = "2"
 futures-util = { workspace = true }
-filetime = "0.2"
 sha2 = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "rt-multi-thread",
@@ -68,7 +65,7 @@ russh = { version = "0.61.2", optional = true, default-features = false, feature
     "flate2",
     "async-trait",
 ] }
-russh-sftp = { version = "2.3.0", optional = true }
+russh-sftp = { workspace = true, optional = true }
 tokio-socks = { version = "0.5", optional = true }
 tokio-rustls = { version = "0.26", optional = true }
 rustls-pki-types = { version = "1", optional = true }
@@ -100,6 +97,7 @@ windows-sys = { workspace = true, features = [
 winreg = { workspace = true }
 
 [dev-dependencies]
+filetime = { workspace = true }
 proptest = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]

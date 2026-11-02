@@ -14,9 +14,9 @@ use std::time::Duration;
 use russh_sftp::client::SftpSession;
 use uuid::Uuid;
 
-use crate::modules::remote;
-use crate::modules::remote::session::{join_remote, RemoteWorkspace};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use terax_core::modules::remote;
+use terax_core::modules::remote::session::{join_remote, RemoteWorkspace};
+use terax_core::modules::workspace::{resolve_path, WorkspaceEnv};
 
 use super::commit::{
     ensure_local_target_available, ensure_remote_target_available, local_stage_path,

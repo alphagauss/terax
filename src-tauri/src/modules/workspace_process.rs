@@ -380,7 +380,7 @@ fn remove_stale_state(
     transfer_root: &Path,
     id: Uuid,
 ) {
-    if let Err(error) = crate::modules::transfers::remove_workspace_files(transfer_root, id) {
+    if let Err(error) = terax_transfers::remove_workspace_files(transfer_root, id) {
         log::warn!("cannot remove stale transfer journals for Workspace {id}: {error}");
         return;
     }

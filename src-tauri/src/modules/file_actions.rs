@@ -1,13 +1,13 @@
 //! 用户主动触发的系统打开方式与另存为。环境来自当前进程，远端下载交给传输运行时。
 
-use crate::modules::transfers::{
-    models::{EnqueueTransferRequest, TransferDirection, TransferStrategy},
-    TransferState,
-};
 use crate::modules::{fs::file, workspace::WorkspaceEnv, workspace_process::WorkspaceProcessState};
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use terax_transfers::{
+    models::{EnqueueTransferRequest, TransferDirection, TransferStrategy},
+    TransferState,
+};
 
 /// 将前端生成的文本另存到用户选择的本机位置，取消时不写入。
 #[tauri::command]

@@ -14,17 +14,15 @@ use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-use crate::modules::transfers::commit::{
+use crate::commit::{
     cleanup_local_staging, commit_local_root_tracked, commit_remote_root_tracked,
     schedule_local_cleanup,
 };
-use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
-use crate::modules::transfers::manager::TransferRunError;
-use crate::modules::transfers::models::{TransferEntryKind, TransferFileFailure, TransferStage};
-use crate::modules::transfers::planner::{
-    RemoteDownloadFile, RemoteDownloadPlan, RemoteUploadFile, RemoteUploadPlan,
-};
-use crate::modules::transfers::progress::ExecutionContext;
+use crate::errors::{io_failure, TransferErrorCode};
+use crate::manager::TransferRunError;
+use crate::models::{TransferEntryKind, TransferFileFailure, TransferStage};
+use crate::planner::{RemoteDownloadFile, RemoteDownloadPlan, RemoteUploadFile, RemoteUploadPlan};
+use crate::progress::ExecutionContext;
 use uuid::Uuid;
 
 const DOWNLOAD_CHUNK_BYTES: usize = 32 * 1024;
@@ -84,7 +82,7 @@ pub(crate) async fn download_file(
         .as_ref()
         .is_some_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
     {
-        return Err(crate::modules::transfers::resume::changed());
+        return Err(crate::resume::changed());
     }
     if existing
         .as_ref()
@@ -177,14 +175,14 @@ async fn download_file_into_inner(
         .await
         .map_err(|error| io_failure("stat partial download", &error))?
         .len();
-    let saved = crate::modules::transfers::resume::validated_offset(saved, actual, expected_size)?;
+    let saved = crate::resume::validated_offset(saved, actual, expected_size)?;
     writer
         .set_len(saved)
         .await
         .map_err(|error| io_failure("truncate unconfirmed download tail", &error))?;
     let mut next_offset = saved;
     let mut completed = saved;
-    let mut prefix = crate::modules::transfers::resume::ConfirmedPrefix::new(saved);
+    let mut prefix = crate::resume::ConfirmedPrefix::new(saved);
     context.report_bytes(saved).await;
     let mut canceled = false;
     let mut failure = None;
@@ -298,7 +296,7 @@ async fn download_file_into_inner(
                     completed = completed.saturating_add(data_len);
                     let confirmed = prefix.complete(offset, data_len);
                     if confirmed.saturating_sub(context.resume_offset(remote))
-                        >= crate::modules::transfers::resume::CHECKPOINT_BYTES
+                        >= crate::resume::CHECKPOINT_BYTES
                     {
                         writer
                             .sync_data()
@@ -359,9 +357,7 @@ pub(crate) async fn execute_upload(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context
-        .prepare_resume(crate::modules::transfers::resume::ResumeState::upload(
-            &plan,
-        ))
+        .prepare_resume(crate::resume::ResumeState::upload(&plan))
         .await?;
     context.set_stage(TransferStage::Transferring).await;
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
@@ -382,7 +378,7 @@ pub(crate) async fn execute_upload(
             .await
             {
                 Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => {}
-                Ok(_) => return Err(crate::modules::transfers::resume::changed()),
+                Ok(_) => return Err(crate::resume::changed()),
                 Err(TransferRunError::Failed(failure))
                     if failure.code == TransferErrorCode::SourceUnavailable =>
                 {
@@ -469,9 +465,7 @@ pub(crate) async fn execute_download(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context
-        .prepare_resume(crate::modules::transfers::resume::ResumeState::download(
-            &plan,
-        ))
+        .prepare_resume(crate::resume::ResumeState::download(&plan))
         .await?;
     context.set_stage(TransferStage::Transferring).await;
     let raw_session = super::session::open_raw(&plan.workspace).await?;
@@ -480,7 +474,7 @@ pub(crate) async fn execute_download(
             context.checkpoint().await?;
             match tokio::fs::symlink_metadata(&directory.destination).await {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-                Ok(_) => return Err(crate::modules::transfers::resume::changed()),
+                Ok(_) => return Err(crate::resume::changed()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     tokio::fs::create_dir(&directory.destination)
                         .await
@@ -586,7 +580,7 @@ async fn copy_remote_upload_file(
     context
         .set_current_file(file.source.to_string_lossy().into_owned())
         .await;
-    let mut reader = crate::modules::transfers::source::open_verified_file(
+    let mut reader = crate::source::open_verified_file(
         &file.source,
         file.source_identity,
         file.size,
@@ -594,7 +588,7 @@ async fn copy_remote_upload_file(
     )
     .await?;
     upload_stream(session, &mut reader, &file.destination, file.size, context).await?;
-    crate::modules::transfers::source::verify_opened_file(
+    crate::source::verify_opened_file(
         &reader,
         &file.source,
         file.source_identity,
@@ -736,11 +730,7 @@ pub(crate) async fn upload_stream(
         .await;
         match existing {
             Ok(metadata) if metadata.is_regular() => {
-                crate::modules::transfers::resume::validated_offset(
-                    saved,
-                    metadata.size.unwrap_or(0),
-                    size,
-                )?;
+                crate::resume::validated_offset(saved, metadata.size.unwrap_or(0), size)?;
                 if saved == size && metadata.size == Some(size) {
                     context.report_bytes(size).await;
                     return Ok(());
@@ -756,7 +746,7 @@ pub(crate) async fn upload_stream(
                 )
             }
             Err(error) => return Err(error),
-            _ => return Err(crate::modules::transfers::resume::changed()),
+            _ => return Err(crate::resume::changed()),
         }
     };
     let mut writer = super::io::run_cancellable(
@@ -797,7 +787,7 @@ pub(crate) async fn upload_stream(
             .await
             .map_err(|error| io_failure("read upload source", &error))?;
         if read == 0 {
-            return Err(crate::modules::transfers::resume::changed());
+            return Err(crate::resume::changed());
         }
         super::io::run_cancellable(
             format!("write remote destination {remote} offset={offset}"),
@@ -809,7 +799,7 @@ pub(crate) async fn upload_stream(
         context.report_bytes(read as u64).await;
         if offset == size
             || offset.saturating_sub(context.resume_offset(remote))
-                >= crate::modules::transfers::resume::CHECKPOINT_BYTES
+                >= crate::resume::CHECKPOINT_BYTES
         {
             super::io::run_cancellable("flush upload checkpoint", writer.flush(), &control).await?;
             super::io::run_cancellable("sync upload checkpoint", writer.sync_all(), &control)

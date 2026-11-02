@@ -207,7 +207,7 @@ pub(crate) async fn cleanup(task: &str, state: &ResumeState) -> bool {
         let Some(scope) = &state.remote_scope else {
             return false;
         };
-        let workspace = match crate::modules::remote::manager::global_manager() {
+        let workspace = match terax_core::modules::remote::manager::global_manager() {
             Ok(manager) => manager.workspace(scope.profile_id()).await.ok(),
             Err(_) => None,
         };

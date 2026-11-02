@@ -6741,6 +6741,7 @@ dependencies = [
  "tempfile",
  "terax-core",
  "terax-git",
+ "terax-transfers",
  "tokio",
  "tokio-util",
  "uuid",
@@ -6763,7 +6764,6 @@ dependencies = [
  "core-foundation 0.9.4",
  "dirs 6.0.0",
  "filetime",
- "flate2",
  "fs2",
  "futures-util",
  "globset",
@@ -6792,7 +6792,6 @@ dependencies = [
  "sha2 0.10.9",
  "shared_child",
  "system-configuration",
- "tar",
  "tempfile",
  "tokio",
  "tokio-rustls",
@@ -6829,6 +6828,29 @@ dependencies = [
  "tempfile",
  "terax-core",
  "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "terax-transfers"
+version = "0.8.2"
+dependencies = [
+ "filetime",
+ "flate2",
+ "futures-util",
+ "ignore",
+ "libc",
+ "log",
+ "russh-sftp",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "terax-core",
+ "tokio",
+ "tokio-util",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

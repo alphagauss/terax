@@ -16,9 +16,9 @@ use super::models::{
 };
 use super::planner::{PreparedTransfer, TransferManifest};
 use super::progress::ExecutionContext;
-use crate::modules::remote::session::shell_quote;
-use crate::modules::workspace::WorkspaceEnv;
 use serde::Serialize;
+use terax_core::modules::remote::session::shell_quote;
+use terax_core::modules::workspace::WorkspaceEnv;
 
 const MAX_ENTRIES: usize = 200_000;
 const MAX_OUTPUT: usize = 32 * 1024 * 1024;
@@ -165,7 +165,7 @@ fn validate_relative(path: &str, windows: bool) -> Result<(), TransferFailure> {
                 || (windows
                     && (part.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])
                         || part.ends_with(['.', ' '])
-                        || crate::modules::remote::sftp::sanitize_local_name(part) != part))
+                        || terax_core::modules::remote::sftp::sanitize_local_name(part) != part))
         })
     {
         return Err(failure(format!("unsupported sync path: {path}")));
@@ -303,7 +303,7 @@ pub(crate) async fn run_script(
     control.checkpoint().await?;
     match env {
         WorkspaceEnv::Ssh { profile_id } => {
-            let workspace = crate::modules::remote::manager::global_manager()?
+            let workspace = terax_core::modules::remote::manager::global_manager()?
                 .workspace(profile_id)
                 .await?;
             super::ssh::archive::run_sync_script(&workspace, script, control, MAX_OUTPUT).await

@@ -13,10 +13,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::app_data::{self, Directory};
-use crate::modules::storage::FileLock;
-use crate::modules::workspace::WorkspaceEnv;
-use crate::modules::workspace_identity::environment_filename_key;
+use terax_core::modules::app_data::{self, Directory};
+use terax_core::modules::storage::FileLock;
+use terax_core::modules::workspace::WorkspaceEnv;
+use terax_core::modules::workspace_identity::environment_filename_key;
 
 use super::cleanup_ticket::CleanupTicket;
 use super::errors::{TransferErrorCode, TransferFailure};
@@ -526,7 +526,7 @@ fn internal(detail: impl Into<String>) -> TransferFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::transfers::models::{TransferDirection, TransferStage, TransferStrategy};
+    use crate::models::{TransferDirection, TransferStage, TransferStrategy};
 
     fn snapshot(status: TransferStatus, updated_at: u64) -> TransferTaskSnapshot {
         TransferTaskSnapshot {

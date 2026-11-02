@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::modules::remote::manager::global_manager;
-use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
+use terax_core::modules::remote::manager::global_manager;
+use terax_core::modules::remote::session::{shell_quote, RemoteWorkspace};
 
 use super::super::cleanup_ticket::{CleanupTicket, CleanupTicketTarget};
 use super::super::errors::TransferErrorCode;
@@ -197,7 +197,7 @@ pub(crate) fn schedule(scope: RemoteCleanupScope, mut paths: Vec<String>) {
     let profile_id = scope.profile_id.clone();
     let owner_task_id = scope.owner_task_id.clone();
     super::super::manager::begin_deferred_cleanup(&owner_task_id);
-    crate::runtime::spawn(async move {
+    terax_core::runtime::spawn(async move {
         if tokio::time::timeout(
             CLEANUP_RETRY_WINDOW,
             cleanup_after_reconnect(&scope, &paths),

@@ -141,7 +141,7 @@ pub fn run() {
         .manage(net::HttpState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
-        .manage(transfers::TransferState::default())
+        .manage(terax_transfers::TransferState::default())
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(fs::properties::FilePropertiesState::default())

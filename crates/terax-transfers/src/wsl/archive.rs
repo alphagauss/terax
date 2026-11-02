@@ -5,7 +5,7 @@
 //! Planner 指定的 staging。WSL 上传在目标侧批量提交，避免小文件被放大为 UNC 往返。
 
 #[cfg(windows)]
-use crate::modules::transfers::manager::TaskControl;
+use crate::manager::TaskControl;
 #[cfg(windows)]
 use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 
@@ -17,30 +17,30 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufRead
 use uuid::Uuid;
 
 #[cfg(windows)]
-use crate::modules::transfers::archive::{
+use crate::archive::{
     build_wsl_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 #[cfg(windows)]
-use crate::modules::transfers::commit::{
+use crate::commit::{
     cleanup_local_staging, commit_local_root, local_cleanup_ticket_for_paths, remote_backup_paths,
     remote_commit_command, schedule_local_cleanup, LocalRoot, RemoteRoot,
 };
 #[cfg(windows)]
-use crate::modules::transfers::diagnostics::PhaseTimer;
+use crate::diagnostics::PhaseTimer;
 #[cfg(windows)]
-use crate::modules::transfers::errors::io_failure;
-use crate::modules::transfers::errors::TransferErrorCode;
+use crate::errors::io_failure;
+use crate::errors::TransferErrorCode;
 #[cfg(windows)]
-use crate::modules::transfers::local::verify_apply_commit;
-use crate::modules::transfers::manager::TransferRunError;
+use crate::local::verify_apply_commit;
+use crate::manager::TransferRunError;
 #[cfg(windows)]
-use crate::modules::transfers::models::TransferStage;
-use crate::modules::transfers::planner::LocalPlan;
+use crate::models::TransferStage;
+use crate::planner::LocalPlan;
 #[cfg(windows)]
-use crate::modules::transfers::planner::WslArchiveContext;
-use crate::modules::transfers::progress::ExecutionContext;
+use crate::planner::WslArchiveContext;
+use crate::progress::ExecutionContext;
 #[cfg(windows)]
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use terax_core::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[cfg(windows)]
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
@@ -199,7 +199,7 @@ async fn execute_download(
             let mut script = selection.pack_script(&sources[0], &remote_archive);
             script.push_str(&format!(
                 "sha256sum -- {}\n",
-                crate::modules::remote::session::shell_quote(&remote_archive)
+                terax_core::modules::remote::session::shell_quote(&remote_archive)
             ));
             let output = super::super::sync::run_script(
                 &WorkspaceEnv::Wsl {
@@ -493,7 +493,7 @@ async fn cleanup_work_dir(distro: &str, directory: &str, task_id: &str) -> bool 
         log::warn!("refused to clean invalid WSL archive directory: {directory}");
         return false;
     }
-    let command = crate::modules::transfers::ssh::cleanup::cleanup_command([directory]);
+    let command = crate::ssh::cleanup::cleanup_command([directory]);
     capture_wsl(distro, "bash", &["-c", &command]).await.is_ok()
 }
 
@@ -505,8 +505,8 @@ fn schedule_cleanup_work_dir(
     staging_task_id: String,
     owner_task_id: String,
 ) {
-    crate::modules::transfers::manager::begin_deferred_cleanup(&owner_task_id);
-    crate::runtime::spawn(async move {
+    crate::manager::begin_deferred_cleanup(&owner_task_id);
+    terax_core::runtime::spawn(async move {
         let cleanup = async {
             loop {
                 if cleanup_work_dir(&distro, &directory, &staging_task_id).await {
@@ -519,7 +519,7 @@ fn schedule_cleanup_work_dir(
             .await
             .is_ok()
         {
-            crate::modules::transfers::manager::finish_deferred_cleanup(&owner_task_id);
+            crate::manager::finish_deferred_cleanup(&owner_task_id);
         } else {
             log::warn!("WSL archive cleanup expired for task {owner_task_id}: {directory}");
         }
@@ -568,7 +568,7 @@ async fn capture_wsl(distro: &str, program: &str, args: &[&str]) -> RunResult<St
     let args: Vec<String> = args.iter().map(|value| (*value).to_string()).collect();
     tokio::task::spawn_blocking(move || {
         let refs: Vec<_> = args.iter().map(String::as_str).collect();
-        crate::modules::workspace::wsl_exec_capture(&distro, &program, &refs)
+        terax_core::modules::workspace::wsl_exec_capture(&distro, &program, &refs)
             .map_err(|error| message(format!("run WSL archive command: {error}")))
     })
     .await
@@ -626,7 +626,7 @@ async fn run_wsl_program_inner(
     input: Option<Vec<u8>>,
     output_limit: usize,
 ) -> RunResult<Vec<u8>> {
-    crate::modules::workspace::validate_wsl_distro_name(distro)
+    terax_core::modules::workspace::validate_wsl_distro_name(distro)
         .map_err(|error| message(format!("invalid WSL archive environment: {error}")))?;
     let mut command = tokio::process::Command::new("wsl.exe");
     command
@@ -647,13 +647,13 @@ async fn run_wsl_program_inner(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    crate::modules::proc::hide_console(command.as_std_mut());
+    terax_core::modules::proc::hide_console(command.as_std_mut());
     let mut child = command
         .spawn()
         .map_err(|error| message(format!("start WSL archive command: {error}")))?;
     let input_task = input.map(|input| {
         let mut stdin = child.stdin.take().expect("piped WSL input");
-        crate::runtime::spawn(async move {
+        terax_core::runtime::spawn(async move {
             stdin.write_all(&input).await?;
             stdin.shutdown().await?;
             drop(stdin);
@@ -818,7 +818,7 @@ async fn publish_upload_staging(
             final_path: root.stage.clone(),
             kind: root.kind,
             destination_kind: None,
-            mode: crate::modules::transfers::commit::RootCommitMode::Create,
+            mode: crate::commit::RootCommitMode::Create,
             merge_preconditions: Vec::new(),
         })
         .await?;
@@ -897,12 +897,8 @@ async fn commit_upload_roots(
         .await?;
     let output = run_wsl_commit_program(distro, "bash", &[&script_path], context).await?;
     let cleanup_pending = output
-        .windows(crate::modules::transfers::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER.len())
-        .any(|value| {
-            value
-                == crate::modules::transfers::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER
-                    .as_bytes()
-        });
+        .windows(crate::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER.len())
+        .any(|value| value == crate::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER.as_bytes());
     context
         .complete_cleanup_ticket(ticket.as_mut(), cleanup_pending)
         .await?;

@@ -27,7 +27,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo nextest run --workspace --locked
 ```
 
-没有 nextest 时使用 `cargo test --workspace --locked`。局部修改使用 `-p terax-core`、`-p terax-git`、`-p terax-host` 或 `-p terax` 选择 crate，再选择相关测试；core 默认覆盖完整 Workspace 能力。共享边界变更还需单独执行 `cargo check -p terax-host --all-targets --locked`，防止联合构建的特性合并掩盖轻量宿主问题。构建组织见 [原生 workspace](../architecture/native-workspace.md)，实验性终端的专用命令见 [终端宿主](../architecture/terminal-agent.md)。
+没有 nextest 时使用 `cargo test --workspace --locked`。局部修改使用 `-p terax-core`、`-p terax-git`、`-p terax-transfers`、`-p terax-host` 或 `-p terax` 选择 crate，再选择相关测试；core 默认覆盖完整 Workspace 能力。共享边界变更还需单独执行 `cargo check -p terax-host --all-targets --locked`，防止联合构建的特性合并掩盖轻量宿主问题。构建组织见 [原生 workspace](../architecture/native-workspace.md)，实验性终端的专用命令见 [终端宿主](../architecture/terminal-agent.md)。
 
 ## 测试边界
 

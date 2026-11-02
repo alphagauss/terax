@@ -8,21 +8,21 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::modules::remote::session::{join_remote, shell_quote, ExecOutput, RemoteWorkspace};
-use crate::modules::transfers::archive::{
+use crate::archive::{
     build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
-use crate::modules::transfers::commit::{
+use crate::commit::{
     cleanup_local_staging, commit_local_roots_tracked, commit_remote_roots_tracked,
     ensure_remote_target_available, schedule_local_cleanup,
 };
-use crate::modules::transfers::diagnostics::PhaseTimer;
-use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
-use crate::modules::transfers::manager::{TaskControl, TransferRunError};
-use crate::modules::transfers::models::TransferStage;
-use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadPlan};
-use crate::modules::transfers::progress::ExecutionContext;
+use crate::diagnostics::PhaseTimer;
+use crate::errors::{io_failure, TransferErrorCode};
+use crate::manager::{TaskControl, TransferRunError};
+use crate::models::TransferStage;
+use crate::planner::{RemoteDownloadPlan, RemoteUploadPlan};
+use crate::progress::ExecutionContext;
 use russh_sftp::client::SftpSession;
+use terax_core::modules::remote::session::{join_remote, shell_quote, ExecOutput, RemoteWorkspace};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const COMMAND_OUTPUT_LIMIT: usize = 1024 * 1024;
@@ -35,9 +35,7 @@ pub(crate) async fn execute_upload(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context
-        .prepare_resume(crate::modules::transfers::resume::ResumeState::upload(
-            &plan,
-        ))
+        .prepare_resume(crate::resume::ResumeState::upload(&plan))
         .await?;
     if context
         .resume
@@ -74,7 +72,7 @@ pub(crate) async fn execute_upload(
             let built = build_upload_archive(&plan, &remote_parent, context).await?;
             let local = context.archive_path().await?;
             let work_dir = join_remote(&remote_parent, &format!(".terax-archive-{}", plan.task_id));
-            let archive = crate::modules::transfers::resume::ArchiveCheckpoint {
+            let archive = crate::resume::ArchiveCheckpoint {
                 local: local.clone(),
                 remote: join_remote(&work_dir, "payload.tar.gz"),
                 work_dir,
@@ -193,9 +191,7 @@ pub(crate) async fn execute_download(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context
-        .prepare_resume(crate::modules::transfers::resume::ResumeState::download(
-            &plan,
-        ))
+        .prepare_resume(crate::resume::ResumeState::download(&plan))
         .await?;
     if context
         .resume
@@ -259,12 +255,12 @@ pub(crate) async fn execute_download(
             };
             context.set_stage(TransferStage::Verifying).await;
             verify_remote_download_sources(&plan, context).await?;
-            let local = crate::modules::transfers::commit::local_stage_path(
+            let local = crate::commit::local_stage_path(
                 &plan.roots[0].final_path,
                 &plan.task_id,
                 usize::MAX,
             )?;
-            let archive = crate::modules::transfers::resume::ArchiveCheckpoint {
+            let archive = crate::resume::ArchiveCheckpoint {
                 local: local.clone(),
                 remote: archive_path,
                 work_dir,
@@ -291,7 +287,7 @@ pub(crate) async fn execute_download(
             .as_ref()
             .is_some_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
         {
-            return Err(crate::modules::transfers::resume::changed());
+            return Err(crate::resume::changed());
         }
         let mut output = tokio::fs::OpenOptions::new()
             .read(true)
@@ -377,7 +373,7 @@ async fn upload_archive(
         .await
         .map_err(|error| io_failure("stat retained archive", &error))?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != size {
-        return Err(crate::modules::transfers::resume::changed());
+        return Err(crate::resume::changed());
     }
     let mut reader = tokio::fs::File::open(local)
         .await

@@ -700,7 +700,9 @@ fn safe_destination_path(root: &Path, relative: &str) -> io::Result<PathBuf> {
                 "archive relative path is invalid",
             ));
         }
-        destination.push(crate::modules::remote::sftp::sanitize_local_name(component));
+        destination.push(terax_core::modules::remote::sftp::sanitize_local_name(
+            component,
+        ));
     }
     Ok(destination)
 }

@@ -7,10 +7,11 @@ use tauri::{AppHandle, State};
 
 use crate::modules::workspace_process::WorkspaceProcessState;
 
-use super::models::{EnqueueTransferRequest, ResolveTransferConflictRequest, TransferTaskSnapshot};
-use super::TransferFailure;
-use super::TransferState;
 use crate::adapters::tauri::host;
+use terax_transfers::models::{
+    EnqueueTransferRequest, ResolveTransferConflictRequest, TransferTaskSnapshot,
+};
+use terax_transfers::{FolderSyncSettings, SyncPreview, TransferFailure, TransferState};
 
 /// 读取当前 Workspace 中这个环境目录最近成功同步的设置。
 #[tauri::command]
@@ -18,7 +19,7 @@ pub async fn transfer_sync_settings(
     app: AppHandle,
     state: State<'_, TransferState>,
     remote_path: String,
-) -> Result<Option<super::FolderSyncSettings>, String> {
+) -> Result<Option<FolderSyncSettings>, String> {
     state
         .manager()
         .sync_settings(host::transfer(&app), remote_path)
@@ -30,8 +31,8 @@ pub async fn transfer_sync_settings(
 pub async fn transfer_sync_preview(
     workspace: State<'_, WorkspaceProcessState>,
     request: EnqueueTransferRequest,
-) -> Result<super::SyncPreview, TransferFailure> {
-    super::preview(&workspace.bootstrap().env, request).await
+) -> Result<SyncPreview, TransferFailure> {
+    terax_transfers::preview(&workspace.bootstrap().env, request).await
 }
 
 /// 将文件、文件夹或批量来源按请求中的策略加入后台队列。

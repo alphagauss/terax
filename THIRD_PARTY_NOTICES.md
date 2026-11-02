@@ -97,7 +97,7 @@ The Apache License 2.0 text is included in the root `LICENSE` file.
   proxy transport, transfer operations, and connection/tunnel lifecycle.
 - Relevant Terax files: `crates/terax-core/src/modules/remote/proxy.rs`, `sftp.rs`,
   `tunnel.rs`, `manager.rs`, and `models.rs`, plus
-  `crates/terax-core/src/modules/transfers/archive.rs` and `transfers/ssh/archive.rs`.
+  `crates/terax-transfers/src/archive.rs` and `crates/terax-transfers/src/ssh/archive.rs`.
 - Modifications: removed the GPUI/application persistence layers, consolidated
   the crates into the Terax backend, replaced project-specific DTOs, and wired
   the operations into Terax's existing commands and workspace model.
@@ -153,7 +153,7 @@ SOFTWARE.
   keepalive, outbound proxy options, and local/remote/dynamic forwarding.
 - Relevant Terax files: `crates/terax-core/src/modules/remote/ssh_config.rs`,
   `host_key.rs`, `session.rs`, `sftp.rs`, and `tunnel.rs`, plus
-  `crates/terax-core/src/modules/transfers/ssh/`.
+  `crates/terax-transfers/src/ssh/`.
 - Modifications: removed the Slint UI and all Telnet/serial/XMODEM features,
   moved secrets to Terax's OS credential-vault commands, and adapted the
   remaining behavior to russh and Terax's workspace APIs.

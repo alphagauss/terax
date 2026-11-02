@@ -14,8 +14,6 @@ pub mod secrets;
 pub mod shared_store;
 pub mod shell;
 pub mod storage;
-#[cfg(feature = "workspace-runtime")]
-pub mod transfers;
 pub mod workspace;
 #[cfg(feature = "workspace-runtime")]
 pub mod workspace_identity;

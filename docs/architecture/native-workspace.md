@@ -6,12 +6,13 @@
 
 - `terax-core` 拥有共享原生业务、授权、持久化和运行时资源，不依赖 Tauri、窗口或 WebView。桌面侧仍拥有窗口、插件及尚未迁出的桌面专属服务。
 - `terax-git` 拥有 Git 仓库操作、命令执行和结果解析，依赖 `terax-core` 的工作区授权和 SSH 会话。
+- `terax-transfers` 管理文件传输的调度、冲突、提交和恢复。SSH 连接通过 `terax-core` 提供传输资格、专用 SFTP 流和命令控制。
 - `src-tauri` 中的 `terax` 是桌面宿主，负责命令参数映射、窗口身份、事件与通道转发、桌面 Store 接入。
 - `terax-host` 是现有终端宿主的私有 stdio 入口，只接受启动所在的 Local 环境。
 
-桌面宿主直接依赖 `terax-core` 和 `terax-git`。终端宿主只接入 `terax-core`。此次拆分不新增 daemon，不改变每个 Workspace 独立进程的模型，也不让后台业务随 UI 挂载启停。
+桌面宿主直接依赖 `terax-core`、`terax-git` 和 `terax-transfers`。终端宿主只接入 `terax-core`。此次拆分不新增 daemon，不改变每个 Workspace 独立进程的模型，也不让后台业务随 UI 挂载启停。
 
-core 默认启用 `workspace-runtime`，覆盖 PTY、SSH、监听和传输等完整 Workspace 能力。终端宿主关闭 core 默认特性，保持原有轻量 Local 构建；它的请求校验始终拒绝远端环境，即使 workspace 联合构建使依赖特性合并，也不能放宽协议边界。
+core 默认启用 `workspace-runtime`，覆盖 PTY、SSH 和文件监听等 Workspace 能力。终端宿主关闭 core 默认特性，保持原有轻量 Local 构建；它的请求校验始终拒绝远端环境，即使 workspace 联合构建使依赖特性合并，也不能放宽协议边界。
 
 ## 后续按需拆分
 
@@ -30,12 +31,12 @@ core 默认启用 `workspace-runtime`，覆盖 PTY、SSH、监听和传输等完
 
 宿主在处理请求前注入已有 Tokio 运行时句柄。原生线程需要调度异步工作时复用该句柄，core 不创建第二套执行器。
 
-事件出口只转发既有事件名与 payload；PTY 原始字节和退出回执使用有类型的输出出口，桌面适配保持原有二进制 IPC。业务状态、取消和资源回收由 core 拥有。
+事件出口只转发既有事件名与 payload；PTY 原始字节和退出回执使用有类型的输出出口，桌面适配保持原有二进制 IPC。传输任务状态、取消与恢复由传输模块拥有，SSH 通道准入与释放由 core 管理。
 
 SSH 宿主共享同一个秘密存储状态，重连仍读取最新凭据。传输设置由桌面适配访问与 WebView 相同的 Workspace Store；保存失败恢复旧内存值，不改变任务结果或现有持久化格式。
 
 ## 开发入口
 
-所有 Cargo 命令从仓库根目录执行。默认成员是桌面宿主；全量检查显式使用 `--workspace`，局部检查使用 `-p terax-core`、`-p terax-git`、`-p terax-host` 或 `-p terax`。具体检查命令见 [检查与验证](../contributing/testing.md)。
+所有 Cargo 命令从仓库根目录执行。默认成员是桌面宿主；全量检查显式使用 `--workspace`，局部检查使用 `-p terax-core`、`-p terax-git`、`-p terax-transfers`、`-p terax-host` 或 `-p terax`。具体检查命令见 [检查与验证](../contributing/testing.md)。
 
 `pnpm tauri dev` 与 `pnpm tauri build` 继续作为桌面入口。TUI 打包中间文件保留在 `artifacts/`，内嵌的 Rust 宿主来自根目录 `target/release/`。

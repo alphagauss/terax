@@ -11,7 +11,7 @@ use std::time::Duration;
 use futures_util::stream::{self, StreamExt};
 use russh_sftp::client::SftpSession;
 
-use crate::modules::remote::session::{join_remote, shell_quote, RemoteWorkspace};
+use terax_core::modules::remote::session::{join_remote, shell_quote, RemoteWorkspace};
 
 use super::cleanup_ticket::{CleanupTicket, CleanupTicketTarget};
 use super::diagnostics::PhaseTimer;
@@ -459,7 +459,7 @@ async fn execute_remote_commit(
         )
         .await
         .map_err(|error| match error {
-            crate::modules::remote::transfer::SshTransferError::OperationFailed(detail) => {
+            terax_core::modules::remote::transfer::SshTransferError::OperationFailed(detail) => {
                 message(format!("{operation}: {detail}"))
             }
             admission => TransferRunError::from(admission),
@@ -1278,7 +1278,7 @@ pub(crate) fn schedule_local_cleanup(task_id: &str, paths: Vec<PathBuf>) {
     }
     super::manager::begin_deferred_cleanup(task_id);
     let task_id = task_id.to_string();
-    crate::runtime::spawn(async move {
+    terax_core::runtime::spawn(async move {
         let cleanup = async {
             let mut remaining = paths;
             loop {
