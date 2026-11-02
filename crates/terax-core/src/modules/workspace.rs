@@ -641,12 +641,9 @@ fn run_wsl(args: &[&str]) -> Result<String, String> {
     Ok(decode_command_output(&out.stdout))
 }
 
+/// 校验发行版名称后以独立参数执行程序，捕获并解码 WSL 标准输出。
 #[cfg(windows)]
-pub(crate) fn wsl_exec_capture(
-    distro: &str,
-    program: &str,
-    args: &[&str],
-) -> Result<String, String> {
+pub fn wsl_exec_capture(distro: &str, program: &str, args: &[&str]) -> Result<String, String> {
     validate_wsl_distro_name(distro)?;
     let mut cmd = std::process::Command::new("wsl.exe");
     cmd.arg("-d")

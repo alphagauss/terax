@@ -450,20 +450,20 @@ async fn execute_remote_commit(
     operation: &str,
 ) -> RunResult<bool> {
     // 脚本走标准输入，避免多根长路径触发远端 exec 的命令行长度上限。
-    let channel = workspace
-        .open_exec_channel()
-        .await
-        .map_err(TransferRunError::from)?;
     let output = workspace
-        .exec_on_channel_with_input(
-            channel,
+        .exec_with_input(
             "bash -s",
             command.as_bytes().to_vec(),
             Duration::from_secs(24 * 60 * 60),
             REMOTE_COMMIT_OUTPUT_LIMIT,
         )
         .await
-        .map_err(|error| message(format!("{operation}: {error}")))?;
+        .map_err(|error| match error {
+            crate::modules::remote::transfer::SshTransferError::OperationFailed(detail) => {
+                message(format!("{operation}: {detail}"))
+            }
+            admission => TransferRunError::from(admission),
+        })?;
     if output.exit_code == Some(0) && !output.timed_out && !output.truncated {
         Ok(output
             .stdout

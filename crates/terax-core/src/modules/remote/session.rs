@@ -47,7 +47,7 @@ pub struct ClientHandler {
     pub cancellation: CancellationToken,
     host_key_rejected: Arc<AtomicBool>,
     health: Arc<SshTransportHealth>,
-    pub(crate) channels: Arc<SessionChannels>,
+    pub(super) channels: Arc<SessionChannels>,
 }
 
 impl Handler for ClientHandler {
@@ -165,7 +165,7 @@ pub struct RemoteWorkspace {
     secret: Zeroizing<String>,
     proxy_secret_override: Option<Zeroizing<String>>,
     health: Arc<SshTransportHealth>,
-    pub(crate) channels: Arc<SessionChannels>,
+    pub(super) channels: Arc<SessionChannels>,
     probe_lock: Mutex<()>,
     pub(crate) tasks: Arc<RemoteTaskRuntime>,
     runtime_epoch: AtomicU64,
@@ -260,7 +260,10 @@ impl RemoteWorkspace {
         &self,
         purpose: &'static str,
     ) -> Result<SessionChannel, String> {
-        self.channels.open(self, purpose).await
+        self.channels
+            .open(self, purpose)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
@@ -1072,7 +1075,12 @@ pub struct ExecOutput {
     pub truncated: bool,
 }
 
-fn append_bounded(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool, max_output: usize) {
+pub(super) fn append_bounded(
+    target: &mut Vec<u8>,
+    data: &[u8],
+    truncated: &mut bool,
+    max_output: usize,
+) {
     let remaining = max_output.saturating_sub(target.len());
     if remaining < data.len() {
         *truncated = true;

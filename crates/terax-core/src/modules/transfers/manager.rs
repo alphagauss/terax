@@ -16,6 +16,7 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::modules::remote::transfer::SshTransferError;
 use crate::modules::workspace::WorkspaceEnv;
 
 use super::cleanup_ticket::{CleanupTicket, CleanupTicketState, CleanupTicketTarget};
@@ -104,19 +105,22 @@ pub(crate) enum TransferRunError {
 
 impl From<String> for TransferRunError {
     fn from(value: String) -> Self {
-        if value.contains(crate::modules::remote::session::EXEC_CANCELLED_ERROR) {
-            return Self::Canceled;
+        Self::failed(TransferErrorCode::Internal, value)
+    }
+}
+
+impl From<SshTransferError> for TransferRunError {
+    fn from(error: SshTransferError) -> Self {
+        match error {
+            SshTransferError::Canceled => Self::Canceled,
+            SshTransferError::Busy(detail) => Self::failed(TransferErrorCode::SessionBusy, detail),
+            SshTransferError::Disconnected(detail) | SshTransferError::OperationFailed(detail) => {
+                Self::failed(TransferErrorCode::ConnectionLost, detail)
+            }
+            SshTransferError::OpenFailed(detail) => {
+                Self::failed(TransferErrorCode::Internal, detail)
+            }
         }
-        let code = if value.contains(crate::modules::remote::channels::RESOURCE_BUSY) {
-            TransferErrorCode::SessionBusy
-        } else if value.contains("SSH transport closed")
-            || value.contains("SSH transfer transport changed")
-        {
-            TransferErrorCode::ConnectionLost
-        } else {
-            TransferErrorCode::Internal
-        };
-        Self::failed(code, value)
     }
 }
 
@@ -382,10 +386,7 @@ impl TransferManager {
                     let remote = manager.workspace(profile_id).await.map_err(|error| {
                         TransferRunError::failed(TransferErrorCode::ConnectionLost, error)
                     })?;
-                    let result = remote
-                        .channels
-                        .transfer_scope(&remote, id.to_string(), &control.cancellation, work)
-                        .await;
+                    let result = remote.run_transfer(id, &control.cancellation, work).await;
                     if control.is_cancelled() {
                         return Err(TransferRunError::Canceled);
                     }
@@ -1867,6 +1868,39 @@ fn reset_for_resume(task: &mut TransferTaskSnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_failure_kind_controls_task_outcome_even_if_details_change() {
+        let detail = "new diagnostic";
+        for (error, expected) in [
+            (
+                SshTransferError::Busy(detail.into()),
+                TransferErrorCode::SessionBusy,
+            ),
+            (
+                SshTransferError::Disconnected(detail.into()),
+                TransferErrorCode::ConnectionLost,
+            ),
+            (
+                SshTransferError::OperationFailed(detail.into()),
+                TransferErrorCode::ConnectionLost,
+            ),
+            (
+                SshTransferError::OpenFailed(detail.into()),
+                TransferErrorCode::Internal,
+            ),
+        ] {
+            let TransferRunError::Failed(failure) = TransferRunError::from(error) else {
+                panic!("expected transfer failure");
+            };
+            assert_eq!(failure.code, expected);
+            assert_eq!(failure.detail, detail);
+        }
+        assert!(matches!(
+            TransferRunError::from(SshTransferError::Canceled),
+            TransferRunError::Canceled
+        ));
+    }
 
     fn managed_task(id: &str, status: TransferStatus, created_at: u64) -> ManagedTask {
         ManagedTask {

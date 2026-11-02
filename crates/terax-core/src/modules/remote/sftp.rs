@@ -1485,7 +1485,7 @@ fn entry_kind(kind: FileType) -> RemoteEntryKind {
 }
 
 /// 将远端文件名转换为 Windows、macOS 和 Linux 均可创建的本地名称。
-pub(crate) fn sanitize_local_name(name: &str) -> String {
+pub fn sanitize_local_name(name: &str) -> String {
     let mut value: String = name
         .chars()
         .map(|character| match character {

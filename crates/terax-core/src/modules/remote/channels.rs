@@ -13,6 +13,7 @@ use russh::{client::Msg, Channel};
 use tokio::sync::{oneshot, Notify};
 
 use super::session::RemoteWorkspace;
+use super::transfer::SshTransferError;
 
 pub(crate) const RESOURCE_BUSY: &str = "ssh_session_capacity_busy";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
@@ -95,10 +96,12 @@ impl Default for SessionChannels {
 }
 
 impl SessionChannels {
-    fn reserve(self: &Arc<Self>) -> Result<Option<Opening>, String> {
+    fn reserve(self: &Arc<Self>) -> Result<Option<Opening>, SshTransferError> {
         let mut state = self.state.lock().unwrap();
         if state.closed {
-            return Err("SSH transport closed".into());
+            return Err(SshTransferError::Disconnected(
+                "SSH transport closed".into(),
+            ));
         }
         if state.blocked_until_close {
             return Ok(None);
@@ -147,12 +150,14 @@ impl SessionChannels {
         self: &Arc<Self>,
         workspace: &RemoteWorkspace,
         purpose: &'static str,
-    ) -> Result<SessionChannel, String> {
+    ) -> Result<SessionChannel, SshTransferError> {
         if TRANSFER
             .try_with(|(channels, _)| !Arc::ptr_eq(channels, self))
             .unwrap_or(false)
         {
-            return Err("SSH transfer transport changed".into());
+            return Err(SshTransferError::Disconnected(
+                "SSH transfer transport changed".into(),
+            ));
         }
         let cancellation = TRANSFER_CANCELLATION
             .try_with(Clone::clone)
@@ -167,12 +172,12 @@ impl SessionChannels {
         let mut cache_closing = None;
         loop {
             if cancellation.is_cancelled() {
-                return Err(super::session::EXEC_CANCELLED_ERROR.into());
+                return Err(SshTransferError::Canceled);
             }
             if tokio::time::Instant::now() >= deadline {
                 let state = self.state.lock().unwrap();
                 log::warn!("SSH_SESSION event=wait_timeout connection={connection} request={request} epoch={} purpose={purpose} budget={} active={} occupants={:?}", workspace.epoch(), state.budget, state.active.len(), state.occupants());
-                return Err(RESOURCE_BUSY.into());
+                return Err(SshTransferError::Busy(RESOURCE_BUSY.into()));
             }
             let changed = self.changed.notified();
             tokio::pin!(changed);
@@ -219,12 +224,14 @@ impl SessionChannels {
                 });
                 let response = tokio::select! {
                     biased;
-                    _ = cancellation.cancelled() => return Err(super::session::EXEC_CANCELLED_ERROR.into()),
+                    _ = cancellation.cancelled() => return Err(SshTransferError::Canceled),
                     response = tokio::time::timeout_at(deadline, receive) => response,
                 };
                 let result = response
-                    .map_err(|_| RESOURCE_BUSY.to_string())?
-                    .map_err(|_| "SSH session opener stopped".to_string())?;
+                    .map_err(|_| SshTransferError::Busy(RESOURCE_BUSY.into()))?
+                    .map_err(|_| {
+                        SshTransferError::OpenFailed("SSH session opener stopped".into())
+                    })?;
                 match result {
                     Ok(channel) => {
                         if waiting {
@@ -234,14 +241,16 @@ impl SessionChannels {
                     }
                     Err((error, capacity)) => {
                         if !capacity || workspace.is_closed() {
-                            return Err(error);
+                            return Err(SshTransferError::OpenFailed(error));
                         }
                         if retried {
-                            return Err(format!("{RESOURCE_BUSY}: {error}"));
+                            return Err(SshTransferError::Busy(format!(
+                                "{RESOURCE_BUSY}: {error}"
+                            )));
                         }
                         retried = true;
                         if self.state.lock().unwrap().active.is_empty() {
-                            return Err(error);
+                            return Err(SshTransferError::OpenFailed(error));
                         }
                         let revision = self.state.lock().unwrap().close_revision;
                         if workspace.remote_fs.reclaim_idle().await {
@@ -270,7 +279,7 @@ impl SessionChannels {
             // 空闲使用者释放 Arc 不产生协议事件，短周期仅检查本地缓存，不发远端请求。
             let wake = tokio::time::sleep(Duration::from_millis(100));
             tokio::select! {
-                _ = cancellation.cancelled() => return Err(super::session::EXEC_CANCELLED_ERROR.into()),
+                _ = cancellation.cancelled() => return Err(SshTransferError::Canceled),
                 _ = &mut changed => {},
                 _ = wake => {},
                 _ = tokio::time::sleep_until(deadline) => {}
@@ -313,7 +322,7 @@ impl SessionChannels {
         task: String,
         cancellation: &tokio_util::sync::CancellationToken,
         work: impl std::future::Future<Output = T>,
-    ) -> Result<T, String> {
+    ) -> Result<T, SshTransferError> {
         // 每次执行有独立身份，同一任务重试不能与取消后迟到的申请混用额度。
         let task: Arc<str> = task.into();
         let deadline = tokio::time::Instant::now() + WAIT_LIMIT;
@@ -329,7 +338,9 @@ impl SessionChannels {
             {
                 let mut state = self.state.lock().unwrap();
                 if state.closed {
-                    return Err("SSH transport closed".into());
+                    return Err(SshTransferError::Disconnected(
+                        "SSH transport closed".into(),
+                    ));
                 }
                 if state.transfer.is_none()
                     && (state.active.len() + state.opening + 2 <= state.budget
@@ -354,10 +365,10 @@ impl SessionChannels {
             if tokio::time::Instant::now() >= deadline {
                 let state = self.state.lock().unwrap();
                 log::warn!("SSH_SESSION event=transfer_wait_timeout connection={} epoch={} task={task} occupants={:?}", self.connection, workspace.epoch(), state.occupants());
-                return Err(RESOURCE_BUSY.into());
+                return Err(SshTransferError::Busy(RESOURCE_BUSY.into()));
             }
             tokio::select! {
-                _ = cancellation.cancelled() => return Err("transfer cancelled".into()),
+                _ = cancellation.cancelled() => return Err(SshTransferError::Canceled),
                 _ = tokio::time::sleep(Duration::from_millis(100)) => {}
             }
         }
@@ -539,7 +550,10 @@ mod tests {
         channels.closed(1);
         assert!(channels.reserve().unwrap().is_some());
         channels.disconnect();
-        assert!(channels.reserve().is_err());
+        assert!(matches!(
+            channels.reserve(),
+            Err(SshTransferError::Disconnected(_))
+        ));
     }
 
     #[tokio::test]

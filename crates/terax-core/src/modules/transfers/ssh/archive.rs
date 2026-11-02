@@ -22,7 +22,6 @@ use crate::modules::transfers::manager::{TaskControl, TransferRunError};
 use crate::modules::transfers::models::TransferStage;
 use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadPlan};
 use crate::modules::transfers::progress::ExecutionContext;
-use russh::{ChannelMsg, Sig};
 use russh_sftp::client::SftpSession;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -531,33 +530,16 @@ async fn run_remote_with_input(
     input: Option<Vec<u8>>,
     output_limit: usize,
 ) -> RunResult<ExecOutput> {
-    let mut channel = workspace
-        .open_session("transfer_command")
-        .await
-        .map_err(TransferRunError::from)?;
-    channel
-        .exec(true, command.as_bytes())
-        .await
-        .map_err(|error| message(format!("start archive command: {error}")))?;
+    let mut channel = workspace.start_transfer_command(command).await?;
     let deadline = tokio::time::Instant::now() + timeout;
     if let Some(input) = input {
-        let send = async {
-            channel
-                .data_bytes(input)
-                .await
-                .map_err(|error| message(format!("write sync input: {error}")))?;
-            channel
-                .eof()
-                .await
-                .map_err(|error| message(format!("finish sync input: {error}")))
-        };
+        let send = async { channel.send_input(input).await.map_err(message) };
         let result = tokio::select! {
             result = tokio::time::timeout_at(deadline, send) => result.unwrap_or_else(|_| Err(message("sync input timed out"))),
             _ = control.cancelled() => Err(TransferRunError::Canceled),
         };
         if let Err(error) = result {
-            let _ = channel.signal(Sig::KILL).await;
-            let _ = channel.close().await;
+            channel.kill().await;
             return Err(error);
         }
     }
@@ -566,36 +548,22 @@ async fn run_remote_with_input(
     loop {
         let paused = control.is_paused();
         if paused != remote_paused {
-            channel
-                .signal(Sig::Custom(if paused { "STOP" } else { "CONT" }.into()))
-                .await
-                .map_err(|error| message(format!("control archive command: {error}")))?;
+            channel.set_paused(paused).await.map_err(message)?;
             remote_paused = paused;
         }
         tokio::select! {
             changed = control.wait_for_change() => {
                 if matches!(changed, Err(TransferRunError::Canceled)) {
-                    let _ = channel.signal(Sig::KILL).await;
-                    let _ = channel.close().await;
+                    channel.kill().await;
                     return Err(TransferRunError::Canceled);
                 }
             }
-            message = tokio::time::timeout_at(deadline, channel.wait()) => {
-                match message {
-                    Ok(Some(ChannelMsg::Data { data })) => {
-                        append_output(&mut output.stdout, &data, &mut output.truncated, output_limit);
-                    }
-                    Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                        append_output(&mut output.stderr, &data, &mut output.truncated, COMMAND_OUTPUT_LIMIT);
-                    }
-                    Ok(Some(ChannelMsg::ExitStatus { exit_status })) => {
-                        output.exit_code = Some(exit_status as i32);
-                    }
-                    Ok(Some(ChannelMsg::ExitSignal { .. })) => output.exit_code = Some(128),
-                    Ok(Some(ChannelMsg::Close)) | Ok(None) => return Ok(output),
-                    Ok(_) => {}
+            result = tokio::time::timeout_at(deadline, channel.read_output(&mut output, output_limit, COMMAND_OUTPUT_LIMIT)) => {
+                match result {
+                    Ok(true) => return Ok(output),
+                    Ok(false) => {}
                     Err(_) => {
-                        let _ = channel.close().await;
+                        channel.close().await;
                         output.timed_out = true;
                         return Ok(output);
                     }
@@ -603,8 +571,7 @@ async fn run_remote_with_input(
             }
         }
         if output.truncated {
-            let _ = channel.signal(Sig::KILL).await;
-            let _ = channel.close().await;
+            channel.kill().await;
             return Ok(output);
         }
     }
@@ -851,14 +818,6 @@ fn remote_command_error(action: &str, output: &ExecOutput) -> TransferRunError {
         TransferErrorCode::IntegrityCheckFailed
     };
     TransferRunError::failed(code, format!("{action}: {reason}"))
-}
-
-fn append_output(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool, limit: usize) {
-    let remaining = limit.saturating_sub(target.len());
-    if remaining < data.len() {
-        *truncated = true;
-    }
-    target.extend_from_slice(&data[..data.len().min(remaining)]);
 }
 
 async fn close_sftp(session: &Arc<SftpSession>) {
