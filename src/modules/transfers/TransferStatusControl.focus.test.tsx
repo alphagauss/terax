@@ -18,7 +18,7 @@ vi.mock("@/modules/workspace", () => ({
   ) => select({ env: { kind: "ssh" } }),
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
 }));
 
 const completed: TransferTask = {
@@ -38,6 +38,7 @@ const completed: TransferTask = {
   unprocessedFiles: 0,
   totalRoots: 1,
   committedRoots: 1,
+  elapsedMs: null,
   speedBytesPerSecond: 0,
   currentFile: null,
   failure: null,

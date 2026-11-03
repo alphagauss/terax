@@ -140,6 +140,13 @@
       "paused": "Paused",
       "canceling": "Canceling…"
     },
+    "timing": {
+      "today": "Today",
+      "created": "{{date}} at {{time}}",
+      "elapsed": "{{duration}} elapsed",
+      "total": "Total {{duration}}",
+      "remaining": "~{{duration}} transfer left"
+    },
     "finishingTransfer": "Finishing transfer…",
     "verifyingAndExtracting": "Verifying and extracting…",
     "stage": {

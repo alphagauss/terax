@@ -36,6 +36,7 @@ function task(id: string, updatedAt: number): TransferTask {
     unprocessedFiles: 0,
     totalRoots: 1,
     committedRoots: 0,
+    elapsedMs: null,
     speedBytesPerSecond: 0,
     currentFile: null,
     failure: null,

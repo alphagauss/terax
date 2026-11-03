@@ -140,6 +140,13 @@
       "paused": "已暂停",
       "canceling": "正在取消…"
     },
+    "timing": {
+      "today": "今天",
+      "created": "{{date}} {{time}} 发起",
+      "elapsed": "已用 {{duration}}",
+      "total": "总耗时 {{duration}}",
+      "remaining": "传输约剩 {{duration}}"
+    },
     "finishingTransfer": "正在完成传输…",
     "verifyingAndExtracting": "正在校验并解包…",
     "stage": {

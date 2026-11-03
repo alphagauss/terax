@@ -112,7 +112,11 @@ vi.mock("@/modules/workspace", () => ({
 
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    i18n: { language: "en" },
+    t: (key: string, args?: { duration?: string }) =>
+      args?.duration ? `${key} ${args.duration}` : key,
+  }),
 }));
 
 vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
@@ -149,6 +153,7 @@ describe("transfer phase feedback", () => {
     unprocessedFiles: 0,
     totalRoots: 1,
     committedRoots: 0,
+    elapsedMs: null,
     speedBytesPerSecond: 10,
     currentFile: null,
     failure: null,
@@ -158,6 +163,69 @@ describe("transfer phase feedback", () => {
     createdAt: 1,
     updatedAt: 2,
   };
+
+  it("按近期传输速度定期估时，停滞保留估值，暂停恢复后重新采样", () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const row = (patch: Partial<TransferTask>) =>
+      createElement(TransferTaskRow, {
+        showTiming: true,
+        task: {
+          ...task,
+          transferredBytes: 0,
+          updatedAt: start,
+          elapsedMs: 0,
+          ...patch,
+        },
+      });
+    const view = render(row({}));
+    try {
+      expect(view.container.textContent).not.toContain(
+        "transfers.timing.remaining",
+      );
+      const slot = () =>
+        view.container.querySelector('[data-slot="transfer-estimate"]')
+          ?.textContent;
+      const elapsed = () =>
+        view.container.querySelector('[data-slot="transfer-elapsed"]')
+          ?.textContent;
+      act(() => view.root.render(row({ transferredBytes: 20 })));
+      act(() => vi.advanceTimersByTime(2000));
+      expect(slot()).toBe("");
+      act(() => vi.advanceTimersByTime(1000));
+      expect(slot()).toBe("transfers.timing.remaining 00:12");
+      act(() => vi.advanceTimersByTime(15_000));
+      expect(slot()).toBe("transfers.timing.remaining 00:12");
+      act(() => view.root.render(row({ transferredBytes: 50 })));
+      act(() => vi.advanceTimersByTime(3000));
+      expect(slot()).toBe("transfers.timing.remaining 00:25");
+      act(() => view.root.render(row({ status: "paused", elapsedMs: 5100 })));
+      expect(
+        view.container.querySelector('[data-slot="transfer-estimate"]')
+          ?.textContent,
+      ).toBe("transfers.status.paused");
+      act(() => vi.advanceTimersByTime(5000));
+      expect(elapsed()).toBe("transfers.timing.elapsed 00:05");
+      act(() => view.root.render(row({ transferredBytes: 50 })));
+      expect(slot()).toBe("");
+      act(() => view.root.render(row({ transferredBytes: 60 })));
+      act(() => vi.advanceTimersByTime(3000));
+      expect(slot()).toBe("transfers.timing.remaining 00:12");
+      act(() =>
+        view.root.render(row({ stage: "verifying", transferredBytes: 100 })),
+      );
+      expect(view.container.textContent).not.toContain(
+        "transfers.timing.remaining",
+      );
+      act(() =>
+        view.root.render(row({ status: "completed", elapsedMs: 7200 })),
+      );
+      expect(elapsed()).toBe("transfers.timing.total 00:07");
+    } finally {
+      act(() => view.root.unmount());
+      vi.useRealTimers();
+    }
+  });
 
   it("任务排队、失败和续传时保持创建顺序", () => {
     mocks.tasks = {
@@ -384,6 +452,7 @@ describe("Direct failure actions", () => {
       unprocessedFiles: 0,
       totalRoots: 1,
       committedRoots: 1,
+      elapsedMs: null,
       speedBytesPerSecond: 0,
       currentFile: null,
       failure: null,

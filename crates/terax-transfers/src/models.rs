@@ -311,6 +311,8 @@ pub struct TransferTaskSnapshot {
     pub file_failures: Vec<TransferFileFailure>,
     pub conflict: Option<TransferConflict>,
     pub is_directory: bool,
+    /// 最近一次快照时已累计的实际处理毫秒数。尚未开始时为空。
+    pub elapsed_ms: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
 }

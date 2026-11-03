@@ -146,6 +146,7 @@ export type TransferTask = {
   fileFailures: TransferFileFailure[];
   conflict: TransferConflict | null;
   isDirectory: boolean;
+  elapsedMs: number | null;
   createdAt: number;
   updatedAt: number;
 };

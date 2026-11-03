@@ -50,6 +50,7 @@ enum JournalRecord {
     CommittedProgress {
         committed_roots: u64,
         completed_files: u64,
+        elapsed_ms: Option<u64>,
         updated_at: u64,
     },
     CleanupTicket {
@@ -205,6 +206,7 @@ pub(crate) async fn append_committed_progress(
         &JournalRecord::CommittedProgress {
             committed_roots: snapshot.committed_roots,
             completed_files: snapshot.completed_files,
+            elapsed_ms: snapshot.elapsed_ms,
             updated_at: snapshot.updated_at,
         },
         "append committed transfer progress",
@@ -410,6 +412,7 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
             JournalRecord::CommittedProgress {
                 committed_roots,
                 completed_files,
+                elapsed_ms,
                 updated_at,
             } => {
                 let Some(current) = snapshot.as_mut() else {
@@ -417,6 +420,7 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
                 };
                 current.committed_roots = committed_roots;
                 current.completed_files = completed_files;
+                current.elapsed_ms = elapsed_ms;
                 current.updated_at = updated_at;
             }
             JournalRecord::CleanupTicket { ticket } => {
@@ -553,6 +557,7 @@ mod tests {
             conflict: None,
             is_directory: false,
             created_at: 1,
+            elapsed_ms: None,
             updated_at,
         }
     }
@@ -644,6 +649,7 @@ mod tests {
             &JournalRecord::CommittedProgress {
                 committed_roots: 1,
                 completed_files: 6,
+                elapsed_ms: Some(27),
                 updated_at: 3,
             },
         )
@@ -654,6 +660,7 @@ mod tests {
         assert_eq!(loaded.request.sources, vec!["file.txt"]);
         assert_eq!(loaded.snapshot.status, TransferStatus::Completed);
         assert_eq!(loaded.snapshot.updated_at, 3);
+        assert_eq!(loaded.snapshot.elapsed_ms, Some(27));
         assert!(loaded.snapshot.is_directory);
         assert_eq!(loaded.snapshot.total_files, 7);
         assert_eq!(loaded.snapshot.total_bytes, 42);

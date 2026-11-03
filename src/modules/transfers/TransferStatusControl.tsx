@@ -47,6 +47,10 @@ import {
   formatTransferFailure,
 } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
+import {
+  TransferCreatedAt,
+  TransferTiming,
+} from "@/modules/transfers/TransferTiming";
 import { formatBytes } from "@/modules/transfers/format";
 import { useTransferBridge, useTransferStore } from "@/modules/transfers/store";
 import {
@@ -61,11 +65,11 @@ import {
 export function TransferStatusControl() {
   const environmentKind = useWorkspaceEnvStore((state) => state.env.kind);
   if (environmentKind === "local") return null;
-  return <TransferStatusPanel />;
+  return <TransferStatusPanel showTiming={environmentKind === "ssh"} />;
 }
 
 /** 挂载传输事件桥、任务列表与全局冲突对话框。 */
-function TransferStatusPanel() {
+function TransferStatusPanel({ showTiming }: { showTiming: boolean }) {
   const { t } = useTranslation("statusbar");
   const taskMap = useTransferStore((state) => state.tasks);
   const removeLocalMany = useTransferStore((state) => state.removeLocalMany);
@@ -252,7 +256,11 @@ function TransferStatusPanel() {
           <ScrollArea className="max-h-[380px]">
             <div className="divide-y divide-border/50">
               {tasks.map((task) => (
-                <TransferTaskRow key={task.id} task={task} />
+                <TransferTaskRow
+                  key={task.id}
+                  task={task}
+                  showTiming={showTiming}
+                />
               ))}
             </div>
           </ScrollArea>
@@ -297,7 +305,13 @@ function TransferStatusPanel() {
 }
 
 /** 展示一条聚合任务，并仅为 Direct 文件夹展开失败文件。 */
-export function TransferTaskRow({ task }: { task: TransferTask }) {
+export function TransferTaskRow({
+  task,
+  showTiming = false,
+}: {
+  task: TransferTask;
+  showTiming?: boolean;
+}) {
   const { t } = useTranslation("statusbar");
   const removeLocal = useTransferStore((state) => state.removeLocal);
   const [failuresOpen, setFailuresOpen] = useState(false);
@@ -386,16 +400,43 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
                 · {t(`transfers.strategy.${task.strategy}`)}
               </span>
             </span>
-            {!phaseOnly ? (
+            {!phaseOnly || showTiming ? (
               <span
                 className={cn(
-                  "shrink-0 text-[10px] text-muted-foreground",
+                  "shrink-0 text-right text-[10px] text-muted-foreground",
+                  showTiming &&
+                    "inline-flex items-center gap-1 whitespace-nowrap",
                   (task.status === "failed" ||
                     task.status === "completed_with_errors") &&
                     "text-destructive",
                 )}
               >
-                {taskStateLabel(task, t)}
+                {(!showTiming || task.status !== "paused") && (
+                  <span
+                    role={phaseOnly ? "status" : undefined}
+                    className={
+                      showTiming && task.status === "running" && byteProgress
+                        ? "sr-only"
+                        : "inline-flex items-center gap-1 align-middle"
+                    }
+                  >
+                    {phaseOnly &&
+                      (task.status === "running" ||
+                        task.status === "canceling") && (
+                        <Spinner
+                          className="size-3 motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
+                      )}
+                    {taskStateLabel(task, t)}
+                  </span>
+                )}
+                {showTiming && (
+                  <TransferTiming
+                    key={`${task.status}-${task.stage}`}
+                    task={task}
+                  />
+                )}
               </span>
             ) : null}
           </div>
@@ -495,7 +536,7 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}
           <div className="mt-1.5 flex min-h-5 items-center justify-between gap-2">
-            {phaseOnly ? (
+            {phaseOnly && !showTiming ? (
               <span
                 role="status"
                 className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
@@ -515,18 +556,21 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
                     ? t("transfers.failureDetail", { error: failureMessage })
                     : task.totalBytes > 0
                       ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
-                      : t("transfers.filesProgress", {
-                          completed: task.completedFiles,
-                          total: task.totalFiles,
-                          count: task.totalFiles,
-                        })}
+                      : showTiming && phaseOnly && task.totalFiles === 0
+                        ? null
+                        : t("transfers.filesProgress", {
+                            completed: task.completedFiles,
+                            total: task.totalFiles,
+                            count: task.totalFiles,
+                          })}
                   {active && byteProgress && task.speedBytesPerSecond > 0
                     ? ` · ${formatBytes(task.speedBytesPerSecond)}/s`
                     : ""}
                 </div>
               </Hint>
             )}
-            <div className="flex shrink-0 items-center gap-0.5">
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              {showTiming && <TransferCreatedAt createdAt={task.createdAt} />}
               {task.status === "paused" ? (
                 <TaskButton
                   label={t("transfers.resume")}

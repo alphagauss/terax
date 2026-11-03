@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use super::TransferHost;
 use serde::Serialize;
@@ -350,11 +350,28 @@ pub struct TransferManager {
 }
 
 struct ManagedTask {
+    active_segment: Option<(Instant, u64)>,
     resume: Option<super::resume::ResumeState>,
     snapshot: TransferTaskSnapshot,
     request: EnqueueTransferRequest,
     journal_path: PathBuf,
     control: Option<Arc<TaskControl>>,
+}
+
+impl ManagedTask {
+    /// 在写锁内按单调时钟累计运行区间。基准固定到区间结束，避免频繁快照丢失毫秒尾数。
+    fn sample_elapsed(&mut self, now: Instant) {
+        if self.snapshot.status == TransferStatus::Running && self.active_segment.is_none() {
+            self.active_segment = Some((now, self.snapshot.elapsed_ms.unwrap_or(0)));
+        }
+        if let Some((start, previous)) = self.active_segment {
+            self.snapshot.elapsed_ms =
+                Some(previous + now.duration_since(start).as_millis() as u64);
+            if self.snapshot.status != TransferStatus::Running {
+                self.active_segment = None;
+            }
+        }
+    }
 }
 
 impl TransferManager {
@@ -512,6 +529,7 @@ impl TransferManager {
             file_failures: Vec::new(),
             conflict: None,
             is_directory: false,
+            elapsed_ms: None,
             created_at: now,
             updated_at: now,
         };
@@ -526,6 +544,7 @@ impl TransferManager {
             tasks.insert(
                 id.clone(),
                 ManagedTask {
+                    active_segment: None,
                     resume: None,
                     snapshot: snapshot.clone(),
                     request: request.clone(),
@@ -1470,6 +1489,7 @@ impl TransferManager {
             let mut tasks = self.tasks.write().await;
             let task = tasks.get_mut(id).ok_or_else(|| task_not_found(id))?;
             mutate(&mut task.snapshot);
+            task.sample_elapsed(Instant::now());
             task.snapshot.updated_at = next_updated_at(task.snapshot.updated_at);
             task.snapshot.clone()
         };
@@ -1548,6 +1568,7 @@ impl TransferManager {
             tasks
                 .entry(task.snapshot.id.clone())
                 .or_insert(ManagedTask {
+                    active_segment: None,
                     resume: task.resume,
                     snapshot: task.snapshot,
                     request: task.request,
@@ -1902,8 +1923,29 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn elapsed_counts_only_running_intervals() {
+        let mut task = managed_task("clock", TransferStatus::Queued, 0);
+        let start = Instant::now();
+        for (seconds, status, expected) in [
+            (8, TransferStatus::Queued, None),
+            (10, TransferStatus::Running, Some(0)),
+            (12, TransferStatus::Paused, Some(2000)),
+            (30, TransferStatus::Running, Some(2000)),
+            (31, TransferStatus::AwaitingDecision, Some(3000)),
+            (90, TransferStatus::Running, Some(3000)),
+            (92, TransferStatus::Completed, Some(5000)),
+            (100, TransferStatus::Completed, Some(5000)),
+        ] {
+            task.snapshot.status = status;
+            task.sample_elapsed(start + std::time::Duration::from_secs(seconds));
+            assert_eq!(task.snapshot.elapsed_ms, expected);
+        }
+    }
+
     fn managed_task(id: &str, status: TransferStatus, created_at: u64) -> ManagedTask {
         ManagedTask {
+            active_segment: None,
             resume: None,
             snapshot: TransferTaskSnapshot {
                 id: id.into(),
@@ -1928,6 +1970,7 @@ mod tests {
                 file_failures: Vec::new(),
                 conflict: None,
                 is_directory: false,
+                elapsed_ms: None,
                 created_at,
                 updated_at: created_at,
             },
