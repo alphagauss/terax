@@ -71,7 +71,7 @@ rustls-platform-verifier = { version = "0.6", optional = true }
 libc = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.9"
+core-foundation = "0.10"
 system-configuration = "0.7"
 keyring = { workspace = true, default-features = false, features = ["apple-native"] }
 
