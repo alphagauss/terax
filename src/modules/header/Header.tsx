@@ -3,14 +3,16 @@
  * Agent 通知导航直接使用 Workbench 标签 ID。
  */
 
-import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
-import { WindowControls } from "@/components/WindowControls";
+import { Hint } from "@/components/controls/tooltip";
 import { ErrorHistoryButton } from "@/components/errors/ErrorHistoryButton";
+import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { WINDOW_DRAG_REGION } from "@/lib/windowChrome";
 import { NotificationBell } from "@/modules/agents";
+import { useRemoteStore } from "@/modules/remote";
 import { useTheme } from "@/modules/theme";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import CommandIcon from "@hugeicons/core-free-icons/CommandIcon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
@@ -31,6 +33,36 @@ type Props = {
   secondarySidebarOpen?: boolean;
   spaceSwitcher: ReactNode;
 };
+
+function WindowEnvironmentLabel() {
+  const { t } = useTranslation("statusbar");
+  const env = useWorkspaceEnvStore((state) => state.env);
+  const profileName = useRemoteStore((state) =>
+    env.kind === "ssh"
+      ? state.profiles.find((profile) => profile.id === env.profileId)?.name
+      : undefined,
+  );
+
+  return (
+    <span
+      {...WINDOW_DRAG_REGION}
+      className="flex min-w-0 items-center gap-1.5 self-stretch text-xs text-muted-foreground"
+    >
+      {env.kind === "local" ? (
+        t("workspace.local")
+      ) : (
+        <>
+          <span {...WINDOW_DRAG_REGION} className="shrink-0">
+            {env.kind === "ssh" ? "SSH" : "WSL"}
+          </span>
+          <span {...WINDOW_DRAG_REGION} className="truncate text-foreground">
+            {env.kind === "ssh" ? (profileName ?? env.profileId) : env.distro}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
 
 /** 渲染应用标题栏并连接全局导航与窗口操作。 */
 export function Header({
@@ -139,10 +171,11 @@ export function Header({
       {IS_MAC && <span className="mr-1 h-full w-px shrink-0 bg-border/70" />}
 
       <div
-        className="flex min-w-0 flex-1 items-center gap-2"
+        className="flex min-w-0 flex-1 items-center gap-2 self-stretch"
         {...WINDOW_DRAG_REGION}
       >
         {spaceSwitcher}
+        <WindowEnvironmentLabel />
         <div {...WINDOW_DRAG_REGION} className="h-full min-w-2 flex-1" />
       </div>
 
