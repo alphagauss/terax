@@ -72,7 +72,7 @@ libc = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9"
-system-configuration = "0.7"
+system-configuration = "0.8"
 keyring = { workspace = true, default-features = false, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
