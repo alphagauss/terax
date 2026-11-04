@@ -285,7 +285,7 @@ function BranchDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="flex min-w-0 max-w-(--radix-dropdown-menu-content-available-width) flex-col overflow-hidden"
+        className="no-scrollbar flex min-w-0 max-w-(--radix-dropdown-menu-content-available-width) flex-col overflow-x-hidden overflow-y-auto"
         style={{
           width: Math.min(
             360,
@@ -306,7 +306,12 @@ function BranchDropdown({
         ) : (
           <>
             {localBranches.length > 0 && (
-              <div className="flex min-h-0 flex-col">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-col",
+                  localBranches.length === 1 && "shrink-0",
+                )}
+              >
                 <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.localBranches")}
                 </DropdownMenuLabel>
@@ -335,7 +340,12 @@ function BranchDropdown({
               </div>
             )}
             {remoteBranches.length > 0 && (
-              <div className="flex min-h-0 flex-col">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-col",
+                  remoteBranches.length === 1 && "shrink-0",
+                )}
+              >
                 {localBranches.length > 0 && <DropdownMenuSeparator />}
                 <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.remoteBranches")}
@@ -361,7 +371,12 @@ function BranchDropdown({
               </div>
             )}
             {tags.length > 0 && (
-              <div className="flex min-h-0 flex-col">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-col",
+                  tags.length === 1 && "shrink-0",
+                )}
+              >
                 {(localBranches.length > 0 || remoteBranches.length > 0) && (
                   <DropdownMenuSeparator />
                 )}
@@ -391,7 +406,12 @@ function BranchDropdown({
               </div>
             )}
             {worktrees.length > 0 && (
-              <div className="flex min-h-0 flex-col">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-col",
+                  worktrees.length === 1 && "shrink-0",
+                )}
+              >
                 {(localBranches.length > 0 ||
                   remoteBranches.length > 0 ||
                   tags.length > 0) && <DropdownMenuSeparator />}
