@@ -162,6 +162,7 @@ function BranchDropdown({
   const [checkingOut, setCheckingOut] = useState(false);
   const [panelSize, setPanelSize] = useState({ width: 280, height: 800 });
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef(0);
   const checkoutInFlight = useRef(false);
 
@@ -209,6 +210,37 @@ function BranchDropdown({
     }
   }, [open, loadBranches]);
 
+  useLayoutEffect(() => {
+    if (!open || loading || branches.length === 0) return;
+    const sections = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>(
+        "[data-branch-group]",
+      ) ?? [],
+    );
+    // 按真实标题和首行尺寸保留最低高度，工作树的路径行也必须完整可见。
+    const updateMinimums = () => {
+      for (const section of sections) {
+        const label = section.querySelector<HTMLElement>(
+          '[data-slot="dropdown-menu-label"]',
+        );
+        const firstRow =
+          section.querySelector<HTMLElement>('[role="menuitem"]');
+        if (!label || !firstRow) continue;
+        // 布局尺寸不受入场缩放影响，额外 1px 覆盖两次整数取整的误差。
+        section.style.minHeight = `${label.offsetHeight + firstRow.offsetHeight + 1}px`;
+      }
+    };
+    updateMinimums();
+    const observer = new ResizeObserver(updateMinimums);
+    for (const section of sections) {
+      const label = section.firstElementChild;
+      const firstRow = section.lastElementChild?.firstElementChild;
+      if (label) observer.observe(label);
+      if (firstRow) observer.observe(firstRow);
+    }
+    return () => observer.disconnect();
+  }, [open, loading, branches]);
+
   const handleCheckout = useCallback(
     async (branch: GitBranchEntry, trackRemote = false) => {
       if (!repoRoot || checkoutInFlight.current) return;
@@ -249,6 +281,7 @@ function BranchDropdown({
     () => branches.filter((b) => b.kind === "tag"),
     [branches],
   );
+  const popoverMaxHeight = `min(${Math.floor(panelSize.height * 0.8)}px, var(--radix-dropdown-menu-content-available-height))`;
 
   const checkoutTarget = useCallback(
     (branch: GitBranchEntry) => {
@@ -284,6 +317,7 @@ function BranchDropdown({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        ref={contentRef}
         align="start"
         className="no-scrollbar flex min-w-0 max-w-(--radix-dropdown-menu-content-available-width) flex-col overflow-x-hidden overflow-y-auto"
         style={{
@@ -291,7 +325,7 @@ function BranchDropdown({
             360,
             Math.max(240, Math.floor(panelSize.width * 0.9)),
           ),
-          maxHeight: `min(${Math.min(640, Math.floor(panelSize.height * 0.7))}px, var(--radix-dropdown-menu-content-available-height))`,
+          maxHeight: popoverMaxHeight,
         }}
       >
         {loading ? (
@@ -305,17 +339,17 @@ function BranchDropdown({
           </div>
         ) : (
           <>
+            {/* 同一高度基准配合内容高度封顶，让短列表的余量由长列表均分。 */}
             {localBranches.length > 0 && (
               <div
-                className={cn(
-                  "flex min-h-0 flex-col",
-                  localBranches.length === 1 && "shrink-0",
-                )}
+                data-branch-group
+                className="flex min-h-0 max-h-fit flex-col"
+                style={{ flexBasis: popoverMaxHeight }}
               >
                 <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.localBranches")}
                 </DropdownMenuLabel>
-                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
+                <DropdownMenuGroup className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain">
                   {localBranches.map((b) => (
                     <DropdownMenuItem
                       key={b.name}
@@ -340,114 +374,123 @@ function BranchDropdown({
               </div>
             )}
             {remoteBranches.length > 0 && (
-              <div
-                className={cn(
-                  "flex min-h-0 flex-col",
-                  remoteBranches.length === 1 && "shrink-0",
+              <>
+                {localBranches.length > 0 && (
+                  <DropdownMenuSeparator className="shrink-0 bg-border" />
                 )}
-              >
-                {localBranches.length > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  {t("branch.remoteBranches")}
-                </DropdownMenuLabel>
-                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
-                  {remoteBranches.map((b) => (
-                    <DropdownMenuItem
-                      key={b.name}
-                      onSelect={() => checkoutTarget(b)}
-                      className="flex cursor-pointer items-center gap-2 text-[12px]"
-                    >
-                      <HugeiconsIcon
-                        icon={FolderCloudIcon}
-                        size={14}
-                        strokeWidth={1.5}
-                        className="shrink-0 text-muted-foreground"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                      <BranchTimestamp timestampSecs={b.timestampSecs} />
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </div>
+                <div
+                  data-branch-group
+                  className="flex min-h-0 max-h-fit flex-col"
+                  style={{ flexBasis: popoverMaxHeight }}
+                >
+                  <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {t("branch.remoteBranches")}
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain">
+                    {remoteBranches.map((b) => (
+                      <DropdownMenuItem
+                        key={b.name}
+                        onSelect={() => checkoutTarget(b)}
+                        className="flex cursor-pointer items-center gap-2 text-[12px]"
+                      >
+                        <HugeiconsIcon
+                          icon={FolderCloudIcon}
+                          size={14}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {b.name}
+                        </span>
+                        <BranchTimestamp timestampSecs={b.timestampSecs} />
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </div>
+              </>
             )}
             {tags.length > 0 && (
-              <div
-                className={cn(
-                  "flex min-h-0 flex-col",
-                  tags.length === 1 && "shrink-0",
-                )}
-              >
+              <>
                 {(localBranches.length > 0 || remoteBranches.length > 0) && (
-                  <DropdownMenuSeparator />
+                  <DropdownMenuSeparator className="shrink-0 bg-border" />
                 )}
-                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  {t("branch.tags")}
-                </DropdownMenuLabel>
-                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
-                  {tags.map((tag) => (
-                    <DropdownMenuItem
-                      key={tag.name}
-                      onSelect={() => checkoutTarget(tag)}
-                      className="flex cursor-pointer items-center gap-2 text-[12px]"
-                    >
-                      <HugeiconsIcon
-                        icon={Tag01Icon}
-                        size={14}
-                        strokeWidth={1.5}
-                        className="shrink-0 text-muted-foreground"
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {tag.name}
-                      </span>
-                      <BranchTimestamp timestampSecs={tag.timestampSecs} />
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </div>
+                <div
+                  data-branch-group
+                  className="flex min-h-0 max-h-fit flex-col"
+                  style={{ flexBasis: popoverMaxHeight }}
+                >
+                  <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {t("branch.tags")}
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain">
+                    {tags.map((tag) => (
+                      <DropdownMenuItem
+                        key={tag.name}
+                        onSelect={() => checkoutTarget(tag)}
+                        className="flex cursor-pointer items-center gap-2 text-[12px]"
+                      >
+                        <HugeiconsIcon
+                          icon={Tag01Icon}
+                          size={14}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {tag.name}
+                        </span>
+                        <BranchTimestamp timestampSecs={tag.timestampSecs} />
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </div>
+              </>
             )}
             {worktrees.length > 0 && (
-              <div
-                className={cn(
-                  "flex min-h-0 flex-col",
-                  worktrees.length === 1 && "shrink-0",
-                )}
-              >
+              <>
                 {(localBranches.length > 0 ||
                   remoteBranches.length > 0 ||
-                  tags.length > 0) && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  {t("branch.worktrees")}
-                </DropdownMenuLabel>
-                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
-                  {worktrees.map((b) => (
-                    <DropdownMenuItem
-                      key={b.worktreePath ?? b.name}
-                      onSelect={() => {
-                        if (b.worktreePath && onNavigateToPath) {
-                          onNavigateToPath(b.worktreePath);
-                        }
-                      }}
-                      className="flex cursor-pointer items-center gap-2 text-[12px]"
-                    >
-                      <HugeiconsIcon
-                        icon={Folder01Icon}
-                        size={14}
-                        strokeWidth={1.5}
-                        className="shrink-0 text-muted-foreground"
-                      />
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate">{b.name}</span>
-                        {b.worktreePath && (
-                          <span className="truncate text-[10px] text-muted-foreground">
-                            {b.worktreePath}
-                          </span>
-                        )}
-                      </div>
-                      <BranchTimestamp timestampSecs={b.timestampSecs} />
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </div>
+                  tags.length > 0) && (
+                  <DropdownMenuSeparator className="shrink-0 bg-border" />
+                )}
+                <div
+                  data-branch-group
+                  className="flex min-h-0 max-h-fit flex-col"
+                  style={{ flexBasis: popoverMaxHeight }}
+                >
+                  <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {t("branch.worktrees")}
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain">
+                    {worktrees.map((b) => (
+                      <DropdownMenuItem
+                        key={b.worktreePath ?? b.name}
+                        onSelect={() => {
+                          if (b.worktreePath && onNavigateToPath) {
+                            onNavigateToPath(b.worktreePath);
+                          }
+                        }}
+                        className="flex cursor-pointer items-center gap-2 text-[12px]"
+                      >
+                        <HugeiconsIcon
+                          icon={Folder01Icon}
+                          size={14}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate">{b.name}</span>
+                          {b.worktreePath && (
+                            <span className="truncate text-[10px] text-muted-foreground">
+                              {b.worktreePath}
+                            </span>
+                          )}
+                        </div>
+                        <BranchTimestamp timestampSecs={b.timestampSecs} />
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </div>
+              </>
             )}
             {branches.length === 0 && (
               <div className="px-3 py-3 text-[11px] text-muted-foreground">

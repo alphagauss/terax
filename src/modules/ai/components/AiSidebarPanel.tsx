@@ -545,7 +545,7 @@ function SessionPicker() {
     360,
     Math.max(240, Math.floor(panelSize.width * 0.9)),
   );
-  const popoverMaxHeight = Math.min(640, Math.floor(panelSize.height * 0.7));
+  const popoverMaxHeight = Math.floor(panelSize.height * 0.7);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);

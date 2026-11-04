@@ -54,6 +54,21 @@ vi.mock("@/modules/explorer/lib/iconResolver", () => ({
 
 it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航到对应目录", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const originalHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetHeight",
+  )?.get;
+  const measurements = vi
+    .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.matches('[data-slot="dropdown-menu-label"]')) {
+        return 36;
+      }
+      if (this.matches('[role="menuitem"]')) {
+        return this.textContent?.includes("/repo-feature") ? 48 : 32;
+      }
+      return originalHeight?.call(this) ?? 0;
+    });
   const branches: GitBranchEntry[] = [
     { name: "main", kind: "local", isHead: true },
     { name: "origin/main", kind: "remote", isHead: false },
@@ -137,6 +152,9 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
       '[data-slot="dropdown-menu-group"]',
     );
     expect(groups).toHaveLength(4);
+    // happy-dom 的视觉矩形高度为零，仍须按布局高度容纳首行及工作树路径。
+    expect(groups?.[0].parentElement?.style.minHeight).toBe("69px");
+    expect(groups?.[3].parentElement?.style.minHeight).toBe("85px");
     const tag = groups?.[2].querySelector<HTMLElement>('[role="menuitem"]');
     expect(tag?.textContent).toBe("main");
     await act(async () => tag?.click());
@@ -176,6 +194,7 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
     container.remove();
     io.checkoutBranch.mockClear();
     io.checkoutTag.mockClear();
+    measurements.mockRestore();
     vi.unstubAllGlobals();
   }
 });
