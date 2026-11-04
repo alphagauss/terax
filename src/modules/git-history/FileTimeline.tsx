@@ -91,25 +91,6 @@ export function FileTimeline({
 
   const selectedCommit =
     commits.find((commit) => commit.sha === graph.anchor?.sha) ?? null;
-  const selectedFiles = selectedCommit
-    ? graph.files.get(selectedCommit.sha)
-    : undefined;
-  // 文件历史首屏不加载全提交统计，悬停后复用详情缓存中的真实文件统计。
-  const detailCommit =
-    selectedCommit && selectedFiles?.state === "loaded"
-      ? {
-          ...selectedCommit,
-          filesChanged: selectedFiles.files.length,
-          insertions: selectedFiles.files.reduce(
-            (total, file) => total + file.added,
-            0,
-          ),
-          deletions: selectedFiles.files.reduce(
-            (total, file) => total + file.removed,
-            0,
-          ),
-        }
-      : selectedCommit;
 
   if (!present) return null;
   const emptyMessage = !repoRoot
@@ -211,7 +192,7 @@ export function FileTimeline({
       {repoRoot ? (
         <CommitHistoryHoverCard
           repoRoot={repoRoot}
-          commit={detailCommit}
+          commit={selectedCommit}
           graph={graph}
           onOpenFile={(file) => {
             if (selectedCommit)

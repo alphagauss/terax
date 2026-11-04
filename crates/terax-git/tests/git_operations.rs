@@ -1101,7 +1101,7 @@ fn commit_files_reports_files_from_the_root_commit() {
 }
 
 #[test]
-fn commit_files_reports_a_merge_relative_to_its_first_parent() {
+fn merge_files_and_diff_share_the_first_parent_baseline() {
     if skip_if_no_git() {
         return;
     }
@@ -1111,8 +1111,9 @@ fn commit_files_reports_a_merge_relative_to_its_first_parent() {
     fx.run_git(&["commit", "-q", "-m", "base"]);
 
     fx.run_git(&["checkout", "-q", "-b", "feature"]);
+    fx.write_file("base.txt", "updated\nextra\n");
     fx.write_file("feature.txt", "feature\n");
-    fx.run_git(&["add", "feature.txt"]);
+    fx.run_git(&["add", "base.txt", "feature.txt"]);
     fx.run_git(&["commit", "-q", "-m", "feature"]);
 
     fx.run_git(&["checkout", "-q", "main"]);
@@ -1121,16 +1122,71 @@ fn commit_files_reports_a_merge_relative_to_its_first_parent() {
     fx.run_git(&["commit", "-q", "-m", "main"]);
     fx.run_git(&["merge", "-q", "--no-ff", "feature", "-m", "merge"]);
 
-    let merge = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
-        .sha
-        .clone();
-    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge, &fx.workspace)
+    let history = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap();
+    let merge = &history[0];
+    assert_eq!(merge.parents.len(), 2);
+    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge.sha, &fx.workspace)
         .expect("merge commit files");
 
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0].path, "feature.txt");
-    assert_eq!(files[0].status, "A");
-    assert_eq!((files[0].added, files[0].removed), (1, 0));
+    assert_eq!(files.len(), 2);
+    assert_eq!(files.iter().map(|file| file.added).sum::<u32>(), 3);
+    assert_eq!(files.iter().map(|file| file.removed).sum::<u32>(), 1);
+    assert!(files.iter().all(|file| file.path != "main.txt"));
+    let feature = files
+        .iter()
+        .find(|file| file.path == "feature.txt")
+        .unwrap();
+    assert_eq!(feature.status, "A");
+    assert_eq!((feature.added, feature.removed), (1, 0));
+    let diff = operations::commit_file_diff(
+        &fx.registry,
+        &fx.repo_str(),
+        &merge.sha,
+        "base.txt",
+        None,
+        &fx.workspace,
+    )
+    .expect("merge file diff");
+    assert_eq!(diff.original_content, "base\n");
+    assert_eq!(diff.modified_content, "updated\nextra\n");
+}
+
+#[test]
+fn merge_with_unchanged_first_parent_tree_reports_no_changes() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("base.txt", "base\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "base"]);
+    fx.run_git(&["checkout", "-q", "-b", "feature"]);
+    fx.write_file("feature.txt", "feature\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "feature"]);
+    fx.run_git(&["checkout", "-q", "main"]);
+    fx.run_git(&[
+        "merge", "-q", "--no-ff", "-s", "ours", "feature", "-m", "merge",
+    ]);
+
+    let history = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
+    let merge = &history[0];
+    assert_eq!(merge.parents.len(), 2);
+    assert_eq!(
+        (merge.files_changed, merge.insertions, merge.deletions),
+        (0, 0, 0)
+    );
+    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge.sha, &fx.workspace)
+        .expect("unchanged merge files");
+    assert!(files.is_empty());
+    let feature = history
+        .iter()
+        .find(|entry| entry.subject == "feature")
+        .unwrap();
+    assert_eq!(
+        (feature.files_changed, feature.insertions, feature.deletions),
+        (1, 1, 0)
+    );
 }
 
 #[test]

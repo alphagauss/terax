@@ -70,6 +70,18 @@ export function CommitDetail({
 }: Props) {
   const { t, i18n } = useTranslation("gitHistory");
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
+  // 汇总与文件列表共用已加载的数据，避免缺失的日志统计被误认为零变更。
+  const stats =
+    filesEntry?.state === "loaded"
+      ? filesEntry.files.reduce(
+          (total, file) => ({
+            filesChanged: total.filesChanged + 1,
+            insertions: total.insertions + file.added,
+            deletions: total.deletions + file.removed,
+          }),
+          { filesChanged: 0, insertions: 0, deletions: 0 },
+        )
+      : null;
   const body =
     filesEntry?.state === "loaded"
       ? commitBody(commit, filesEntry.message)
@@ -163,19 +175,24 @@ export function CommitDetail({
             </Button>
           ) : null}
         </div>
-        <div className="mt-2 border-t border-border/40 pt-2 text-[10.5px] tabular-nums text-muted-foreground">
-          {t("filesChanged", { count: commit.filesChanged })}
-          {commit.insertions > 0 ? (
-            <span className="ml-1.5 font-semibold text-success">
-              {t("insertions", { count: commit.insertions })}
-            </span>
-          ) : null}
-          {commit.deletions > 0 ? (
-            <span className="ml-1.5 font-semibold text-destructive">
-              {t("deletions", { count: commit.deletions })}
-            </span>
-          ) : null}
-        </div>
+        {stats ? (
+          <div className="mt-2 border-t border-border/40 pt-2 text-[10.5px] tabular-nums text-muted-foreground">
+            {t("filesChanged", { count: stats.filesChanged })}
+            {stats.insertions > 0 ? (
+              <span className="ml-1.5 font-semibold text-success">
+                {t("insertions", { count: stats.insertions })}
+              </span>
+            ) : null}
+            {stats.deletions > 0 ? (
+              <span className="ml-1.5 font-semibold text-destructive">
+                {t("deletions", { count: stats.deletions })}
+              </span>
+            ) : null}
+            {commit.parents.length > 1 ? (
+              <div className="mt-1">{t("relativeToFirstParent")}</div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">

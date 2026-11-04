@@ -8,6 +8,7 @@
   "unknownAuthor": "Unknown",
   "filesChanged_one": "{{count}} file changed",
   "filesChanged_other": "{{count}} files changed",
+  "relativeToFirstParent": "Relative to the first parent",
   "copySha": "Copy SHA",
   "loadingFiles": "Loading files…",
   "noFileChanges": "No file changes.",

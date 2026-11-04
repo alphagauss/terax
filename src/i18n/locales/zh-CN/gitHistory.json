@@ -8,6 +8,7 @@
   "unknownAuthor": "未知",
   "filesChanged_one": "变更了 {{count}} 个文件",
   "filesChanged_other": "变更了 {{count}} 个文件",
+  "relativeToFirstParent": "相对于第一父提交",
   "copySha": "复制 SHA",
   "loadingFiles": "正在加载文件…",
   "noFileChanges": "没有文件变更。",
