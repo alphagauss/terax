@@ -85,7 +85,6 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
     behind: 0,
     hasRepo: true,
     isLoading: false,
-    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,
@@ -242,9 +241,10 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
     await act(async () => button?.click());
     expect(emptyTitle()).toBe(title);
     expect(icon?.classList.contains("animate-spin")).toBe(true);
+    expect(button?.disabled).toBe(true);
     await act(async () => complete(empty));
-    await act(async () => vi.advanceTimersByTimeAsync(450));
     expect(icon?.classList.contains("animate-spin")).toBe(false);
+    expect(button?.disabled).toBe(false);
 
     await act(async () => vi.advanceTimersByTimeAsync(3_000));
     await act(async () =>
@@ -333,10 +333,7 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
     const original = graph();
     expect(original).not.toBeNull();
     const input = container.querySelector("textarea");
-    const progress = () =>
-      container.querySelector(
-        '[role="progressbar"][aria-label="panel.refreshingChanges"]',
-      );
+    const progress = () => container.querySelector('[role="progressbar"]');
     let finish!: (snapshot: GitPanelSnapshot) => void;
     io.snapshot.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -347,14 +344,12 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
     await act(async () => {
       refresh = controller.refresh();
     });
-    expect(controller.isRefreshing).toBe(true);
     expect(graph()).toBe(original);
     expect(container.querySelector("textarea")).toBe(input);
     expect(progress()).toBeNull();
-    await act(async () => vi.advanceTimersByTimeAsync(299));
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
     expect(progress()).toBeNull();
-    await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(progress()).not.toBeNull();
+    expect(container.textContent).not.toContain("panel.loadingChanges");
     expect(container.querySelector("textarea")).toBe(input);
     await act(async () => root.render(<View path="/repo/second" />));
     expect(graph()).toBeNull();
@@ -447,7 +442,6 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     behind: 0,
     hasRepo: true,
     isLoading: false,
-    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,

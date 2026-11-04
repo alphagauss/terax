@@ -57,8 +57,6 @@ export type RepositoryController = {
   hasRepo: boolean;
   /** 当前上下文尚未完成首次检测；已有结果的后台复查不进入加载态。 */
   isLoading: boolean;
-  /** 同一上下文已有仓库内容的刷新，不替换为首次加载占位。 */
-  isRefreshing: boolean;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
@@ -140,7 +138,6 @@ export function useRepositoryController(
   const enabled = useViewActive(requestedEnabled && epoch !== null);
   const epochRef = useRef(epoch);
   epochRef.current = epoch;
-  const [refreshing, setRefreshing] = useState(false);
   const [state, setState] = useState<RepositoryControllerState>({
     contextPath: null,
     repo: null,
@@ -250,10 +247,6 @@ export function useRepositoryController(
     }
 
     try {
-      setRefreshing(
-        stateRef.current.repo !== null &&
-          stateRef.current.contextPath === requestedContext,
-      );
       const cacheKey = `${requestedWorkspace}\0${requestedContext}`;
       const snapshot = await readViewResource(
         `git-snapshot:${cacheKey}:${requestedEpoch}:${includeGraph}`,
@@ -368,7 +361,6 @@ export function useRepositoryController(
         };
       });
     } finally {
-      if (mountedRef.current) setRefreshing(false);
       if (isCurrentRequest()) {
         lastDurationRef.current = Date.now() - startedAt;
         lastRefreshAtRef.current = Date.now();
@@ -635,8 +627,6 @@ export function useRepositoryController(
       hasRepo: repo !== null,
       isLoading:
         enabled && !!contextPath && current?.contextPath !== contextPath,
-      isRefreshing:
-        refreshing && repo !== null && state.contextPath === contextPath,
       localError: contextPath ? (current?.localError ?? null) : null,
       busyAction: current?.busyAction ?? null,
       lastRemoteError: current?.lastRemoteError ?? null,
@@ -646,13 +636,5 @@ export function useRepositoryController(
       refresh,
       runRemoteAction,
     };
-  }, [
-    state,
-    refreshing,
-    enabled,
-    contextPath,
-    workspaceKey,
-    refresh,
-    runRemoteAction,
-  ]);
+  }, [state, enabled, contextPath, workspaceKey, refresh, runRemoteAction]);
 }

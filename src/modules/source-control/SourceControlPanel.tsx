@@ -63,7 +63,6 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
 import { GraphSection } from "@/modules/source-control/GraphSection";
 import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
-import { SourceControlRefreshProgress } from "@/modules/source-control/SourceControlRefreshProgress";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
@@ -394,7 +393,6 @@ function SourceControlViewContainerComponent({
 }: Props) {
   const { t } = useTranslation("sourceControl");
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
-  const refreshAnimationRef = useRef<number | null>(null);
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -442,14 +440,6 @@ function SourceControlViewContainerComponent({
     (state) => state.sourceControlShowUndoCommit,
   );
   const refreshSourceControl = scm.refresh;
-
-  useEffect(() => {
-    return () => {
-      if (refreshAnimationRef.current) {
-        window.clearTimeout(refreshAnimationRef.current);
-      }
-    };
-  }, []);
 
   const isRefreshing = scm.panelState === "loading";
   const graphRepoRoot = scm.repo?.repoRoot ?? null;
@@ -532,14 +522,8 @@ function SourceControlViewContainerComponent({
 
   const handleRefresh = useCallback(() => {
     setRefreshAnimating(true);
-    if (refreshAnimationRef.current) {
-      window.clearTimeout(refreshAnimationRef.current);
-    }
     void refreshSourceControl().finally(() => {
-      refreshAnimationRef.current = window.setTimeout(() => {
-        setRefreshAnimating(false);
-        refreshAnimationRef.current = null;
-      }, 450);
+      setRefreshAnimating(false);
     });
   }, [refreshSourceControl]);
 
@@ -757,7 +741,9 @@ function SourceControlViewContainerComponent({
                   </IconActionButton>
                   <IconActionButton
                     label={t("refresh")}
-                    disabled={isRefreshing || !!scm.actionBusy}
+                    disabled={
+                      isRefreshing || refreshAnimating || !!scm.actionBusy
+                    }
                     onClick={handleRefresh}
                     side="bottom"
                   >
@@ -777,10 +763,6 @@ function SourceControlViewContainerComponent({
               render: ({ present }) =>
                 present ? (
                   <div className="relative flex h-full min-h-0 flex-col">
-                    <SourceControlRefreshProgress
-                      active={open && sourceControl.isRefreshing}
-                      label={t("panel.refreshingChanges")}
-                    />
                     <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/40 px-2.5">
                       <BranchDropdown
                         repoRoot={scm.repo?.repoRoot ?? null}

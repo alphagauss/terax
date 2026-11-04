@@ -57,7 +57,6 @@ import {
 } from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
-import { SourceControlRefreshProgress } from "@/modules/source-control/SourceControlRefreshProgress";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import CloudIcon from "@hugeicons/core-free-icons/CloudIcon";
@@ -363,10 +362,6 @@ export const GraphSection = memo(function GraphSection({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-sidebar [contain:layout_style]">
-      <SourceControlRefreshProgress
-        active={refreshing && expanded && present}
-        label={t("refreshingCommits")}
-      />
       {searchOpen && expanded ? (
         <form
           aria-label={t("searchHistory")}

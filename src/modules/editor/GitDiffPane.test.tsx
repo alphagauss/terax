@@ -119,7 +119,6 @@ function repositoryController(revision: number): RepositoryController {
     behind: 0,
     hasRepo: true,
     isLoading: false,
-    isRefreshing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,

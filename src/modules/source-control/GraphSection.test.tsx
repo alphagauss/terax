@@ -217,7 +217,7 @@ it("刷新令牌变化后重新读取提交图", async () => {
   expect(container.textContent).toContain("Commit remote");
 });
 
-it("同仓库慢刷新保留列表、展开和焦点，延迟提示并按阅读锚点更新", async () => {
+it("同仓库慢刷新静默保留列表、展开和焦点，并按阅读锚点更新", async () => {
   await act(async () => renderSearch({ searchOpen: false }));
   const row = container.querySelector<HTMLButtonElement>(
     '[aria-label="a Commit a"]',
@@ -243,10 +243,9 @@ it("同仓库慢刷新保留列表、展开和焦点，延迟提示并按阅读�
   expect(row.getAttribute("aria-expanded")).toBe("true");
   expect(document.activeElement).toBe(row);
   expect(container.querySelector('[role="progressbar"]')).toBeNull();
-  await wait(299);
+  await wait(1_000);
   expect(container.querySelector('[role="progressbar"]')).toBeNull();
-  await wait(1);
-  expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("loadingCommits");
   await act(async () =>
     finish([commit("new", ["a"]), commit("a", ["b"]), commit("b", [])]),
   );
@@ -344,7 +343,7 @@ it("连续刷新只接纳最新结果，快速完成和顶部阅读均不产生�
   ).toBe(0);
 });
 
-it("刷新空结果保留空状态，隐藏后停止进度提示，重新显示仍可完成刷新", async () => {
+it("刷新空结果静默保留空状态，隐藏后重新显示仍可完成刷新", async () => {
   vi.mocked(native.gitLog).mockResolvedValueOnce([]);
   await act(async () => renderSearch({ searchOpen: false }));
   let finish!: (commits: GitLogEntry[]) => void;
@@ -356,8 +355,8 @@ it("刷新空结果保留空状态，隐藏后停止进度提示，重新显示�
   await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
   expect(container.textContent).toContain("noCommitsYet");
   expect(container.textContent).not.toContain("loadingCommits");
-  await wait(300);
-  expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+  await wait(1_000);
+  expect(container.querySelector('[role="progressbar"]')).toBeNull();
   await act(async () =>
     renderSearch({
       searchOpen: false,
