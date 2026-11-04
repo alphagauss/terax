@@ -211,6 +211,8 @@ pub struct GitBranchEntry {
     pub is_head: bool,
     pub is_detached: bool,
     pub timestamp_secs: Option<i64>,
+    /// 标签提交可达的本地引用类别，不表示标签最初来自哪个远端。
+    pub tag_sources: Vec<String>,
 }
 
 #[derive(Serialize)]

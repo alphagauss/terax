@@ -438,6 +438,14 @@ function BranchDropdown({
                         <span className="min-w-0 flex-1 truncate">
                           {tag.name}
                         </span>
+                        {tag.tagSources.map((source) => (
+                          <span
+                            key={source}
+                            className="shrink-0 rounded bg-interactive-hover px-1 text-[9px] text-muted-foreground"
+                          >
+                            {t(`branch.tagSource.${source}`)}
+                          </span>
+                        ))}
                         <BranchTimestamp timestampSecs={tag.timestampSecs} />
                       </DropdownMenuItem>
                     ))}

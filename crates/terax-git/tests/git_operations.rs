@@ -1322,6 +1322,120 @@ fn checkout_branch_rejects_unsafe_names() {
 }
 
 #[test]
+fn tag_list_uses_only_local_and_origin_history_without_network() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("seed.txt", "base\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-qm", "base"]);
+    let base = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&["tag", "shared"]);
+    fx.run_git(&["tag", "-a", "shared-annotated", "-m", "shared"]);
+    fx.run_git(&["remote", "add", "origin", "https://origin.invalid/repo.git"]);
+    fx.run_git(&[
+        "remote",
+        "add",
+        "upstream",
+        "https://upstream.invalid/repo.git",
+    ]);
+    fx.run_git(&["config", "protocol.allow", "never"]);
+    fx.run_git(&["config", "log.excludeDecoration", "refs/tags/*"]);
+
+    fx.write_file("seed.txt", "local\n");
+    fx.run_git(&["commit", "-qam", "local"]);
+    fx.run_git(&["tag", "local"]);
+    fx.run_git(&["tag", "-a", "local-annotated", "-m", "local"]);
+
+    fx.run_git(&["checkout", "-qb", "feature", &base]);
+    fx.write_file("seed.txt", "feature\n");
+    fx.run_git(&["commit", "-qam", "feature"]);
+    fx.run_git(&["tag", "feature-tag"]);
+
+    fx.run_git(&["checkout", "-q", "--detach", &base]);
+    fx.write_file("seed.txt", "origin\n");
+    fx.run_git(&["commit", "-qam", "origin"]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    fx.run_git(&["tag", "origin"]);
+    fx.run_git(&["tag", "origin,comma"]);
+    fx.run_git(&["tag", "-a", "origin-annotated", "-m", "origin"]);
+
+    fx.run_git(&["checkout", "-q", "--detach", &base]);
+    fx.write_file("seed.txt", "upstream\n");
+    fx.run_git(&["commit", "-qam", "upstream"]);
+    fx.run_git(&["update-ref", "refs/remotes/upstream/main", "HEAD"]);
+    fx.run_git(&["tag", "upstream"]);
+    fx.run_git(&["tag", "-a", "upstream-annotated", "-m", "upstream"]);
+
+    fx.run_git(&["checkout", "-q", "--detach", &base]);
+    fx.write_file("seed.txt", "tag-only\n");
+    fx.run_git(&["commit", "-qam", "tag-only"]);
+    fx.run_git(&["tag", "tag-only"]);
+    fx.run_git(&["checkout", "-q", "main"]);
+
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let mut tags: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|entry| entry.kind == "tag")
+        .map(|entry| {
+            (
+                entry.name.as_str(),
+                entry
+                    .tag_sources
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    tags.sort();
+    assert_eq!(
+        tags,
+        vec![
+            ("feature-tag", vec!["local"]),
+            ("local", vec!["local"]),
+            ("local-annotated", vec!["local"]),
+            ("origin", vec!["origin"]),
+            ("origin,comma", vec!["origin"]),
+            ("origin-annotated", vec!["origin"]),
+            ("shared", vec!["local", "origin"]),
+            ("shared-annotated", vec!["local", "origin"]),
+        ]
+    );
+
+    fx.run_git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let tags: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|entry| entry.kind == "tag")
+        .collect();
+    assert_eq!(tags.len(), 5);
+    assert!(tags.iter().all(|entry| entry.tag_sources == ["local"]));
+
+    // 刚初始化并 fetch 的仓库可以只有远程引用和标签，当前本地分支尚未产生提交。
+    fx.run_git(&["checkout", "-q", "--detach", &base]);
+    fx.run_git(&["update-ref", "-d", "refs/heads/main"]);
+    fx.run_git(&["update-ref", "-d", "refs/heads/feature"]);
+    fx.run_git(&["symbolic-ref", "HEAD", "refs/heads/main"]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/main", &base]);
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let tags: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|entry| entry.kind == "tag")
+        .collect();
+    assert_eq!(tags.len(), 2);
+    assert!(tags.iter().all(|entry| entry.tag_sources == ["origin"]));
+
+    fx.run_git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert!(result.branches.iter().all(|entry| entry.kind != "tag"));
+}
+
+#[test]
 fn tags_keep_their_namespace_and_checkout_detaches_without_overwriting_changes() {
     if skip_if_no_git() {
         return;

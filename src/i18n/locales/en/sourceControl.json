@@ -30,6 +30,10 @@
     "localBranches": "Local Branches",
     "remoteBranches": "Remote Branches",
     "tags": "Tags",
+    "tagSource": {
+      "local": "Local",
+      "origin": "origin"
+    },
     "worktrees": "Worktrees",
     "noBranches": "No branches found."
   },

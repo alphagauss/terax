@@ -312,6 +312,7 @@ export type GitBranchEntry = {
   isHead: boolean;
   isDetached: boolean;
   timestampSecs: number | null;
+  tagSources: ("local" | "origin")[];
 };
 
 export type GitBranchListResult = {

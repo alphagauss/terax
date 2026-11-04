@@ -1758,6 +1758,7 @@ pub fn list_branches(
                     is_head,
                     is_detached: is_head && is_detached_head,
                     timestamp_secs,
+                    tag_sources: Vec::new(),
                 });
             } else if refname.starts_with("refs/remotes/")
                 && !name.is_empty()
@@ -1771,6 +1772,7 @@ pub fn list_branches(
                     is_head: false,
                     is_detached: false,
                     timestamp_secs,
+                    tag_sources: Vec::new(),
                 });
             }
         }
@@ -1851,7 +1853,7 @@ pub fn list_branches(
         }
     }
 
-    // 标签使用独立命名空间，不能与同名分支或工作树合并。
+    // 标签独立于分支去重，仅保留本地分支和本地 origin 引用历史中可达的标签。
     let tags = git_stdout_lines(
         &repo_root.workspace,
         &repo_root.git_path,
@@ -1861,10 +1863,36 @@ pub fn list_branches(
             "refs/tags",
         ],
     )?;
+    let has_local_branches = deduped
+        .iter()
+        .any(|entry| entry.kind == "local" || (entry.kind == "worktree" && !entry.is_detached));
+    let has_origin_branches = deduped
+        .iter()
+        .any(|entry| entry.kind == "remote" && entry.name.starts_with("origin/"));
+    let local_tags = if !tags.is_empty() && has_local_branches {
+        reachable_tag_names(&repo_root, "--branches")?
+    } else {
+        HashSet::new()
+    };
+    let origin_tags = if !tags.is_empty() && has_origin_branches {
+        reachable_tag_names(&repo_root, "--remotes=origin")?
+    } else {
+        HashSet::new()
+    };
     for line in tags {
         let mut parts = line.split('\0');
         let name = parts.next().unwrap_or("").to_string();
         let timestamp_secs = parts.next().and_then(|value| value.parse::<i64>().ok());
+        let mut tag_sources = Vec::new();
+        if local_tags.contains(&name) {
+            tag_sources.push("local".into());
+        }
+        if origin_tags.contains(&name) {
+            tag_sources.push("origin".into());
+        }
+        if tag_sources.is_empty() {
+            continue;
+        }
         deduped.push(GitBranchEntry {
             name,
             kind: "tag".into(),
@@ -1872,6 +1900,7 @@ pub fn list_branches(
             is_head: false,
             is_detached: false,
             timestamp_secs,
+            tag_sources,
         });
     }
 
@@ -1895,6 +1924,39 @@ pub fn list_branches(
     });
 
     Ok(GitBranchListResult { branches: deduped })
+}
+
+/// 只遍历本地引用的完整历史，由 Git 展开附注标签，不受 Graph 分页范围影响。
+fn reachable_tag_names(repo_root: &ResolvedGitDirectory, refs: &str) -> Result<HashSet<String>> {
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "log",
+            "--no-color",
+            "--no-show-signature",
+            "--simplify-by-decoration",
+            "--decorate=full",
+            "--decorate-refs=refs/tags/*",
+            "--format=%D",
+            refs,
+            "--",
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git tag reachability failed")?;
+    if output.truncated {
+        return Err(GitError::command(
+            "git tag reachability failed",
+            "output truncated",
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .flat_map(|line| line.split(", "))
+        .filter_map(|reference| reference.strip_prefix("tag: refs/tags/"))
+        .map(str::to_string)
+        .collect())
 }
 
 fn push_worktree(
@@ -1926,6 +1988,7 @@ fn push_worktree(
         timestamp_secs: branch
             .as_ref()
             .and_then(|branch| branch_timestamps.get(branch).copied()),
+        tag_sources: Vec::new(),
     });
 }
 

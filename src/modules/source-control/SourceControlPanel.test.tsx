@@ -80,6 +80,7 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
     worktreePath: null,
     isDetached: false,
     timestampSecs: null,
+    tagSources: entry.kind === "tag" ? ["local", "origin"] : [],
   }));
   branches.push({
     name: "feature",
@@ -88,6 +89,7 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
     isHead: false,
     isDetached: false,
     timestampSecs: null,
+    tagSources: [],
   });
   io.branches.mockResolvedValue({ branches });
   io.checkoutBranch.mockResolvedValue(undefined);
@@ -156,7 +158,9 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
     expect(groups?.[0].parentElement?.style.minHeight).toBe("69px");
     expect(groups?.[3].parentElement?.style.minHeight).toBe("85px");
     const tag = groups?.[2].querySelector<HTMLElement>('[role="menuitem"]');
-    expect(tag?.textContent).toBe("main");
+    expect(tag?.textContent).toContain("main");
+    expect(tag?.textContent).toContain("branch.tagSource.local");
+    expect(tag?.textContent).toContain("branch.tagSource.origin");
     await act(async () => tag?.click());
     expect(io.checkoutTag).toHaveBeenCalledWith("/repo", "main");
     expect(io.checkoutBranch).not.toHaveBeenCalled();

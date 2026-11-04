@@ -30,6 +30,10 @@
     "localBranches": "本地分支",
     "remoteBranches": "远程分支",
     "tags": "标签",
+    "tagSource": {
+      "local": "本地",
+      "origin": "origin"
+    },
     "worktrees": "工作树",
     "noBranches": "未找到分支。"
   },
