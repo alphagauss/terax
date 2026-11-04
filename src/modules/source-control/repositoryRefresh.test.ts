@@ -15,6 +15,69 @@ function deferred() {
 }
 
 describe("repository refresh queue", () => {
+  it("操作等待下一轮快照但不等待统计，且优先补查仍保持串行", async () => {
+    const firstStats = deferred();
+    const secondStats = deferred();
+    const ready: Array<() => void> = [];
+    const run = vi.fn((snapshotReady: () => void) => {
+      ready.push(snapshotReady);
+      return ready.length === 1 ? firstStats.promise : secondStats.promise;
+    });
+    const queue = createRepositoryRefreshQueue(run, () => 60_000);
+    const fullRound = queue.request();
+    const mutation = queue.request("mutation");
+    let completed = false;
+    void mutation.then(() => {
+      completed = true;
+    });
+    ready[0]();
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    expect(run).toHaveBeenCalledOnce();
+    firstStats.resolve();
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(2);
+    ready[1]();
+    await mutation;
+    expect(completed).toBe(true);
+    let allFinished = false;
+    void fullRound.then(() => {
+      allFinished = true;
+    });
+    await Promise.resolve();
+    expect(allFinished).toBe(false);
+    secondStats.resolve();
+    await fullRound;
+  });
+
+  it("操作补查释放已经开始的自动退避，取消时释放快照等待者", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn(async (ready: () => void) => {
+        ready();
+      });
+      const queue = createRepositoryRefreshQueue(run, () => 60_000);
+      const fullRound = queue.request();
+      queue.request();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(run).toHaveBeenCalledOnce();
+      await queue.request("mutation");
+      expect(run).toHaveBeenCalledTimes(2);
+      await fullRound;
+      const held = deferred();
+      run.mockImplementationOnce(() => held.promise);
+      const current = queue.request();
+      const nextSnapshot = queue.request("mutation");
+      queue.cancelPending();
+      await nextSnapshot;
+      held.resolve();
+      await current;
+      expect(run).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("隐藏后丢弃待执行的补查，并释放轮间等待", async () => {
     vi.useFakeTimers();
     try {

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -341,6 +341,41 @@ where
         .stderr(Stdio::piped());
     terax_core::modules::proc::hide_console(&mut cmd);
 
+    run_child(cmd, dur, MAX_OUTPUT_BYTES, None)
+}
+
+/// WSL 每个固定批次只启动一次入口，批次内各 Git 命令沿用 SSH 的字节协议。
+#[cfg(windows)]
+pub(super) fn execute_wsl_batch(
+    distro: &str,
+    path: &str,
+    kind: terax_core::modules::remote::git_service::GitBatchKind,
+) -> Result<Vec<terax_core::modules::remote::git_service::GitBatchOutput>> {
+    use terax_core::modules::remote::git_service;
+    validate_wsl_distro_name(distro).map_err(GitError::Spawn)?;
+    let timeout = Duration::from_secs(kind.timeout_secs());
+    let script = git_service::batch_script(path, kind).map_err(GitError::Spawn)?;
+    let mut cmd = Command::new("wsl.exe");
+    // 脚本包含未跟踪文件路径，不能放进有长度上限的 Windows 命令行。
+    cmd.args(["-d", distro, "--exec", "sh", "-s"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    terax_core::modules::proc::hide_console(&mut cmd);
+    let output = run_child(cmd, timeout, 8 * 1024 * 1024, Some(script.into_bytes()))?;
+    ensure_success(&output, "WSL Git batch failed")?;
+    if output.truncated {
+        return Err(GitError::command("WSL Git batch", "output truncated"));
+    }
+    git_service::parse_batch(&output.stdout).map_err(GitError::Spawn)
+}
+
+pub(super) fn run_child(
+    mut cmd: Command,
+    dur: Duration,
+    max_output: usize,
+    input: Option<Vec<u8>>,
+) -> Result<GitOutput> {
     let child = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?);
     let mut stdout_pipe = child
         .take_stdout()
@@ -349,8 +384,14 @@ where
         .take_stderr()
         .ok_or_else(|| GitError::Spawn("no stderr pipe".into()))?;
 
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, 64 * 1024));
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024));
+    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, 64 * 1024, max_output));
+    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024, max_output));
+
+    // 输入和输出并行传输，避免批次超过管道容量时互相等待；超时仍由统一等待器控制。
+    let input_handle = input.map(|input| {
+        let mut stdin = child.take_stdin().expect("piped Git batch input");
+        thread::spawn(move || stdin.write_all(&input))
+    });
 
     let (tx, rx) = mpsc::channel();
     let waiter = Arc::clone(&child);
@@ -373,6 +414,13 @@ where
 
     let (stdout, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
     let (stderr, _stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    if let Some(input_handle) = input_handle {
+        let written = input_handle.join().expect("Git batch input thread");
+        // 提前失败时保留进程的实际错误，避免 BrokenPipe 掩盖目录或 Shell 错误。
+        if !timed_out && exit_code == Some(0) {
+            written?;
+        }
+    }
 
     Ok(GitOutput {
         stdout,
@@ -461,19 +509,19 @@ fn decode_text(bytes: Vec<u8>) -> TextSource {
     }
 }
 
-fn drain<R: Read>(reader: &mut R, prealloc: usize) -> (Vec<u8>, bool) {
-    let mut out: Vec<u8> = Vec::with_capacity(prealloc.min(MAX_OUTPUT_BYTES));
+fn drain<R: Read>(reader: &mut R, prealloc: usize, max_output: usize) -> (Vec<u8>, bool) {
+    let mut out: Vec<u8> = Vec::with_capacity(prealloc.min(max_output));
     let mut buf = [0u8; 16 * 1024];
     let mut truncated = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if out.len() >= MAX_OUTPUT_BYTES {
+                if out.len() >= max_output {
                     truncated = true;
                     continue;
                 }
-                let take = (MAX_OUTPUT_BYTES - out.len()).min(n);
+                let take = (max_output - out.len()).min(n);
                 out.extend_from_slice(&buf[..take]);
                 if take < n {
                     truncated = true;

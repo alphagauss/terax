@@ -91,6 +91,28 @@ pub fn authorized_repo_root(
     Ok(canonical)
 }
 
+/// SSH 固定批次在服务器内通过 cd 校验目录，不为每次操作增加 SFTP 往返。
+pub fn batch_repo_root(
+    registry: &WorkspaceRegistry,
+    path: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<ResolvedGitDirectory> {
+    if workspace.is_ssh() {
+        terax_core::modules::remote::session::validate_remote_path(path)
+            .map_err(GitError::Spawn)?;
+        if !path.starts_with('/') {
+            return Err(GitError::InvalidPath(path.into()));
+        }
+        return Ok(ResolvedGitDirectory {
+            workspace: workspace.clone(),
+            git_path: path.into(),
+            local_path: PathBuf::from(path),
+            remote: true,
+        });
+    }
+    authorized_repo_root(registry, path, workspace)
+}
+
 pub fn resolve_within_repo(repo_root: &Path, rel: &str) -> Result<PathBuf> {
     if !is_safe_pathspec(rel) {
         return Err(GitError::InvalidPath(rel.into()));

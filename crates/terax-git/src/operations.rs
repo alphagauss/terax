@@ -19,12 +19,13 @@ use crate::types::{
     GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitFileLineStats,
     GitLineStats, GitLogEntry, GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats,
     GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
-    TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
+    TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES,
 };
 use crate::utils::{
-    authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
-    ResolvedGitDirectory,
+    authorized_repo_root, batch_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo,
+    split_upstream, ResolvedGitDirectory,
 };
+use terax_core::modules::remote::git_service::{GitRemoteAction, HISTORY_FORMAT as LOG_FORMAT};
 use terax_core::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 const DIFF_VIEW_TEXT_LIMIT: usize = 256 * 1024;
@@ -159,13 +160,21 @@ pub fn panel_snapshot(
 ) -> Result<GitPanelSnapshot> {
     if workspace.is_ssh() {
         ensure_git_available(workspace)?;
-        return crate::remote::snapshot(cwd, workspace, include_graph);
+        return crate::batch::snapshot(cwd, workspace, include_graph);
     }
     let cwd = canonical_dir(registry, cwd, workspace)?;
     if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
     }
     ensure_git_available(&cwd.workspace)?;
+    if workspace.is_wsl() {
+        let snapshot = crate::batch::snapshot(&cwd.git_path, workspace, include_graph)?;
+        if let Some(repo) = &snapshot.repo {
+            let root = canonical_dir(registry, &repo.repo_root, workspace)?;
+            let _ = registry.authorize(&root.local_path);
+        }
+        return Ok(snapshot);
+    }
     let Some(canonical_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
         return Ok(GitPanelSnapshot {
             graph_revision: None,
@@ -174,24 +183,11 @@ pub fn panel_snapshot(
         });
     };
     let status = status_inner(&canonical_root)?;
-    let repo = GitRepoInfo {
-        repo_root: canonical_root.git_path.clone(),
-        branch: status.branch.clone(),
-        upstream: status.upstream.clone(),
-        is_detached: status.is_detached,
-    };
-    Ok(GitPanelSnapshot {
-        graph_revision: if include_graph {
-            Some(
-                graph_revision(registry, &repo.repo_root, workspace)
-                    .unwrap_or_else(|_| "unavailable".into()),
-            )
-        } else {
-            None
-        },
-        repo: Some(repo),
-        status: Some(status),
-    })
+    let graph_revision = include_graph.then(|| {
+        graph_revision(registry, &canonical_root.git_path, workspace)
+            .unwrap_or_else(|_| "unavailable".into())
+    });
+    Ok(crate::batch::snapshot_from_status(status, graph_revision))
 }
 
 /// 按需读取整批行数统计，与轻量状态快照分离，避免列表等待全文比较。
@@ -205,10 +201,13 @@ pub fn panel_diff_stats(
         return Err(GitError::InvalidPath(repo_root.into()));
     }
     if workspace.is_ssh() {
-        return crate::remote::statistics(repo_root, status, workspace);
+        return crate::batch::statistics(repo_root, status, workspace);
     }
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    if workspace.is_wsl() {
+        return crate::batch::statistics(&repo_root.git_path, status, workspace);
+    }
     Ok(GitPanelDiffStats {
         worktree: panel_line_stats(&repo_root, status, false).ok(),
         index: panel_line_stats(&repo_root, status, true).ok(),
@@ -849,27 +848,8 @@ pub fn push(
     repo_root: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<GitPushResult> {
-    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
-    ensure_git_available(&repo_root.workspace)?;
-
-    let upstream = git_stdout_line_opt(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )?;
-    if upstream.is_none() {
-        return Err(GitError::NoUpstream);
-    }
-
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        ["push"],
-        NETWORK_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git push failed")?;
-
-    let upstream = upstream.unwrap();
+    let upstream = crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Push)?
+        .ok_or(GitError::NoUpstream)?;
     let (remote, branch) = split_upstream(&upstream);
     Ok(GitPushResult {
         remote,
@@ -878,7 +858,6 @@ pub fn push(
     })
 }
 
-const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s";
 const MAX_LOG_LIMIT: u32 = 200;
 
 pub fn log(
@@ -888,56 +867,15 @@ pub fn log(
     skip: u32,
     workspace: &WorkspaceEnv,
 ) -> Result<Vec<GitLogEntry>> {
-    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    let repo_root = batch_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
     let bounded = limit.clamp(1, MAX_LOG_LIMIT);
-    let remote_names: HashSet<String> =
-        git_stdout_lines(&repo_root.workspace, &repo_root.git_path, ["remote"])?
-            .into_iter()
-            .filter(|name| !name.is_empty())
-            .collect();
-    let count_arg = format!("--max-count={bounded}");
-    let skip_arg = format!("--skip={skip}");
-    let format_arg = format!("--format={LOG_FORMAT}");
-    let current_branch = git_stdout_line_opt(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
-    )?;
-    let upstream_ref = git_stdout_line_opt(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["rev-parse", "--symbolic-full-name", "@{upstream}"],
-    )?;
-    let upstream_label = upstream_ref
-        .as_deref()
-        .map(|refname| {
-            refname
-                .strip_prefix("refs/remotes/")
-                .or_else(|| refname.strip_prefix("refs/heads/"))
-                .unwrap_or(refname)
-        })
-        .map(str::to_string);
-    let mut args: Vec<OsString> = vec![
-        OsString::from("log"),
-        OsString::from("--no-color"),
-        OsString::from("--shortstat"),
-        OsString::from("--topo-order"),
-        OsString::from("--ignore-missing"),
-        OsString::from(count_arg),
-        OsString::from(skip_arg),
-        OsString::from(format_arg),
-        OsString::from("HEAD"),
-    ];
-    if let Some(upstream_ref) = upstream_ref {
-        args.push(OsString::from(upstream_ref));
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
+    let crate::batch::HistoryRead {
+        remote_names,
+        current_branch,
+        upstream_label,
+        output,
+    } = crate::batch::history(&repo_root.git_path, workspace, bounded, skip)?;
     if output.timed_out {
         return Err(GitError::TimedOut("git log"));
     }
@@ -954,38 +892,16 @@ pub fn log(
     }
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
     let mut entries: Vec<GitLogEntry> = Vec::with_capacity(bounded as usize);
-    // Lines we get back interleave:
-    //   <sha>\x1f<author>\x1f<email>\x1f<ts>\x1f<parents>\x1f<refs>\x1f<subject>
-    //   <blank>
-    //    5 files changed, 12 insertions(+), 3 deletions(-)
-    // Commits without diffstats (root commits, merges with no changes) just
-    // skip the shortstat line. Detect commit headers by the presence of
-    // the unit-separator we put in the format.
-    for raw_line in stdout.lines() {
-        let line = raw_line.trim_end_matches('\r');
-        if line.is_empty() {
-            continue;
-        }
-        if line.contains('\x1f') {
-            if let Some(entry) = parse_log_header(line, |refs| {
-                parse_log_refs(
-                    refs,
-                    &remote_names,
-                    current_branch.as_deref(),
-                    upstream_label.as_deref(),
-                )
-            }) {
-                entries.push(entry);
-            }
-            continue;
-        }
-        if let Some(current) = entries.last_mut() {
-            if line.contains("file changed") || line.contains("files changed") {
-                let (files, ins, del) = parse_shortstat(line);
-                current.files_changed = files;
-                current.insertions = ins;
-                current.deletions = del;
-            }
+    for line in stdout.lines() {
+        if let Some(entry) = parse_log_header(line.trim_end_matches('\r'), |refs| {
+            parse_log_refs(
+                refs,
+                &remote_names,
+                current_branch.as_deref(),
+                upstream_label.as_deref(),
+            )
+        }) {
+            entries.push(entry);
         }
     }
     Ok(entries)
@@ -1011,9 +927,6 @@ fn parse_log_header(line: &str, refs: impl FnOnce(&str) -> Vec<GitLogRef>) -> Op
             .collect(),
         refs: refs(fields.next()?),
         subject: fields.next()?.to_string(),
-        files_changed: 0,
-        insertions: 0,
-        deletions: 0,
     })
 }
 
@@ -1217,33 +1130,6 @@ pub fn commit_message(
     Ok(String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_string())
-}
-
-fn parse_shortstat(tail: &str) -> (u32, u32, u32) {
-    // Looks for a line like " 5 files changed, 12 insertions(+), 3 deletions(-)"
-    for line in tail.lines() {
-        let trimmed = line.trim();
-        if !(trimmed.contains("file changed") || trimmed.contains("files changed")) {
-            continue;
-        }
-        let mut files = 0u32;
-        let mut ins = 0u32;
-        let mut del = 0u32;
-        for part in trimmed.split(',') {
-            let part = part.trim();
-            let num_str = part.split_ascii_whitespace().next().unwrap_or("0");
-            let n: u32 = num_str.parse().unwrap_or(0);
-            if part.contains("file") {
-                files = n;
-            } else if part.contains("insertion") {
-                ins = n;
-            } else if part.contains("deletion") {
-                del = n;
-            }
-        }
-        return (files, ins, del);
-    }
-    (0, 0, 0)
 }
 
 fn sha_is_safe(sha: &str) -> bool {
@@ -1537,15 +1423,7 @@ pub fn fetch(
     repo_root: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<()> {
-    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
-    ensure_git_available(&repo_root.workspace)?;
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        ["fetch", "--prune"],
-        NETWORK_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git fetch failed")
+    crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Fetch).map(|_| ())
 }
 
 pub fn pull_ff_only(
@@ -1553,15 +1431,7 @@ pub fn pull_ff_only(
     repo_root: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<()> {
-    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
-    ensure_git_available(&repo_root.workspace)?;
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        ["pull", "--ff-only"],
-        NETWORK_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git pull --ff-only failed")
+    crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Pull).map(|_| ())
 }
 
 fn nothing_to_commit(output: &GitOutput) -> bool {
@@ -2121,23 +1991,6 @@ mod tests {
         for c in " /:\\?\"'".chars() {
             assert!(!is_remote_name_char(c));
         }
-    }
-
-    #[test]
-    fn parse_shortstat_pulls_three_counts() {
-        let line = " 5 files changed, 12 insertions(+), 3 deletions(-)";
-        assert_eq!(parse_shortstat(line), (5, 12, 3));
-    }
-
-    #[test]
-    fn parse_shortstat_handles_singular_file() {
-        let line = " 1 file changed, 1 insertion(+)";
-        assert_eq!(parse_shortstat(line), (1, 1, 0));
-    }
-
-    #[test]
-    fn parse_shortstat_returns_zeros_when_absent() {
-        assert_eq!(parse_shortstat("no stat here"), (0, 0, 0));
     }
 
     #[test]

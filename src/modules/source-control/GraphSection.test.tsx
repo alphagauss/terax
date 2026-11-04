@@ -60,9 +60,6 @@ const commit = (sha: string, parents: string[]): GitLogEntry => ({
   timestampSecs: 1,
   parents,
   refs: [],
-  filesChanged: 1,
-  insertions: 12,
-  deletions: 3,
 });
 const files: GitCommitFileChange[] = [
   {

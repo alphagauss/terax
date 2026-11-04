@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   gitPanelSnapshot: vi.fn(),
   gitPanelDiffStats: vi.fn(),
   gitStatus: vi.fn(),
+  gitFetch: vi.fn(),
+  gitPullFfOnly: vi.fn(),
+  gitPush: vi.fn(),
   workspaceKey: "local",
   resumeListeners: new Set<() => void>(),
   changeListeners: new Set<(paths: string[]) => void>(),
@@ -26,6 +29,9 @@ vi.mock("@/modules/ai/lib/native", () => ({
     gitPanelSnapshot: mocks.gitPanelSnapshot,
     gitPanelDiffStats: mocks.gitPanelDiffStats,
     gitStatus: mocks.gitStatus,
+    gitFetch: mocks.gitFetch,
+    gitPullFfOnly: mocks.gitPullFfOnly,
+    gitPush: mocks.gitPush,
   },
 }));
 vi.mock("@/modules/workspace", () => ({
@@ -122,6 +128,220 @@ afterEach(async () => {
 });
 
 describe("useRepositoryController", () => {
+  it("切换上下文后旧联网操作的失败不覆盖新仓库或触发其刷新", async () => {
+    vi.useFakeTimers();
+    mocks.gitPanelSnapshot.mockImplementation(async (path: string) => {
+      const snapshot = repositorySnapshot(path);
+      if (snapshot.status) snapshot.status.upstream = "origin/main";
+      return snapshot;
+    });
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    let reject!: (error: Error) => void;
+    mocks.gitPush.mockReturnValueOnce(
+      new Promise<void>((_, fail) => {
+        reject = fail;
+      }),
+    );
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      action = controller?.runRemoteAction("push");
+    });
+    await act(async () => root?.render(<Probe contextPath="C:/b" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    const reads = mocks.gitPanelSnapshot.mock.calls.length;
+    await act(async () => {
+      reject(new Error("old push failed"));
+      expect(await action).toMatchObject({
+        ok: false,
+        error: "old push failed",
+      });
+    });
+    expect(controller?.repo?.repoRoot).toBe("C:/b");
+    expect(controller?.lastRemoteError).toBeNull();
+    expect(controller?.busyAction).toBeNull();
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(reads);
+  });
+
+  it("拉取只联网一次并拦截重复触发，快照发布后结束忙碌而统计继续串行", async () => {
+    vi.useFakeTimers();
+    const snapshot = repositorySnapshot("C:/repo");
+    if (!snapshot.status) throw new Error("Missing status");
+    snapshot.status.upstream = "origin/main";
+    snapshot.status.behind = 1;
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    const pull = deferred<void>();
+    const nextSnapshot = deferred<GitPanelSnapshot>();
+    const stats = deferred<{ index: null; worktree: null }>();
+    mocks.gitPullFfOnly.mockReturnValueOnce(pull.promise);
+    mocks.gitPanelSnapshot.mockReturnValueOnce(nextSnapshot.promise);
+    mocks.gitPanelDiffStats.mockReturnValueOnce(stats.promise);
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      action = controller?.runRemoteAction("pull");
+    });
+    await act(async () => {
+      expect(await controller?.runRemoteAction("pull")).toMatchObject({
+        blocked: "busy",
+      });
+    });
+    expect(mocks.gitPullFfOnly).toHaveBeenCalledOnce();
+    expect(mocks.gitFetch).not.toHaveBeenCalled();
+    await act(async () => pull.resolve());
+    expect(controller?.busyAction).toBe("pull");
+    await act(async () => {
+      nextSnapshot.resolve({
+        ...snapshot,
+        status: snapshot.status ? { ...snapshot.status, behind: 0 } : null,
+      });
+      expect(await action).toEqual({ ok: true, action: "pull" });
+    });
+    expect(controller?.busyAction).toBeNull();
+    expect(controller?.behind).toBe(0);
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledTimes(2);
+    await act(async () => stats.resolve({ index: null, worktree: null }));
+  });
+
+  it.each([true, false])(
+    "推送结果与刷新失败独立，不隐式获取或重试，成功=%s",
+    async (success) => {
+      vi.useFakeTimers();
+      const snapshot = repositorySnapshot("C:/repo");
+      if (!snapshot.status) throw new Error("Missing status");
+      snapshot.status.upstream = "origin/main";
+      snapshot.status.ahead = 1;
+      mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+      root = createRoot(document.createElement("div"));
+      await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+      await act(async () => vi.advanceTimersByTimeAsync(600));
+      mocks.gitPanelSnapshot.mockRejectedValueOnce(new Error("status failed"));
+      if (success) mocks.gitPush.mockResolvedValueOnce(undefined);
+      else mocks.gitPush.mockRejectedValueOnce(new Error("push rejected"));
+      await act(async () => {
+        expect(await controller?.runRemoteAction("push")).toMatchObject({
+          ok: success,
+          action: "push",
+        });
+      });
+      expect(mocks.gitPush).toHaveBeenCalledOnce();
+      expect(mocks.gitFetch).not.toHaveBeenCalled();
+      expect(mocks.gitPullFfOnly).not.toHaveBeenCalled();
+      expect(controller?.localError).toBe("status failed");
+      expect(controller?.lastRemoteError).toBe(
+        success ? null : "push rejected",
+      );
+      expect(controller?.busyAction).toBeNull();
+    },
+  );
+
+  it("操作前启动的慢读取不能替代操作后的校验，旧统计不触发额外联网", async () => {
+    vi.useFakeTimers();
+    const snapshot = repositorySnapshot("C:/repo");
+    if (!snapshot.status) throw new Error("Missing status");
+    snapshot.status.upstream = "origin/main";
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    const oldSnapshot = deferred<GitPanelSnapshot>();
+    const oldStats = deferred<{ index: null; worktree: null }>();
+    const freshSnapshot = deferred<GitPanelSnapshot>();
+    mocks.gitPanelSnapshot
+      .mockReturnValueOnce(oldSnapshot.promise)
+      .mockReturnValueOnce(freshSnapshot.promise);
+    mocks.gitPanelDiffStats.mockReturnValueOnce(oldStats.promise);
+    let fullRefresh: Promise<void> | undefined;
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      fullRefresh = controller?.refresh();
+    });
+    await act(async () => oldSnapshot.resolve(snapshot));
+    mocks.gitPush.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      action = controller?.runRemoteAction("push");
+    });
+    expect(controller?.busyAction).toBe("push");
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+    await act(async () => oldStats.resolve({ index: null, worktree: null }));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(3);
+    expect(controller?.busyAction).toBe("push");
+    await act(async () => {
+      freshSnapshot.resolve(snapshot);
+      await action;
+      await fullRefresh;
+    });
+    expect(controller?.busyAction).toBeNull();
+    expect(mocks.gitPush).toHaveBeenCalledOnce();
+    expect(mocks.gitFetch).not.toHaveBeenCalled();
+  });
+
+  it("其他视图中操作前开始的慢请求不能回填操作后的共享缓存", async () => {
+    vi.useFakeTimers();
+    const snapshot = repositorySnapshot("C:/repo");
+    if (!snapshot.status) throw new Error("Missing status");
+    snapshot.status.upstream = "origin/main";
+    snapshot.status.ahead = 1;
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    let other: RepositoryController | undefined;
+    function OtherProbe() {
+      other = useRepositoryController("C:/repo");
+      return null;
+    }
+    root = createRoot(document.createElement("div"));
+    await act(async () =>
+      root?.render(
+        <>
+          <Probe contextPath="C:/repo" />
+          <OtherProbe />
+        </>,
+      ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    const reads = mocks.gitPanelSnapshot.mock.calls.length;
+    const old = deferred<GitPanelSnapshot>();
+    const fresh = deferred<GitPanelSnapshot>();
+    mocks.gitPanelSnapshot
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(fresh.promise);
+    let oldRefresh: Promise<void> | undefined;
+    await act(async () => {
+      oldRefresh = other?.refresh();
+    });
+    mocks.gitPush.mockResolvedValueOnce(undefined);
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      action = controller?.runRemoteAction("push");
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(reads + 2);
+    const freshSnapshot = {
+      ...snapshot,
+      status: { ...snapshot.status, ahead: 0 },
+    };
+    await act(async () => {
+      fresh.resolve(freshSnapshot);
+      await action;
+    });
+    expect(controller?.ahead).toBe(0);
+    await act(async () => {
+      old.resolve(snapshot);
+      await oldRefresh;
+    });
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/other" enabled={false} />),
+    );
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/repo" enabled={false} />),
+    );
+    expect(controller?.ahead).toBe(0);
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(reads + 2);
+  });
+
   it("超过 200 个改动停止自动读取和统计，显式刷新后恢复，并拦截已排队的自动补查", async () => {
     vi.useFakeTimers();
     const snapshot = repositorySnapshot("C:/repo");

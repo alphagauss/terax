@@ -239,9 +239,6 @@ export type GitLogEntry = {
   parents: string[];
   refs: GitLogRef[];
   subject: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
 };
 
 export type GitFileHistoryEntry = GitLogEntry & {

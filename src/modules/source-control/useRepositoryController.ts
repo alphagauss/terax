@@ -3,6 +3,7 @@
  * 所有调用方共享真实快照与单调 revision；基础状态先发布，引用与可见统计共用串行刷新周期。
  */
 
+import i18n from "@/i18n";
 import {
   createSnapshotCache,
   readViewResource,
@@ -44,7 +45,7 @@ type RepositoryRemoteActionResult = {
   ok: boolean;
   action: RepositoryRemoteAction | null;
   error?: string;
-  blocked?: "diverged" | "missing-upstream" | "no-repo";
+  blocked?: "diverged" | "missing-upstream" | "no-repo" | "busy";
 };
 
 /** 当前工作区仓库的唯一可观察快照与操作入口。 */
@@ -73,6 +74,8 @@ export type RepositoryController = {
 };
 
 const snapshots = createSnapshotCache<RepositoryControllerState>(16);
+// 同一 Workspace 的视图共用失效序号，写操作前开始的读取不得回填共享缓存。
+const mutationRevisions = new Map<string, number>();
 
 type RepositoryControllerState = {
   contextPath: string | null;
@@ -98,12 +101,18 @@ function isPathInsideRepository(
 }
 
 function normalizeError(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return "Unknown source control error";
+  const detail =
+    typeof error === "string"
+      ? error
+      : error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "Unknown source control error";
+  return detail === "git_remote_operation_busy"
+    ? i18n.t("sourceControl:remoteActionBusy")
+    : detail;
 }
 
 function getContextualAction(
@@ -164,6 +173,7 @@ export function useRepositoryController(
   const dirtyRef = useRef(false);
   // 显式刷新可以越过大量改动保护，并在隐藏期间保留到恢复；自动补查执行时仍需重新判断。
   const explicitRefreshRef = useRef(false);
+  const remoteActionsRef = useRef(new Set<string>());
   const isAutoRefreshPaused = useCallback(
     () =>
       !explicitRefreshRef.current &&
@@ -222,175 +232,191 @@ export function useRepositoryController(
     };
   }, []);
 
-  const doRefresh = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current || !enabledRef.current || !isWindowVisible())
-      return;
-    if (isAutoRefreshPaused()) return;
-    explicitRefreshRef.current = false;
-    const startedAt = Date.now();
-    const requestId = ++requestIdRef.current;
-    const requestedContext = contextPathRef.current;
-    const requestedWorkspace = workspaceKeyRef.current;
-    const requestedEpoch = epochRef.current;
-    const includeGraph = foregroundRef.current;
-    const isCurrentRequest = () =>
-      mountedRef.current &&
-      requestId === requestIdRef.current &&
-      enabledRef.current &&
-      contextPathRef.current === requestedContext &&
-      workspaceKeyRef.current === requestedWorkspace &&
-      epochRef.current === requestedEpoch;
+  const doRefresh = useCallback(
+    async (snapshotReady: () => void) => {
+      if (!mountedRef.current || !enabledRef.current || !isWindowVisible())
+        return;
+      if (isAutoRefreshPaused()) return;
+      explicitRefreshRef.current = false;
+      const startedAt = Date.now();
+      const requestId = ++requestIdRef.current;
+      const requestedContext = contextPathRef.current;
+      const requestedWorkspace = workspaceKeyRef.current;
+      const requestedEpoch = epochRef.current;
+      const mutationRevision = mutationRevisions.get(requestedWorkspace) ?? 0;
+      const isCurrentRevision = () =>
+        (mutationRevisions.get(requestedWorkspace) ?? 0) === mutationRevision;
+      const includeGraph = foregroundRef.current;
+      const isCurrentRequest = () =>
+        mountedRef.current &&
+        requestId === requestIdRef.current &&
+        enabledRef.current &&
+        contextPathRef.current === requestedContext &&
+        workspaceKeyRef.current === requestedWorkspace &&
+        epochRef.current === requestedEpoch;
 
-    if (!requestedContext) {
-      updateState((current) =>
-        current.contextPath === null
-          ? current
-          : {
-              ...current,
-              contextPath: null,
-              repo: null,
-              status: null,
-              diffStats: null,
-              graphRevision: null,
-              localError: null,
-              busyAction: null,
-              lastRemoteError: null,
-            },
-      );
-      return;
-    }
-
-    try {
-      const cacheKey = `${requestedWorkspace}\0${requestedContext}`;
-      const snapshot = await readViewResource(
-        `git-snapshot:${cacheKey}:${requestedEpoch}:${includeGraph}`,
-        () => native.gitPanelSnapshot(requestedContext, includeGraph),
-      );
-      if (!mountedRef.current || epochRef.current !== requestedEpoch) return;
-      const cached = snapshots.get(cacheKey);
-      const largeChanges =
-        (snapshot.status?.changedFiles.length ?? 0) > SC_AUTO_REFRESH_LIMIT;
-      const graphRevision = snapshot.repo
-        ? ((snapshot.graphRevision === "unavailable"
-            ? null
-            : snapshot.graphRevision) ??
-          (cached?.repo?.repoRoot === snapshot.repo.repoRoot
-            ? cached.graphRevision
-            : null) ??
-          (includeGraph ? "unavailable" : null))
-        : null;
-      snapshots.set(cacheKey, {
-        contextPath: requestedContext,
-        repo: snapshot.repo,
-        status: snapshot.status,
-        graphRevision,
-        diffStats:
-          !largeChanges && cached?.repo?.repoRoot === snapshot.repo?.repoRoot
-            ? (cached?.diffStats ?? null)
-            : null,
-        revision: (cached?.revision ?? 0) + 1,
-        localError: null,
-        busyAction: null,
-        lastRemoteError: null,
-      });
-      if (!isCurrentRequest()) return;
-      if (!snapshot.repo || !snapshot.status) {
+      if (!requestedContext) {
         updateState((current) =>
-          current.contextPath === requestedContext &&
-          current.repo === null &&
-          current.localError === null
+          current.contextPath === null
             ? current
             : {
                 ...current,
-                contextPath: requestedContext,
+                contextPath: null,
                 repo: null,
                 status: null,
-                graphRevision: null,
                 diffStats: null,
+                graphRevision: null,
                 localError: null,
+                busyAction: null,
+                lastRemoteError: null,
               },
         );
         return;
       }
-      const previous = stateRef.current;
-      const shared = shareRepositorySnapshot(previous, snapshot);
-      const repo = shared.repo ?? snapshot.repo;
-      const status = shared.status ?? snapshot.status;
 
-      updateState((current) => ({
-        ...current,
-        contextPath: requestedContext,
-        repo,
-        status,
-        revision: current.revision + 1,
-        // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
-        graphRevision,
-        diffStats:
-          !largeChanges && current.repo?.repoRoot === repo.repoRoot
-            ? current.diffStats
-            : null,
-        localError: null,
-      }));
-      // 清单先显示，统计沿用本轮状态；慢统计计入周期，不能与下一轮自动读取重叠。
-      if (
-        !largeChanges &&
-        foregroundRef.current &&
-        isWindowVisible() &&
-        isCurrentRequest()
-      ) {
-        try {
-          const stats = await native.gitPanelDiffStats(
-            repo.repoRoot,
-            snapshot.status,
-          );
-          const cached = snapshots.get(cacheKey);
-          if (
-            epochRef.current === requestedEpoch &&
-            cached?.status === snapshot.status
-          )
-            snapshots.set(cacheKey, { ...cached, diffStats: stats });
-          if (
-            isCurrentRequest() &&
-            foregroundRef.current &&
-            isWindowVisible()
-          ) {
-            updateState((current) => ({
-              ...current,
-              diffStats: shareDiffStats(current.diffStats, stats),
-            }));
-          }
-        } catch {
-          // 展示统计失败不覆盖已成功读取的仓库状态。
-          if (isCurrentRequest())
-            updateState((current) => ({ ...current, diffStats: null }));
+      try {
+        const cacheKey = `${requestedWorkspace}\0${requestedContext}`;
+        // 序号进入共享请求身份，操作后的校验只复用操作结束后启动的读取。
+        const snapshot = await readViewResource(
+          `git-snapshot:${cacheKey}:${requestedEpoch}:${includeGraph}:${mutationRevision}`,
+          () => native.gitPanelSnapshot(requestedContext, includeGraph),
+        );
+        if (!mountedRef.current || epochRef.current !== requestedEpoch) return;
+        if (!isCurrentRevision()) {
+          if (isCurrentRequest()) dirtyRef.current = true;
+          return;
         }
-      }
-    } catch (error) {
-      if (!isCurrentRequest()) return;
-      const localError = normalizeError(error);
-      updateState((current) => {
-        if (current.contextPath === requestedContext)
-          return current.localError === localError
-            ? current
-            : { ...current, localError };
-        return {
+        const cached = snapshots.get(cacheKey);
+        const largeChanges =
+          (snapshot.status?.changedFiles.length ?? 0) > SC_AUTO_REFRESH_LIMIT;
+        const graphRevision = snapshot.repo
+          ? ((snapshot.graphRevision === "unavailable"
+              ? null
+              : snapshot.graphRevision) ??
+            (cached?.repo?.repoRoot === snapshot.repo.repoRoot
+              ? cached.graphRevision
+              : null) ??
+            (includeGraph ? "unavailable" : null))
+          : null;
+        snapshots.set(cacheKey, {
+          contextPath: requestedContext,
+          repo: snapshot.repo,
+          status: snapshot.status,
+          graphRevision,
+          diffStats:
+            !largeChanges && cached?.repo?.repoRoot === snapshot.repo?.repoRoot
+              ? (cached?.diffStats ?? null)
+              : null,
+          revision: (cached?.revision ?? 0) + 1,
+          localError: null,
+          busyAction: null,
+          lastRemoteError: null,
+        });
+        if (!isCurrentRequest()) return;
+        if (!snapshot.repo || !snapshot.status) {
+          updateState((current) =>
+            current.contextPath === requestedContext &&
+            current.repo === null &&
+            current.localError === null
+              ? current
+              : {
+                  ...current,
+                  contextPath: requestedContext,
+                  repo: null,
+                  status: null,
+                  graphRevision: null,
+                  diffStats: null,
+                  localError: null,
+                },
+          );
+          return;
+        }
+        const previous = stateRef.current;
+        const shared = shareRepositorySnapshot(previous, snapshot);
+        const repo = shared.repo ?? snapshot.repo;
+        const status = shared.status ?? snapshot.status;
+
+        updateState((current) => ({
           ...current,
           contextPath: requestedContext,
-          repo: null,
-          status: null,
-          graphRevision: null,
-          diffStats: null,
-          localError,
-        };
-      });
-    } finally {
-      if (isCurrentRequest()) {
-        lastDurationRef.current = Date.now() - startedAt;
-        lastRefreshAtRef.current = Date.now();
-        schedulePollRef.current();
+          repo,
+          status,
+          revision: current.revision + 1,
+          // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
+          graphRevision,
+          diffStats:
+            !largeChanges && current.repo?.repoRoot === repo.repoRoot
+              ? current.diffStats
+              : null,
+          localError: null,
+        }));
+        snapshotReady();
+        // 清单先显示，统计沿用本轮状态；慢统计计入周期，不能与下一轮自动读取重叠。
+        if (
+          !largeChanges &&
+          foregroundRef.current &&
+          isWindowVisible() &&
+          isCurrentRequest()
+        ) {
+          try {
+            const stats = await native.gitPanelDiffStats(
+              repo.repoRoot,
+              snapshot.status,
+            );
+            if (!isCurrentRevision()) {
+              if (isCurrentRequest()) dirtyRef.current = true;
+              return;
+            }
+            const cached = snapshots.get(cacheKey);
+            if (
+              epochRef.current === requestedEpoch &&
+              cached?.status === snapshot.status
+            )
+              snapshots.set(cacheKey, { ...cached, diffStats: stats });
+            if (
+              isCurrentRequest() &&
+              foregroundRef.current &&
+              isWindowVisible()
+            ) {
+              updateState((current) => ({
+                ...current,
+                diffStats: shareDiffStats(current.diffStats, stats),
+              }));
+            }
+          } catch {
+            // 展示统计失败不覆盖已成功读取的仓库状态。
+            if (isCurrentRequest() && isCurrentRevision())
+              updateState((current) => ({ ...current, diffStats: null }));
+          }
+        }
+      } catch (error) {
+        if (!isCurrentRequest() || !isCurrentRevision()) return;
+        const localError = normalizeError(error);
+        updateState((current) => {
+          if (current.contextPath === requestedContext)
+            return current.localError === localError
+              ? current
+              : { ...current, localError };
+          return {
+            ...current,
+            contextPath: requestedContext,
+            repo: null,
+            status: null,
+            graphRevision: null,
+            diffStats: null,
+            localError,
+          };
+        });
+      } finally {
+        if (isCurrentRequest()) {
+          lastDurationRef.current = Date.now() - startedAt;
+          lastRefreshAtRef.current = Date.now();
+          schedulePollRef.current();
+        }
       }
-    }
-  }, [updateState, isAutoRefreshPaused]);
+    },
+    [updateState, isAutoRefreshPaused],
+  );
 
   const refreshQueue = useMemo(
     () =>
@@ -404,7 +430,7 @@ export function useRepositoryController(
   useEffect(() => () => refreshQueue.cancelPending(), [refreshQueue]);
 
   const refresh = useCallback(
-    (explicit = true) => {
+    (explicit = true, snapshotOnly = false) => {
       if (!explicit && isAutoRefreshPaused()) return Promise.resolve();
       explicitRefreshRef.current ||= explicit;
       if (!enabledRef.current || !isWindowVisible()) {
@@ -412,7 +438,7 @@ export function useRepositoryController(
         return Promise.resolve();
       }
       dirtyRef.current = false;
-      return refreshQueue.request();
+      return refreshQueue.request(snapshotOnly ? "mutation" : "invalidate");
     },
     [refreshQueue, isAutoRefreshPaused],
   );
@@ -446,31 +472,52 @@ export function useRepositoryController(
         return { ok: false, action: null, blocked: "diverged" };
       }
 
+      const requestedContext = contextPathRef.current;
+      const requestedWorkspace = workspaceKeyRef.current;
+      const requestedEpoch = epochRef.current;
+      const operationKey = `${requestedWorkspace}\0${repo.repoRoot}`;
+      if (remoteActionsRef.current.has(operationKey)) {
+        return { ok: false, action, blocked: "busy" };
+      }
+      remoteActionsRef.current.add(operationKey);
+      const isCurrentAction = () =>
+        mountedRef.current &&
+        contextPathRef.current === requestedContext &&
+        workspaceKeyRef.current === requestedWorkspace &&
+        epochRef.current === requestedEpoch;
       updateState((current) => ({ ...current, busyAction: action }));
 
+      let result: RepositoryRemoteActionResult;
       try {
         if (action === "fetch") {
           await native.gitFetch(repo.repoRoot);
         } else if (action === "pull") {
-          await native.gitFetch(repo.repoRoot);
           await native.gitPullFfOnly(repo.repoRoot);
         } else {
           await native.gitPush(repo.repoRoot);
         }
-        updateState((current) => ({ ...current, lastRemoteError: null }));
-        await refresh();
-        return { ok: true, action };
+        if (isCurrentAction())
+          updateState((current) => ({ ...current, lastRemoteError: null }));
+        result = { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
-        updateState((current) => ({
-          ...current,
-          lastRemoteError: message,
-        }));
-        await refresh().catch(() => {});
-        return { ok: false, action, error: message };
-      } finally {
-        updateState((current) => ({ ...current, busyAction: null }));
+        if (isCurrentAction())
+          updateState((current) => ({ ...current, lastRemoteError: message }));
+        result = { ok: false, action, error: message };
       }
+      mutationRevisions.set(
+        requestedWorkspace,
+        (mutationRevisions.get(requestedWorkspace) ?? 0) + 1,
+      );
+      try {
+        // 操作结果独立于刷新结果；只等待操作后的快照，不等待行数统计或后续事件。
+        if (isCurrentAction()) await refresh(true, true);
+      } finally {
+        remoteActionsRef.current.delete(operationKey);
+        if (isCurrentAction())
+          updateState((current) => ({ ...current, busyAction: null }));
+      }
+      return result;
     },
     [refresh, updateState],
   );
@@ -492,21 +539,8 @@ export function useRepositoryController(
     const run = () => {
       void refresh(false);
     };
-    const idle =
-      typeof window.requestIdleCallback === "function"
-        ? window.requestIdleCallback(run, { timeout: 600 })
-        : (window.setTimeout(run, 0) as unknown as number);
-    return () => {
-      if (typeof window.cancelIdleCallback === "function") {
-        try {
-          window.cancelIdleCallback(idle as number);
-        } catch {
-          /* 忽略已失效的 idle 回调 */
-        }
-      } else {
-        window.clearTimeout(idle as number);
-      }
-    };
+    const timer = window.setTimeout(run, 0);
+    return () => window.clearTimeout(timer);
   }, [
     refresh,
     refreshQueue,

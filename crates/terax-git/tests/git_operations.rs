@@ -44,6 +44,74 @@ fn panel_diff_stats(
 }
 
 #[test]
+fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let origin = TempDir::new().unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--bare", "-q"])
+        .arg(origin.path())
+        .status()
+        .unwrap()
+        .success());
+    fx.write_file("file.txt", "seed\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-qm", "seed"]);
+    fx.run_git(&["remote", "add", "origin", &to_canon(origin.path())]);
+    fx.run_git(&["push", "-qu", "origin", "main"]);
+    fx.write_file("file.txt", "next\n");
+    fx.run_git(&["commit", "-qam", "next"]);
+    let hook = fx.repo_path.join(".git/hooks/pre-push");
+    std::fs::write(&hook,
+        "#!/bin/sh\nprintf 'push\\n' >>.git/push-calls\n: >.git/push-started\ni=0\nwhile [ ! -f .git/push-release ] && [ \"$i\" -lt 1000 ]; do sleep 0.01; i=$((i+1)); done\nexit 1\n"
+    ).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| operations::push(&fx.registry, &fx.repo_str(), &fx.workspace));
+        let started = Instant::now();
+        let marker = fx.repo_path.join(".git/push-started");
+        while !marker.exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let entered_hook = marker.exists();
+        let duplicate = operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace);
+        std::fs::write(fx.repo_path.join(".git/push-release"), "release").unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(entered_hook, "push never reached the test hook");
+        assert!(matches!(duplicate, Err(GitError::RemoteOperationBusy)));
+    });
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_path.join(".git/push-calls")).unwrap(),
+        "push\n"
+    );
+    // 失败后释放原生防重入，后续显式获取可以正常执行。
+    operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    fx.run_git(&[
+        "remote",
+        "set-url",
+        "origin",
+        &to_canon(origin.path().join("missing")),
+    ]);
+    // origin 已不可访问，展示读取仍只依赖工作树及现有引用。
+    let snapshot =
+        operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, true).unwrap();
+    assert_eq!(snapshot.status.unwrap().ahead, 1);
+    assert_eq!(
+        operations::log(&fx.registry, &fx.repo_str(), 40, 0, &fx.workspace)
+            .unwrap()
+            .len(),
+        2
+    );
+    panel_diff_stats(&fx).unwrap();
+}
+
+#[test]
 fn resolve_repo_returns_none_outside_repo() {
     if skip_if_no_git() {
         return;
@@ -1172,10 +1240,6 @@ fn merge_with_unchanged_first_parent_tree_reports_no_changes() {
     let history = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
     let merge = &history[0];
     assert_eq!(merge.parents.len(), 2);
-    assert_eq!(
-        (merge.files_changed, merge.insertions, merge.deletions),
-        (0, 0, 0)
-    );
     let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge.sha, &fx.workspace)
         .expect("unchanged merge files");
     assert!(files.is_empty());
@@ -1183,10 +1247,11 @@ fn merge_with_unchanged_first_parent_tree_reports_no_changes() {
         .iter()
         .find(|entry| entry.subject == "feature")
         .unwrap();
-    assert_eq!(
-        (feature.files_changed, feature.insertions, feature.deletions),
-        (1, 1, 0)
-    );
+    let feature_files =
+        operations::commit_files(&fx.registry, &fx.repo_str(), &feature.sha, &fx.workspace)
+            .unwrap();
+    assert_eq!(feature_files.len(), 1);
+    assert_eq!((feature_files[0].added, feature_files[0].removed), (1, 0));
 }
 
 #[test]

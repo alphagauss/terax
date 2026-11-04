@@ -1,4 +1,5 @@
 {
+  "remoteActionBusy": "Another Git remote operation is already running for this repository.",
   "largeChanges": "{{count}} changed files. Automatic refresh and line counts are paused. Refresh manually to update.",
   "pagination": {
     "previous": "Previous",

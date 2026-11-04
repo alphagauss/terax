@@ -29,9 +29,6 @@ const commit: GitLogEntry = {
   timestampSecs: 1,
   parents: ["main", "feature"],
   refs: [],
-  filesChanged: 0,
-  insertions: 0,
-  deletions: 0,
 };
 const files: GitCommitFileChange[] = [
   {
@@ -124,12 +121,8 @@ it("普通提交也使用文件汇总且不显示合并基准提示", async () =
     {
       ...commit,
       parents: ["main"],
-      filesChanged: 99,
-      insertions: 99,
-      deletions: 99,
     },
   );
   expect(container.textContent).toContain("filesChanged:3");
   expect(container.textContent).not.toContain("relativeToFirstParent");
-  expect(container.textContent).not.toContain(":99");
 });

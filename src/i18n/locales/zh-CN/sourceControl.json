@@ -1,4 +1,5 @@
 {
+  "remoteActionBusy": "此仓库已有 Git 远程操作正在执行，请等待完成。",
   "largeChanges": "共 {{count}} 个改动文件，已暂停自动刷新和行数统计。请手动刷新以更新。",
   "pagination": {
     "previous": "上一页",

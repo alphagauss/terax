@@ -54,9 +54,6 @@ const entry = (sha: string): GitFileHistoryEntry => ({
   timestampSecs: 1,
   parents: [],
   refs: [],
-  filesChanged: 0,
-  insertions: 0,
-  deletions: 0,
   path: "src/old.ts",
   originalPath: "src/older.ts",
 });

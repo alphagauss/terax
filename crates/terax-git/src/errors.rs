@@ -22,6 +22,7 @@ pub enum GitError {
     },
     SymlinkRejected(PathBuf),
     NoUpstream,
+    RemoteOperationBusy,
     AuthRequired(String),
     HostKeyUnverified,
     TimedOut(&'static str),
@@ -73,6 +74,7 @@ impl Display for GitError {
                 f,
                 "no upstream configured. Run `git push -u <remote> <branch>` in the terminal first."
             ),
+            GitError::RemoteOperationBusy => write!(f, "git_remote_operation_busy"),
             GitError::AuthRequired(detail) => write!(
                 f,
                 "authentication required: {detail}. Configure a credential helper or SSH key."

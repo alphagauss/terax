@@ -163,9 +163,6 @@ pub struct GitLogEntry {
     pub parents: Vec<String>,
     pub refs: Vec<GitLogRef>,
     pub subject: String,
-    pub files_changed: u32,
-    pub insertions: u32,
-    pub deletions: u32,
 }
 
 /// 单文件历史保留每次提交中的路径，重命名前的记录不能使用当前文件名打开。

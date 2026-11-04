@@ -20,7 +20,7 @@ pub(crate) mod delete;
 pub(crate) mod file_sync;
 pub(crate) mod file_version;
 pub(crate) mod file_write;
-pub(crate) mod git_read;
+pub(crate) mod git_batch;
 pub(crate) mod grep;
 pub(crate) mod ripgrep;
 pub(crate) mod sftp_fallback;
@@ -32,8 +32,8 @@ pub(crate) const TASK_OUTPUT_LIMIT: usize = 1024;
 /// 允许通过封闭任务运行时执行的内部操作。
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum TaskKind {
-    /// Git 面板只读批次。
-    GitRead,
+    /// Git 固定采集批次与用户显式联网操作。
+    GitBatch,
     /// 按版本条件写入文件。
     FileWriteChecked,
     /// 仅在目标缺失时创建文件。
@@ -73,7 +73,7 @@ pub(crate) enum TaskKind {
 impl TaskKind {
     fn name(self) -> &'static str {
         match self {
-            Self::GitRead => "git_read",
+            Self::GitBatch => "git_batch",
             Self::FileWriteChecked => "file_write_checked",
             Self::FileWriteMissing => "file_write_missing",
             Self::FileWriteOverwrite => "file_write_overwrite",
