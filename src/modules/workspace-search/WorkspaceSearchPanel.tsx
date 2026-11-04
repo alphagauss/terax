@@ -3,6 +3,12 @@
  * 面板按需调用统一搜索后端并在内存中保留查询，不建立索引、监听器或持久搜索历史。
  */
 
+import {
+  useViewActive,
+  useViewState,
+  useViewCommand,
+  useViewScroll,
+} from "@/modules/view-state";
 import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -25,7 +31,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useCallback,
-  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -63,28 +68,57 @@ type Props = {
 export const WorkspaceSearchPanel = forwardRef<
   WorkspaceSearchPanelHandle,
   Props
->(function WorkspaceSearchPanel({ rootPath, visible, onOpenHit }, ref) {
+>(function WorkspaceSearchPanel(
+  { rootPath, visible: requestedVisible, onOpenHit },
+  ref,
+) {
   const { t } = useTranslation("workspaceSearch");
   const patternRef = useRef<FindPatternFieldHandle>(null);
   const requestIdRef = useRef(0);
-  const previousRootRef = useRef(rootPath);
-  const [query, setQuery] = useState("");
-  const [options, setOptions] = useState<FindOptions>({
-    caseSensitive: false,
-    wholeWord: false,
-    regexp: false,
-  });
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [includeInput, setIncludeInput] = useState("");
-  const [excludeInput, setExcludeInput] = useState("");
-  const [response, setResponse] = useState<ContentSearchResponse | null>(null);
+  const visible = useViewActive(requestedVisible);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useViewState(`query:${rootPath}`, "");
+  const [options, setOptions] = useViewState<FindOptions>(
+    `options:${rootPath}`,
+    {
+      caseSensitive: false,
+      wholeWord: false,
+      regexp: false,
+    },
+  );
+  const [detailsOpen, setDetailsOpen] = useViewState(
+    `details:${rootPath}`,
+    false,
+  );
+  const [includeInput, setIncludeInput] = useViewState(
+    `include:${rootPath}`,
+    "",
+  );
+  const [excludeInput, setExcludeInput] = useViewState(
+    `exclude:${rootPath}`,
+    "",
+  );
+  const [response, setResponse] = useViewState<ContentSearchResponse | null>(
+    `response:${rootPath}`,
+    null,
+  );
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
+  const [error, setError] = useViewState<string | null>(
+    `error:${rootPath}`,
+    null,
+  );
+  const [refreshVersion, setRefreshVersion] = useViewState(
+    `refresh:${rootPath}`,
+    0,
+  );
+  const [collapsedFiles, setCollapsedFiles] = useViewState<Set<string>>(
+    `collapsed:${rootPath}`,
     () => new Set(),
   );
-  const [selectedHitKey, setSelectedHitKey] = useState<string | null>(null);
+  const [selectedHitKey, setSelectedHitKey] = useViewState<string | null>(
+    `selected:${rootPath}`,
+    null,
+  );
 
   const groups = useMemo(
     () => groupContentHits(response?.hits ?? []),
@@ -104,20 +138,15 @@ export const WorkspaceSearchPanel = forwardRef<
   }, []);
   useImperativeHandle(ref, () => ({ focus }), [focus]);
 
-  useEffect(() => {
-    if (previousRootRef.current === rootPath) return;
-    previousRootRef.current = rootPath;
-    requestIdRef.current += 1;
-    setQuery("");
-    setResponse(null);
-    setLoading(false);
-    setError(null);
-    setCollapsedFiles(new Set());
-    setSelectedHitKey(null);
-  }, [rootPath]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshVersion 只用于显式重新执行完全相同的查询。
-  useEffect(() => {
+  const requestKey = JSON.stringify([
+    rootPath,
+    query,
+    options,
+    includeInput,
+    excludeInput,
+    refreshVersion,
+  ]);
+  useViewCommand("content-search", requestKey, visible, () => {
     const requestId = ++requestIdRef.current;
     const pattern = query;
     if (!visible || !rootPath) {
@@ -172,17 +201,20 @@ export const WorkspaceSearchPanel = forwardRef<
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(handle);
+      requestIdRef.current++;
+      setLoading(false);
       if (searchActive) void cancelContentSearch(rootPath).catch(() => {});
     };
-  }, [
-    excludeInput,
-    includeInput,
-    options,
-    query,
-    refreshVersion,
-    rootPath,
-    visible,
-  ]);
+  });
+  const resultKeys = useMemo(
+    () =>
+      groups.flatMap((group) => [
+        group.rel,
+        ...(collapsedFiles.has(group.rel) ? [] : group.hits.map(hitKey)),
+      ]),
+    [groups, collapsedFiles],
+  );
+  const attachScroll = useViewScroll("results", scrollRef, resultKeys, visible);
 
   const clear = () => {
     requestIdRef.current += 1;
@@ -305,7 +337,10 @@ export const WorkspaceSearchPanel = forwardRef<
         ) : null}
       </div>
 
-      <div className="app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+      <div
+        ref={attachScroll}
+        className="app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+      >
         <div className="py-1">
           {!rootPath ? (
             <EmptyState>{t("noWorkspace")}</EmptyState>
@@ -342,6 +377,7 @@ export const WorkspaceSearchPanel = forwardRef<
                   <div key={group.rel}>
                     <button
                       type="button"
+                      data-view-row={group.rel}
                       aria-expanded={!collapsed}
                       onClick={() =>
                         setCollapsedFiles((current) => {
@@ -387,6 +423,7 @@ export const WorkspaceSearchPanel = forwardRef<
                             key={hitKey(hit)}
                           >
                             <button
+                              data-view-row={hitKey(hit)}
                               aria-label={`${hit.rel}:${hit.line}`}
                               type="button"
                               aria-current={

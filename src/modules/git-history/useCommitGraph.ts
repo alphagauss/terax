@@ -1,6 +1,12 @@
 /** 提交图谱的详情缓存、展开行和悬停生命周期。 */
 
 import {
+  useViewActive,
+  useViewState,
+  useViewScopeKey,
+  readViewResource,
+} from "@/modules/view-state";
+import {
   TOOLTIP_DELAY_MS,
   TOOLTIP_SKIP_DELAY_MS,
 } from "@/components/controls/tooltip";
@@ -57,13 +63,28 @@ export function flattenCommitRows(
   });
 }
 
-export function useCommitGraph(repoRoot: string | null, visible: boolean) {
-  const [files, setFiles] = useState(new Map<string, CommitDetailFilesEntry>());
+export function useCommitGraph(
+  repoRoot: string | null,
+  requestedVisible: boolean,
+) {
+  const visible = useViewActive(requestedVisible);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const viewScope = useViewScopeKey();
+  const [files, setFiles] = useViewState(
+    `commitFiles:${repoRoot}`,
+    () => new Map<string, CommitDetailFilesEntry>(),
+  );
   const cache = useRef(files);
   const generation = useRef(0);
-  const [expanded, setExpanded] = useState(new Set<string>());
+  const requests = useRef(new Set<string>());
+  const [expanded, setExpanded] = useViewState(
+    `commitsExpanded:${repoRoot}`,
+    () => new Set<string>(),
+  );
   const expandedRef = useRef(expanded);
-  const repository = useRef(repoRoot);
+  cache.current = files;
+  expandedRef.current = expanded;
   const [anchor, setAnchor] = useState<{
     sha: string;
     element: HTMLElement;
@@ -89,9 +110,16 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
 
   const fetchFiles = useCallback(
     async (sha: string, retry = false) => {
-      if (!repoRoot) return;
+      if (!repoRoot || !visibleRef.current) return;
       const existing = cache.current.get(sha);
-      if (existing && !(retry && existing.state === "error")) return;
+      if (
+        requests.current.has(sha) ||
+        (existing &&
+          existing.state !== "loading" &&
+          !(retry && existing.state === "error"))
+      )
+        return;
+      requests.current.add(sha);
       const request = generation.current;
       const write = (entry: CommitDetailFilesEntry) => {
         cache.current = new Map(cache.current).set(sha, entry);
@@ -112,10 +140,14 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
       };
       write({ state: "loading" });
       try {
-        const [changes, message] = await Promise.all([
-          native.gitCommitFiles(repoRoot, sha),
-          native.gitCommitMessage(repoRoot, sha),
-        ]);
+        const [changes, message] = await readViewResource(
+          `commit-detail:${repoRoot}:${sha}`,
+          () =>
+            Promise.all([
+              native.gitCommitFiles(repoRoot, sha),
+              native.gitCommitMessage(repoRoot, sha),
+            ]),
+        );
         if (request === generation.current)
           write({ state: "loaded", files: changes, message });
       } catch (error) {
@@ -124,21 +156,12 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
             state: "error",
             error: error instanceof Error ? error.message : String(error),
           });
+      } finally {
+        if (request === generation.current) requests.current.delete(sha);
       }
     },
     [repoRoot],
   );
-
-  const reset = useCallback(() => {
-    generation.current += 1;
-    cache.current = new Map();
-    setFiles(cache.current);
-    expandedRef.current = new Set();
-    setExpanded(expandedRef.current);
-    blocked.current = null;
-    close();
-    warmUntil.current = 0;
-  }, [close]);
 
   /** 刷新后只清理已消失提交的交互状态，SHA 不变的详情缓存仍有效。 */
   const retainCommits = useCallback(
@@ -157,18 +180,24 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
   );
 
   useEffect(() => {
-    if (repository.current !== repoRoot) reset();
-    repository.current = repoRoot;
+    void repoRoot;
+    void viewScope;
+    close();
+    blocked.current = null;
+    warmUntil.current = 0;
     return () => {
       generation.current += 1;
+      requests.current.clear();
       clearTimeout(openTimer.current);
       clearTimeout(closeTimer.current);
     };
-  }, [repoRoot, reset]);
+  }, [repoRoot, viewScope, close]);
 
   useEffect(() => {
+    void viewScope;
     if (!visible) close();
-  }, [visible, close]);
+    else for (const sha of expandedRef.current) void fetchFiles(sha);
+  }, [visible, close, fetchFiles, viewScope]);
 
   const enter = useCallback(
     (sha: string, element: HTMLElement, immediate = false) => {
@@ -230,7 +259,6 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
       dismiss,
       toggle,
       fetchFiles,
-      reset,
       retainCommits,
     }),
     [
@@ -244,7 +272,6 @@ export function useCommitGraph(repoRoot: string | null, visible: boolean) {
       dismiss,
       toggle,
       fetchFiles,
-      reset,
       retainCommits,
     ],
   );

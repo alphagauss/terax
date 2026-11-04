@@ -2,9 +2,10 @@
  * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
  * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
  * Changes 使用轻量普通行与共享菜单、提示，侧栏切换保留展示树；open 控制展示统计和 Graph，
- * 共享仓库控制器在后台保留基础状态校验，停止展示统计。
+ * 共享仓库控制器仅为可见消费者校验基础状态，隐藏时停止展示统计。
  */
 
+import { useViewState, useViewScroll } from "@/modules/view-state";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -397,11 +398,17 @@ function SourceControlViewContainerComponent({
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState({
-    index: false,
-    worktree: false,
-  });
-  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useViewState(
+    "collapsedGroups",
+    {
+      index: false,
+      worktree: false,
+    },
+  );
+  const [focusedRowKey, setFocusedRowKey] = useViewState<string | null>(
+    "focusedRow",
+    null,
+  );
   const [contextRowKey, setContextRowKey] = useState<string | null>(null);
   const [hintTarget, setHintTarget] = useState<HTMLElement | null>(null);
   const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
@@ -423,8 +430,14 @@ function SourceControlViewContainerComponent({
   useEffect(() => {
     if (!open) clearHover();
   }, [open, clearHover]);
-  const [graphRefreshToken, setGraphRefreshToken] = useState(0);
-  const [graphSearchOpen, setGraphSearchOpen] = useState(false);
+  const [graphRefreshToken, setGraphRefreshToken] = useViewState(
+    "graphRefreshToken",
+    0,
+  );
+  const [graphSearchOpen, setGraphSearchOpen] = useViewState(
+    "graphSearchOpen",
+    false,
+  );
   const showUndoCommit = usePreferencesStore(
     (state) => state.sourceControlShowUndoCommit,
   );
@@ -563,6 +576,9 @@ function SourceControlViewContainerComponent({
       ),
     [groups, collapsedGroups],
   );
+
+  const rowKeys = useMemo(() => rows.map((row) => row.key), [rows]);
+  const attachScroll = useViewScroll("changes", scrollRef, rowKeys, open);
 
   const rowKeyToIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -1031,7 +1047,7 @@ function SourceControlViewContainerComponent({
                                     setHintTarget(null)
                                   }
                                   onScroll={clearHover}
-                                  ref={scrollRef}
+                                  ref={attachScroll}
                                   data-reveal-boundary
                                   className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
                                 >
@@ -1394,6 +1410,7 @@ const EntryRow = memo(function EntryRow({
   return (
     <div
       id={`scm-row-${entry.key}`}
+      data-view-row={entry.key}
       data-scm-row-key={entry.key}
       data-focused={focused || undefined}
       role="option"

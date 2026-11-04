@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   remoteReady: true,
   runtimePhase: "idle",
   names: ["file.txt"],
+  childNodes: {} as Record<string, unknown>,
 }));
 
 afterEach(() => {
@@ -31,6 +32,7 @@ afterEach(() => {
   mocks.remoteReady = true;
   mocks.runtimePhase = "idle";
   mocks.names = ["file.txt"];
+  mocks.childNodes = {};
 });
 
 vi.mock("@/components/controls/button", () => ({
@@ -214,6 +216,7 @@ vi.mock("./lib/useGitStatus", () => ({
 }));
 vi.mock("./lib/useFileTree", () => ({
   ancestorDirs: () => [],
+  dirname: (value: string) => value.slice(0, value.lastIndexOf("/")),
   useFileTree: () => ({
     beginCreate: vi.fn(),
     beginRename: vi.fn(),
@@ -225,17 +228,18 @@ vi.mock("./lib/useFileTree", () => ({
     deletePath: vi.fn(),
     deletingPaths: new Set<string>(),
     expand: vi.fn(),
-    expanded: new Set<string>(),
+    expanded: new Set(Object.keys(mocks.childNodes)),
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     movePath: vi.fn(),
     nodes: {
+      ...mocks.childNodes,
       "/home/remote": {
         status: mocks.rootStatus,
         entries: mocks.empty
           ? []
           : mocks.names.map((name) => ({
               name,
-              kind: "file",
+              kind: mocks.childNodes[`/home/remote/${name}`] ? "dir" : "file",
               gitignored: false,
             })),
       },
@@ -354,6 +358,46 @@ it("keeps every file row mounted across sidebar switches and locates the active 
         .querySelector("[data-timeline-enabled]")
         ?.getAttribute("data-timeline-enabled"),
     ).toBe("false");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("恢复时等待所选文件的父目录加载完成，再判断选中项是否消失", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  mocks.names = ["src"];
+  const parent = "/home/remote/src";
+  const selected = `${parent}/file.txt`;
+  mocks.childNodes[parent] = {
+    status: "loaded",
+    entries: [{ name: "file.txt", kind: "file", gitignored: false }],
+  };
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const props = { rootPath: "/home/remote", onOpenFile: vi.fn() };
+  const selectedRow = () =>
+    container
+      .querySelector('[role="tree"]')
+      ?.getAttribute("aria-activedescendant");
+  const selectedId = `file-tree-item-${encodeURIComponent(selected)}`;
+  try {
+    await act(async () =>
+      root.render(
+        createElement(FileExplorer, {
+          ...props,
+          activeFilePath: selected,
+        }),
+      ),
+    );
+    expect(selectedRow()).toBe(selectedId);
+    mocks.childNodes[parent] = { status: "loading" };
+    await act(async () => root.render(createElement(FileExplorer, props)));
+    expect(selectedRow()).toBe(selectedId);
+    mocks.childNodes[parent] = { status: "loaded", entries: [] };
+    await act(async () =>
+      root.render(createElement(FileExplorer, { ...props, active: true })),
+    );
+    expect(selectedRow()).toBeNull();
   } finally {
     await act(async () => root.unmount());
   }

@@ -1,5 +1,10 @@
+import {
+  useViewActive,
+  useViewState,
+  readViewResource,
+} from "@/modules/view-state";
 import { native, type GitStatusSnapshot } from "@/modules/ai/lib/native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   bubbleUpDirectoryStatuses,
   buildGitStatusMap,
@@ -10,32 +15,35 @@ import {
 
 const EMPTY = new Map<string, GitStatusCode>();
 
-// Decorations ride the always-resident SC snapshot: no fetch, no watcher. When
-// the shared status does not cover the explorer root, nothing is shown rather
-// than triggering git work of our own.
+/** 文件树复用可见消费者共享的 Git 状态，不建立独立 Git 请求或监听。 */
 export function useGitStatus(
   workspaceRoot: string | null,
   status: GitStatusSnapshot | null | undefined,
   enabled: boolean,
 ) {
-  const [canonicalRoot, setCanonicalRoot] = useState<string | null>(null);
+  const active = useViewActive(enabled);
+  const [canonicalRoot, setCanonicalRoot] = useViewState<string | null>(
+    `canonicalRoot:${workspaceRoot}`,
+    null,
+  );
   const reqRef = useRef(0);
 
   useEffect(() => {
-    if (!enabled || !workspaceRoot) {
-      setCanonicalRoot(null);
-      return;
-    }
+    if (!active || !workspaceRoot) return;
     const req = ++reqRef.current;
-    void native
-      .canonicalize(workspaceRoot)
+    void readViewResource(`canonical:${workspaceRoot}`, () =>
+      native.canonicalize(workspaceRoot),
+    )
       .then((c) => {
         if (req === reqRef.current) setCanonicalRoot(c);
       })
       .catch(() => {
         if (req === reqRef.current) setCanonicalRoot(null);
       });
-  }, [enabled, workspaceRoot]);
+    return () => {
+      reqRef.current++;
+    };
+  }, [active, workspaceRoot]);
 
   const aliases = useMemo(() => {
     const out: string[] = [];

@@ -237,13 +237,10 @@ class SharedDocumentModel {
 
   getSnapshot = (): DocumentSnapshot => this.snapshot;
 
-  subscribe = (listener: Listener): (() => void) => {
+  subscribe = (listener: Listener, initialize = true): (() => void) => {
     this.cancelDisposal();
     this.listeners.add(listener);
-    if (!this.started) {
-      this.started = true;
-      void this.loadInitial(false);
-    }
+    if (initialize) this.ensureLoaded();
     syncRemotePolling();
 
     return () => {
@@ -251,6 +248,13 @@ class SharedDocumentModel {
       syncRemotePolling();
       if (this.listeners.size === 0) this.scheduleDisposal();
     };
+  };
+
+  /** 隐藏视图只订阅内存状态，首次展示才启动正文读取。 */
+  ensureLoaded = (): void => {
+    if (this.started) return;
+    this.started = true;
+    void this.loadInitial(false);
   };
 
   /** 接收编辑器内容变化，并根据当前冲突状态安排协调或自动保存。 */
@@ -758,13 +762,23 @@ class SharedDocumentModel {
 
   /** 更新一个视图是否处于前台，多个可见视图共享最高轮询优先级。 */
   setRemotePollingActive(owner: symbol, active: boolean): void {
+    const wasActive = this.remotePollOwners.get(owner);
     this.remotePollOwners.set(owner, active);
+    if (wasActive && !active) this.pauseAutomaticChecks();
     syncRemotePolling();
   }
 
   clearRemotePollingOwner(owner: symbol): void {
+    const wasActive = this.remotePollOwners.get(owner);
     this.remotePollOwners.delete(owner);
+    if (wasActive) this.pauseAutomaticChecks();
     syncRemotePolling();
+  }
+
+  private pauseAutomaticChecks(): void {
+    if ([...this.remotePollOwners.values()].some(Boolean)) return;
+    this.activationCheckPending = false;
+    this.reloadRequested = "none";
   }
 
   /** 仅为前台订阅者按固定周期探测远端。 */

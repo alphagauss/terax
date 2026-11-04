@@ -15,6 +15,30 @@ function deferred() {
 }
 
 describe("repository refresh queue", () => {
+  it("隐藏后丢弃待执行的补查，并释放轮间等待", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstRun = deferred();
+      const run = vi
+        .fn()
+        .mockReturnValueOnce(firstRun.promise)
+        .mockResolvedValue(undefined);
+      const queue = createRepositoryRefreshQueue(run, () => 4000);
+      const task = queue.request();
+      queue.request();
+      firstRun.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+      queue.cancelPending();
+      await task;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(run).toHaveBeenCalledTimes(1);
+      await queue.request();
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps invalidations arriving between the last read and queue cleanup", async () => {
     const run = vi.fn(async () => {});
     const queue = createRepositoryRefreshQueue(run);

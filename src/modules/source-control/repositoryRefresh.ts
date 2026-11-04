@@ -11,9 +11,11 @@ export function createRepositoryRefreshQueue(
   trailingDelay: () => number = () => 0,
 ): {
   request: (mode?: "invalidate" | "check") => Promise<void>;
+  cancelPending: () => void;
 } {
   let pending = false;
   let inflight: Promise<void> | null = null;
+  let releaseDelay: (() => void) | undefined;
 
   const request = (
     mode: "invalidate" | "check" = "invalidate",
@@ -29,7 +31,17 @@ export function createRepositoryRefreshQueue(
         if (pending) {
           const delay = trailingDelay();
           if (delay > 0)
-            await new Promise<void>((resolve) => setTimeout(resolve, delay));
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(() => {
+                releaseDelay = undefined;
+                resolve();
+              }, delay);
+              releaseDelay = () => {
+                clearTimeout(timer);
+                releaseDelay = undefined;
+                resolve();
+              };
+            });
         }
       }
     })().finally(() => {
@@ -41,5 +53,11 @@ export function createRepositoryRefreshQueue(
     return task;
   };
 
-  return { request };
+  return {
+    request,
+    cancelPending: () => {
+      pending = false;
+      releaseDelay?.();
+    },
+  };
 }

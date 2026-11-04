@@ -1,3 +1,9 @@
+import {
+  useViewState,
+  useViewScroll,
+  useViewActive,
+  useViewCommand,
+} from "@/modules/view-state";
 /**
  * 本文件实现 Source Control 的提交图谱区域。
  * 负责提交列表与分页，复用悬停详情及多提交文件展开交互。
@@ -64,7 +70,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -128,8 +133,8 @@ export const GraphSection = memo(function GraphSection({
   repoRoot,
   headBranch,
   headSha,
-  expanded,
-  present = expanded,
+  expanded: requestedExpanded,
+  present: requestedPresent,
   refreshToken,
   graphRevision,
   showUndoCommit,
@@ -139,11 +144,26 @@ export const GraphSection = memo(function GraphSection({
   searchOpen = false,
   onCloseSearch,
 }: Props) {
+  const expanded = useViewActive(requestedExpanded);
+  const present = requestedPresent ?? requestedExpanded;
   const { t } = useTranslation("gitHistory");
-  const [searchInput, setSearchInput] = useState("");
-  const [searchField, setSearchField] = useState<SearchField>("subject");
+  const [searchInput, setSearchInput] = useViewState("graphSearch", "");
+  const [searchField, setSearchField] = useViewState<SearchField>(
+    "graphSearchField",
+    "subject",
+  );
   const searchFieldRef = useRef<FindPatternFieldHandle>(null);
   const activeSearch = searchOpen ? searchInput.trim() : "";
+  const [searchPaging, setSearchPaging] = useState(false);
+  useViewCommand(
+    "graph-search",
+    JSON.stringify([activeSearch, searchField, refreshToken]),
+    expanded && !!activeSearch,
+    () => {
+      setSearchPaging(true);
+      return () => setSearchPaging(false);
+    },
+  );
   const graph = useCommitGraph(repoRoot, expanded);
   const {
     anchor: openAnchor,
@@ -154,22 +174,11 @@ export const GraphSection = memo(function GraphSection({
   } = graph;
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<{
+  const [selectedFile, setSelectedFile] = useViewState<{
     sha: string;
     path: string;
-  } | null>(null);
+  } | null>("graphSelectedFile", null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollTop = useRef(0);
-  const latestItems = useRef<ReturnType<typeof flattenCommitRows>>([]);
-  const restoreScroll = useRef<{
-    key?: string;
-    offset: number;
-    top: number;
-  } | null>(null);
-  const attachScroll = useCallback((element: HTMLDivElement | null) => {
-    scrollRef.current = element;
-    if (element) element.scrollTop = scrollTop.current;
-  }, []);
   const refreshKey = JSON.stringify([
     headBranch,
     headSha,
@@ -183,14 +192,6 @@ export const GraphSection = memo(function GraphSection({
   );
   const onInitialLoaded = useCallback(
     (next: GitLogEntry[]) => {
-      // 在替换列表前捕获当前阅读行，用户刷新期间的滚动和展开也应被保留。
-      const top = scrollRef.current?.scrollTop ?? scrollTop.current;
-      const index = Math.floor(top / ROW_HEIGHT);
-      restoreScroll.current = {
-        key: top > 0 ? latestItems.current[index]?.key : undefined,
-        offset: top % ROW_HEIGHT,
-        top,
-      };
       retainCommits(next);
       setSelectedFile((selected) =>
         selected && next.some((commit) => commit.sha === selected.sha)
@@ -222,13 +223,6 @@ export const GraphSection = memo(function GraphSection({
   }, [searchOpen]);
 
   useEffect(() => {
-    void repoRoot;
-    scrollTop.current = 0;
-    restoreScroll.current = null;
-    setSelectedFile(null);
-  }, [repoRoot]);
-
-  useEffect(() => {
     setPendingUndo((current) => (current?.sha === headSha ? current : null));
   }, [headSha]);
 
@@ -250,10 +244,8 @@ export const GraphSection = memo(function GraphSection({
     () => flattenCommitRows(filtered, graph.expanded, filesBySha),
     [filtered, graph.expanded, filesBySha],
   );
-  latestItems.current = items;
   const virtualizer = useVirtualizer({
     enabled: present,
-    initialOffset: () => scrollTop.current,
     count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
@@ -261,22 +253,14 @@ export const GraphSection = memo(function GraphSection({
     getItemKey: (index) => items[index]?.key ?? index,
   });
 
-  useLayoutEffect(() => {
-    const snapshot = restoreScroll.current;
-    if (!snapshot) return;
-    restoreScroll.current = null;
-    const index = snapshot.key
-      ? items.findIndex((item) => item.key === snapshot.key)
-      : -1;
-    const top =
-      index >= 0 ? index * ROW_HEIGHT + snapshot.offset : snapshot.top;
-    const maximum = Math.max(
-      0,
-      items.length * ROW_HEIGHT - (scrollRef.current?.clientHeight ?? 0),
-    );
-    scrollTop.current = Math.min(top, maximum);
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollTop.current;
-  }, [items]);
+  const itemKeys = useMemo(() => items.map((item) => item.key), [items]);
+  const attachScroll = useViewScroll(
+    `graph:${repoRoot}`,
+    scrollRef,
+    itemKeys,
+    expanded && present,
+    ROW_HEIGHT,
+  );
 
   const reveal = useCommitRowReveal(
     items,
@@ -322,13 +306,14 @@ export const GraphSection = memo(function GraphSection({
     if (!expanded || loadStatus !== "idle" || endReached) return;
     const scroll = scrollRef.current;
     if (
-      activeSearch ||
-      (scroll && scroll.scrollHeight <= scroll.clientHeight + NEAR_BOTTOM_PX)
+      activeSearch
+        ? searchPaging
+        : scroll && scroll.scrollHeight <= scroll.clientHeight + NEAR_BOTTOM_PX
     ) {
       const timer = window.setTimeout(() => void loadMore(), 0);
       return () => window.clearTimeout(timer);
     }
-  }, [activeSearch, endReached, expanded, loadMore, loadStatus]);
+  }, [activeSearch, searchPaging, endReached, expanded, loadMore, loadStatus]);
 
   const confirmUndo = useCallback(async () => {
     if (!repoRoot || !pendingUndo) return;
@@ -505,10 +490,10 @@ export const GraphSection = memo(function GraphSection({
             reveal.finish();
             closePopover();
             const target = event.currentTarget;
-            if (expanded) scrollTop.current = target.scrollTop;
             if (
+              (!activeSearch || searchPaging) &&
               target.scrollHeight - target.scrollTop - target.clientHeight <
-              NEAR_BOTTOM_PX
+                NEAR_BOTTOM_PX
             ) {
               void loadMore();
             }

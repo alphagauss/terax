@@ -182,7 +182,6 @@ describe("WorkingGitDiffPane", () => {
     );
     const mountedDiff = container.querySelector('[data-testid="split-diff"]');
 
-    await act(async () => renderPane(1, false));
     await act(async () => renderPane(1, true));
     expect(mocks.gitDiffContent).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="split-diff"]')).toBe(

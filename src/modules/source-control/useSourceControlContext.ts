@@ -4,7 +4,12 @@ import { useRepositoryController } from "./useRepositoryController";
 export function useSourceControlContext(
   explorerRoot: string | null,
   foreground: boolean,
+  decorationsVisible = false,
 ) {
-  const sourceControl = useRepositoryController(explorerRoot, true, foreground);
+  const sourceControl = useRepositoryController(
+    explorerRoot,
+    foreground || decorationsVisible,
+    foreground,
+  );
   return { sourceControl };
 }

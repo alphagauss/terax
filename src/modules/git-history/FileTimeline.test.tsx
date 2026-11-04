@@ -1,3 +1,4 @@
+import { resetViewCachesForTests } from "@/modules/view-state/cache";
 // @vitest-environment happy-dom
 
 import { native, type GitFileHistoryEntry } from "@/modules/ai/lib/native";
@@ -96,6 +97,7 @@ function scrollToBottom() {
   return scroll;
 }
 beforeEach(() => {
+  resetViewCachesForTests();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   vi.mocked(native.gitFileHistory)
@@ -208,9 +210,10 @@ it("快速切换文件和 HEAD 后，迟到的上一文件分页不能覆盖新�
   await render();
   await act(async () => scrollToBottom());
   await render({ path: "/repo/next.ts" });
-  expect(container.textContent).toContain("Commit new-file");
   expect(container.textContent).not.toContain("Commit old-0");
+  expect(native.gitFileHistory).toHaveBeenCalledTimes(2);
   await act(async () => more.resolve([entry("late")]));
+  expect(container.textContent).toContain("Commit new-file");
   expect(container.textContent).not.toContain("Commit late");
   await render({ path: "/repo/next.ts", headSha: "next-head" });
   expect(container.textContent).toContain("Commit new-head");

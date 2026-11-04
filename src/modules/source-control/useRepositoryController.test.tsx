@@ -1,3 +1,4 @@
+import { resetViewCachesForTests } from "@/modules/view-state/cache";
 /**
  * 本文件测试 Repository Controller 的真实刷新与上下文切换。
  * 锁定相同状态仍推进 revision、嵌套路径重新发现仓库，以及陈旧请求不得覆盖新上下文。
@@ -87,6 +88,7 @@ let root: Root | null = null;
 let controller: RepositoryController | null = null;
 
 beforeEach(() => {
+  resetViewCachesForTests();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mocks.workspaceKey = "local";
   mocks.gitPanelDiffStats.mockResolvedValue({ index: null, worktree: null });
@@ -120,6 +122,57 @@ afterEach(async () => {
 });
 
 describe("useRepositoryController", () => {
+  it("没有可见消费者时停止读取，切回仓库先显示缓存再校验", async () => {
+    vi.useFakeTimers();
+    mocks.gitPanelSnapshot.mockImplementation(async (path) =>
+      repositorySnapshot(path),
+    );
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () => root?.render(<Probe contextPath="C:/b" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/a" enabled={false} />),
+    );
+    expect(controller?.repo?.repoRoot).toBe("C:/a");
+    expect(controller?.isLoading).toBe(false);
+    const count = mocks.gitPanelSnapshot.mock.calls.length;
+    expect(mocks.changeListeners.size).toBe(0);
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(count);
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    expect(controller?.repo?.repoRoot).toBe("C:/a");
+    expect(controller?.isLoading).toBe(false);
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(count + 1);
+  });
+
+  it("隐藏后慢快照只进入缓存，不继续统计或待执行补查", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<GitPanelSnapshot>();
+    mocks.gitPanelSnapshot.mockReturnValueOnce(pending.promise);
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () => {
+      void controller?.refresh();
+    });
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/repo" enabled={false} />),
+    );
+    await act(async () => pending.resolve(repositorySnapshot("C:/repo")));
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.gitPanelDiffStats).not.toHaveBeenCalled();
+    mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/repo"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    expect(controller?.repo?.repoRoot).toBe("C:/repo");
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledTimes(1);
+  });
+
   it("rechecks after resuming during an inflight read", async () => {
     vi.useFakeTimers();
     const visibility = vi
@@ -356,7 +409,7 @@ describe("useRepositoryController", () => {
     );
     expect(controller?.isLoading).toBe(false);
     await act(async () => root?.render(<Probe contextPath="C:/next" />));
-    expect(controller?.isLoading).toBe(true);
+    expect(controller?.isLoading).toBe(false);
     await act(async () => vi.advanceTimersByTimeAsync(600));
     expect(controller?.isLoading).toBe(false);
     await act(async () => root?.render(<Probe contextPath={null} />));

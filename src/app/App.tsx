@@ -2,6 +2,7 @@
  * 本文件协调 Terax 主窗口的工作区、终端、侧栏和全局交互状态。
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
+import { pruneViewStates, useViewActive } from "@/modules/view-state";
 import { EditorContextMenu } from "@/components/menu/EditorContextMenu";
 import { PageContextMenu } from "@/components/menu/PageContextMenu";
 import { ChannelsPanel } from "@/modules/channels/components/lazy";
@@ -1024,10 +1025,22 @@ export default function App() {
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
+  const windowVisible = useViewActive();
+  const sourceControlVisible =
+    windowVisible && sidebar.isVisible("source-control") && !zenMode;
+  const explorerVisible =
+    windowVisible && sidebar.isVisible("explorer") && !zenMode;
   const { sourceControl } = useSourceControlContext(
     explorerRoot,
-    sidebar.isVisible("source-control"),
+    sourceControlVisible,
+    explorerVisible && explorerGitDecorations,
   );
+  useEffect(() => {
+    pruneViewStates(
+      new Set(spaces.map((space) => space.id)),
+      new Set(tabs.map((tab) => String(tab.id))),
+    );
+  }, [spaces, tabs]);
 
   const openWebPreviewTab = useCallback(
     (url: string, groupId?: number) => {
@@ -1866,7 +1879,7 @@ export default function App() {
       id: "source-control",
       content: (
         <SourceControlViewContainer
-          open={sidebar.isVisible("source-control")}
+          open={sourceControlVisible}
           sourceControl={sourceControl}
           onOpenDiff={(path) =>
             openWorkspaceFromSidebar("source-control", () =>
@@ -1892,7 +1905,9 @@ export default function App() {
     {
       id: "channels",
       content: (
-        <ChannelsPanel visible={sidebar.isVisible("channels") && !zenMode} />
+        <ChannelsPanel
+          visible={windowVisible && sidebar.isVisible("channels") && !zenMode}
+        />
       ),
     },
     {
@@ -1900,7 +1915,7 @@ export default function App() {
       content: (
         <AiSidebarPanel
           hasComposer={hasComposer}
-          visible={sidebar.isVisible("ai")}
+          visible={windowVisible && sidebar.isVisible("ai") && !zenMode}
         />
       ),
     },
@@ -2063,6 +2078,9 @@ export default function App() {
                           actions={workbenchActions}
                           services={workbenchServices}
                           hideTabBars={zenMode}
+                          visible={
+                            windowVisible && !secondaryPresentationActive
+                          }
                         />
                       </div>
 
@@ -2163,6 +2181,7 @@ export default function App() {
               </ResizablePanel>
             </ResizablePanelGroup>
             <SidebarViewPool
+              scopeKey={`${activeSpaceId ?? DEFAULT_SPACE_ID}\0${explorerRoot ?? ""}`}
               views={sidebarViews}
               placements={sidebar.placements}
               runtime={sidebar.runtime}

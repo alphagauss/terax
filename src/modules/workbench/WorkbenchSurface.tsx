@@ -19,6 +19,7 @@ type Props = {
   actions: WorkbenchChromeActions;
   services: WorkbenchViewServices;
   hideTabBars?: boolean;
+  visible?: boolean;
 };
 
 /** 渲染当前 Space 的稳定 Workbench 视图池和递归分组布局。 */
@@ -28,6 +29,7 @@ export function WorkbenchSurface({
   actions,
   services,
   hideTabBars = false,
+  visible = true,
 }: Props) {
   const space = state.spaces[activeSpaceId];
   if (!space) return null;
@@ -48,6 +50,7 @@ export function WorkbenchSurface({
         tabs={Object.values(state.tabs)}
         activeSpaceId={activeSpaceId}
         services={services}
+        visible={visible}
       />
     </div>
   );

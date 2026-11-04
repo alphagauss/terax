@@ -5,6 +5,11 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import {
+  useViewActive,
+  useViewState,
+  useViewScroll,
+} from "@/modules/view-state";
 import { FolderSyncDialog } from "@/modules/transfers/FolderSyncDialog";
 import { DirectoryPathInput } from "@/modules/workspace/DirectoryPathInput";
 import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
@@ -92,7 +97,11 @@ import type { GitStatusCode } from "@/modules/explorer/lib/gitStatusUtils";
 import { folderIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { useExplorerDnd } from "@/modules/explorer/lib/useExplorerDnd";
 import { useExplorerFileDrop } from "@/modules/explorer/lib/useExplorerFileDrop";
-import { ancestorDirs, useFileTree } from "@/modules/explorer/lib/useFileTree";
+import {
+  ancestorDirs,
+  dirname,
+  useFileTree,
+} from "@/modules/explorer/lib/useFileTree";
 import { useGitStatus } from "@/modules/explorer/lib/useGitStatus";
 import {
   EntryRow,
@@ -413,7 +422,7 @@ export const FileExplorer = memo(
     {
       rootPath,
       rootPending,
-      active,
+      active: requestedActive,
       onOpenFolder,
       openFolderLabel,
       onOpenInNewSpace,
@@ -434,8 +443,12 @@ export const FileExplorer = memo(
     ref,
   ) {
     const { t } = useTranslation(["explorer", "statusbar"]);
+    const active = useViewActive(requestedActive);
     const repository = useRepositorySnapshot();
-    const [timelineRefreshToken, setTimelineRefreshToken] = useState(0);
+    const [timelineRefreshToken, setTimelineRefreshToken] = useViewState(
+      "timelineRefreshToken",
+      0,
+    );
     const tree = useFileTree(rootPath, {
       onPathRenamed,
       onPathDeleted,
@@ -518,8 +531,11 @@ export const FileExplorer = memo(
       gitDecorations ? gitStatus : null,
       gitDecorations,
     );
-    const [selectedPath, setSelectedPath] = useState<string | null>(null);
-    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [selectedPath, setSelectedPath] = useViewState<string | null>(
+      "selectedPath",
+      null,
+    );
+    const [isSearchOpen, setIsSearchOpen] = useViewState("searchOpen", false);
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -543,6 +559,22 @@ export const FileExplorer = memo(
       lookupGitStatus,
       t,
     ]);
+
+    const rowKeys = useMemo(() => rows.map((row) => row.key), [rows]);
+    const attachScroll = useViewScroll(
+      "tree",
+      scrollRef,
+      rowKeys,
+      active && !isSearchActive,
+      24,
+    );
+    const attachTree = useCallback(
+      (node: HTMLDivElement | null) => {
+        attachScroll(node);
+        treeRef.current = node;
+      },
+      [attachScroll],
+    );
 
     const rowActions = useMemo<RowActions>(
       () => ({
@@ -608,10 +640,14 @@ export const FileExplorer = memo(
     }, [dropTargetDir, rootPath, tree.expanded, tree.expand]);
 
     useEffect(() => {
-      if (selectedPath && !entryIndexByPath.has(selectedPath)) {
+      if (
+        selectedPath &&
+        tree.nodes[dirname(selectedPath)]?.status === "loaded" &&
+        !entryIndexByPath.has(selectedPath)
+      ) {
         setSelectedPath(null);
       }
-    }, [entryIndexByPath, selectedPath]);
+    }, [entryIndexByPath, selectedPath, tree.nodes]);
 
     const scrollEntryIntoView = useCallback((path: string) => {
       scrollListRowIntoView(
@@ -620,16 +656,15 @@ export const FileExplorer = memo(
       );
     }, []);
 
-    const lastSyncedActivePathRef = useRef<string | null>(null);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: 根目录变化后，同一路径也须重新展开与定位。
-    useEffect(() => {
-      lastSyncedActivePathRef.current = null;
-    }, [rootPath]);
+    const [lastSyncedActivePath, setLastSyncedActivePath] = useViewState<
+      string | null
+    >(`activePath:${rootPath}`, null);
 
     useEffect(() => {
       if (
+        !active ||
         !activeFilePath ||
-        activeFilePath === lastSyncedActivePathRef.current
+        activeFilePath === lastSyncedActivePath
       ) {
         return;
       }
@@ -639,10 +674,12 @@ export const FileExplorer = memo(
         }
       }
       if (!entryIndexByPath.has(activeFilePath)) return;
-      lastSyncedActivePathRef.current = activeFilePath;
+      setLastSyncedActivePath(activeFilePath);
       setSelectedPath(activeFilePath);
       requestAnimationFrame(() => scrollEntryIntoView(activeFilePath));
     }, [
+      active,
+      lastSyncedActivePath,
       activeFilePath,
       rootPath,
       entryIndexByPath,
@@ -1208,10 +1245,7 @@ export const FileExplorer = memo(
 
                         {!isSearchActive ? (
                           <div
-                            ref={(node) => {
-                              scrollRef.current = node;
-                              treeRef.current = node;
-                            }}
+                            ref={attachTree}
                             data-explorer-drop=""
                             data-explorer-context="tree"
                             role="tree"

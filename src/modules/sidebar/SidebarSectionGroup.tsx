@@ -3,6 +3,7 @@
  * 分区标题和辅助说明在紧凑布局下保持可读。
  */
 
+import { useViewScopeKey, useViewState } from "@/modules/view-state";
 import { Button } from "@/components/controls/button";
 import {
   ResizableHandle,
@@ -67,8 +68,13 @@ function storageKey(id: string): string {
 }
 
 /** 渲染可折叠和可调整尺寸的侧边栏分区组。 */
-export function SidebarSectionGroup({ id, sections, className }: Props) {
-  const [initialLayout] = useState(() =>
+export function SidebarSectionGroup(props: Props) {
+  const scope = useViewScopeKey();
+  return <ScopedSectionGroup key={scope} {...props} />;
+}
+
+function ScopedSectionGroup({ id, sections, className }: Props) {
+  const [savedLayout, saveLayout] = useViewState(`sections:${id}`, () =>
     normalizeSidebarSectionLayout(
       getWorkspaceValue<unknown>(storageKey(id)),
       sections.map((section) => ({
@@ -79,6 +85,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
       })),
     ),
   );
+  const [initialLayout] = useState(savedLayout);
   const panelRefs = useRef(new Map<string, PanelImperativeHandle>());
   const sizesRef = useRef(
     new Map(
@@ -111,6 +118,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
         collapsed: collapsedRef.current.has(section.id),
       };
     }
+    saveLayout(next);
     void setWorkspaceValue(storageKey(id), next);
   }, [id, sections]);
 

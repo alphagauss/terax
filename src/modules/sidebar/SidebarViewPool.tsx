@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { ViewStateScope } from "@/modules/view-state";
 import { findSidebarContainerLocation } from "./model";
 import type {
   SidebarContainerId,
@@ -28,6 +29,7 @@ type Props = {
   placements: SidebarPlacements;
   runtime: SidebarRuntimeState;
   temporarilyHidden: boolean;
+  scopeKey?: string;
 };
 
 /** 按需挂载侧边栏容器，并在两个位置宿主之间保留其实例。 */
@@ -36,6 +38,7 @@ export function SidebarViewPool({
   placements,
   runtime,
   temporarilyHidden,
+  scopeKey,
 }: Props) {
   const activatedRef = useRef(new Set<SidebarContainerId>());
 
@@ -56,6 +59,7 @@ export function SidebarViewPool({
             view={view}
             location={location}
             visible={visible}
+            scopeKey={scopeKey}
           />
         );
       })}
@@ -67,10 +71,12 @@ function PooledSidebarView({
   view,
   location,
   visible,
+  scopeKey,
 }: {
   view: SidebarPooledView;
   location: "primary" | "secondary";
   visible: boolean;
+  scopeKey?: string;
 }) {
   const [container] = useState(() => {
     const element = document.createElement("div");
@@ -112,7 +118,20 @@ function PooledSidebarView({
   );
 
   return createPortal(
-    <div className="relative h-full w-full">{view.content}</div>,
+    <div className="relative h-full w-full">
+      {scopeKey ? (
+        <ViewStateScope
+          kind="sidebar"
+          scope={scopeKey}
+          view={view.id}
+          visible={visible}
+        >
+          {view.content}
+        </ViewStateScope>
+      ) : (
+        view.content
+      )}
+    </div>,
     container,
   );
 }

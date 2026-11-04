@@ -22,12 +22,14 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { ViewStateScope } from "@/modules/view-state";
 
 type Props = {
   state: WorkbenchState;
   tabs: Tab[];
   activeSpaceId: string;
   services: WorkbenchViewServices;
+  visible?: boolean;
 };
 
 export function WorkbenchViewPool({
@@ -35,6 +37,7 @@ export function WorkbenchViewPool({
   tabs,
   activeSpaceId,
   services,
+  visible: surfaceVisible = true,
 }: Props) {
   const depotRef = useRef<HTMLDivElement>(null);
   const owners = useMemo(() => {
@@ -62,7 +65,9 @@ export function WorkbenchViewPool({
         const owner = owners.get(tab.id);
         if (!owner) return null;
         const visible =
-          owner.spaceId === activeSpaceId && owner.activeTabId === tab.id;
+          surfaceVisible &&
+          owner.spaceId === activeSpaceId &&
+          owner.activeTabId === tab.id;
         const focused =
           visible &&
           state.spaces[activeSpaceId]?.activeGroupId === owner.groupId;
@@ -138,14 +143,21 @@ function PooledView({
       onMouseDownCapture={() => services.onFocusTab(tab.id)}
       onFocusCapture={() => services.onFocusTab(tab.id)}
     >
-      <WorkbenchPageScope visible={visible} focused={focused}>
-        <WorkbenchRegisteredView
-          tab={tab}
-          visible={visible}
-          focused={focused}
-          services={services}
-        />
-      </WorkbenchPageScope>
+      <ViewStateScope
+        kind="page"
+        scope={String(tab.id)}
+        view={tab.kind}
+        visible={visible}
+      >
+        <WorkbenchPageScope visible={visible} focused={focused}>
+          <WorkbenchRegisteredView
+            tab={tab}
+            visible={visible}
+            focused={focused}
+            services={services}
+          />
+        </WorkbenchPageScope>
+      </ViewStateScope>
     </div>,
     container,
   );

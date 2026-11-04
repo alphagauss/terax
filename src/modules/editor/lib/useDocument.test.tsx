@@ -103,6 +103,52 @@ afterEach(async () => {
 });
 
 describe("useDocument", () => {
+  it("隐藏视图不启动正文读取，切走后慢读取不再追加恢复校验", async () => {
+    const text = {
+      kind: "text",
+      content: "cached",
+      size: 6,
+      mtime: 1,
+      revision: "disk",
+    };
+    let finish!: (value: typeof text) => void;
+    const first = new Promise<typeof text>((resolve) => {
+      finish = resolve;
+    });
+    let reads = 0;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "fs_sync_file")
+        return ++reads === 1 ? first : Promise.resolve(text);
+      if (command === "git_quick_diff_baseline")
+        return Promise.resolve({ kind: "ignored" });
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const container = document.createElement("div");
+    root = createRoot(container);
+    function View({ active }: { active: boolean }) {
+      const { doc } = useDocument({ path: "C:/work/hidden.txt", active });
+      return <span>{doc.status === "ready" ? doc.content : doc.status}</span>;
+    }
+    const render = async (active: boolean) =>
+      act(async () =>
+        root?.render(
+          <RepositoryProvider controller={controller}>
+            <View active={active} />
+          </RepositoryProvider>,
+        ),
+      );
+    await render(false);
+    expect(reads).toBe(0);
+    await render(true);
+    expect(reads).toBe(1);
+    await render(false);
+    await act(async () => finish(text));
+    expect(reads).toBe(1);
+    expect(container.textContent).toBe("cached");
+    await render(true);
+    expect(reads).toBe(2);
+  });
+
   it("refreshes ignore eligibility in both directions without polling unchanged baselines", async () => {
     let ignored = true;
     let reads = 0;

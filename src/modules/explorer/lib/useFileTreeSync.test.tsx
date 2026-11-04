@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 
+import { ViewStateScope } from "@/modules/view-state";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -25,7 +28,10 @@ vi.mock("@/modules/filesystem", () => ({
 }));
 
 import { useFileTree } from "./useFileTree";
-import { resetDirectoryCacheForTests } from "./directoryCache";
+import {
+  readCachedDirectory,
+  resetDirectoryCacheForTests,
+} from "./directoryCache";
 
 beforeEach(() => {
   mocks.invoke.mockReset();
@@ -55,6 +61,18 @@ it("preserves live tree and editing state across visibility changes even without
     active: boolean;
     path?: string | null;
   }) {
+    return (
+      <ViewStateScope
+        kind="sidebar"
+        scope={path ?? "empty"}
+        view="explorer"
+        visible={active}
+      >
+        <Tree path={path} active={active} />
+      </ViewStateScope>
+    );
+  }
+  function Tree({ path, active }: { path: string | null; active: boolean }) {
     tree = useFileTree(path, { active });
     return null;
   }
@@ -142,6 +160,52 @@ it("replays changes received during a directory read and stops observing when hi
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+it("读取期间切换显示偏好，旧结果只进入原偏好的缓存并串行补查", async () => {
+  const initial = usePreferencesStore.getState().showHidden;
+  const path = "/options-switch-test";
+  const finishes: ((entries: unknown[]) => void)[] = [];
+  mocks.invoke.mockImplementation(
+    () => new Promise((resolve) => finishes.push(resolve)),
+  );
+  const root = createRoot(document.createElement("div"));
+  let tree!: ReturnType<typeof useFileTree>;
+  function Probe() {
+    tree = useFileTree(path);
+    return null;
+  }
+  const cacheOptions = {
+    workspace: currentWorkspaceEnv(),
+    path,
+    gitDecorations: usePreferencesStore.getState().explorerGitDecorations,
+  };
+  try {
+    await act(async () => root.render(<Probe />));
+    await act(async () =>
+      usePreferencesStore.setState({ showHidden: !initial }),
+    );
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    const oldEntries = [{ name: "old.txt", kind: "file" }];
+    await act(async () => finishes[0](oldEntries));
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+    expect(tree.nodes[path]?.status).toBe("loading");
+    expect(
+      readCachedDirectory({ ...cacheOptions, showHidden: initial })?.entries,
+    ).toEqual(oldEntries);
+    expect(
+      readCachedDirectory({ ...cacheOptions, showHidden: !initial }),
+    ).toBeNull();
+    const entries = [{ name: "current.txt", kind: "file" }];
+    await act(async () => finishes[1](entries));
+    expect(tree.nodes[path]).toEqual({ status: "loaded", entries });
+    expect(
+      readCachedDirectory({ ...cacheOptions, showHidden: !initial })?.entries,
+    ).toEqual(entries);
+  } finally {
+    await act(async () => root.unmount());
+    usePreferencesStore.setState({ showHidden: initial });
   }
 });
 

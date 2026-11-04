@@ -4,6 +4,7 @@
  * 同一路径的多个视图共享读取、缓冲区和保存状态，调用方不得另建独立副本。
  */
 
+import { useViewActive } from "@/modules/view-state";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
   subscribeActiveFile,
@@ -11,7 +12,13 @@ import {
 } from "@/modules/filesystem";
 import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContext";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { getSharedDocumentModel } from "./documentModel";
 
 export { FORCE_READ_LIMIT } from "./documentModel";
@@ -23,15 +30,24 @@ type Options = {
 };
 
 /** 订阅指定路径的共享文档，登记前后台轮询优先级并暴露稳定的编辑、保存和重载动作。 */
-export function useDocument({ path, active = true, onDirtyChange }: Options) {
+export function useDocument({
+  path,
+  active: requestedActive = true,
+  onDirtyChange,
+}: Options) {
+  const active = useViewActive(requestedActive);
   const workspace = useWorkspaceEnvStore((state) => state.env);
   const repository = useRepositorySnapshot();
   const model = useMemo(
     () => getSharedDocumentModel(workspace, path),
     [path, workspace],
   );
+  const subscribe = useCallback(
+    (listener: () => void) => model.subscribe(listener, false),
+    [model],
+  );
   const snapshot = useSyncExternalStore(
-    model.subscribe,
+    subscribe,
     model.getSnapshot,
     model.getSnapshot,
   );
@@ -48,6 +64,7 @@ export function useDocument({ path, active = true, onDirtyChange }: Options) {
     const owner = remotePollingOwnerRef.current;
     model.setRemotePollingActive(owner, active);
     if (!active) return () => model.clearRemotePollingOwner(owner);
+    model.ensureLoaded();
 
     const revalidate = () => model.revalidateAfterActivation();
     const unsubscribeFile = subscribeActiveFile(workspace, path, revalidate);
@@ -61,6 +78,7 @@ export function useDocument({ path, active = true, onDirtyChange }: Options) {
 
   useEffect(() => {
     if (
+      !active ||
       snapshot.doc.status !== "ready" ||
       !repository.repo ||
       !repository.status
@@ -95,6 +113,7 @@ export function useDocument({ path, active = true, onDirtyChange }: Options) {
       );
     }
   }, [
+    active,
     model,
     path,
     repository.repo,

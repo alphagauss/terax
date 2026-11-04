@@ -3,6 +3,7 @@
  * 缓存按 Workspace、规范路径和显示选项隔离，只保存成功结果并使用有限 LRU 控制内存。
  */
 
+import { createSnapshotCache } from "@/modules/view-state";
 import { documentResourceKey } from "@/lib/pathIdentity";
 import type { WorkspaceEnv } from "@/modules/workspace";
 
@@ -26,7 +27,9 @@ export type CachedDirectory = {
 };
 
 const DIRECTORY_CACHE_LIMIT = 128;
-const directoryCache = new Map<string, CachedDirectory>();
+const directoryCache = createSnapshotCache<CachedDirectory>(
+  DIRECTORY_CACHE_LIMIT,
+);
 
 function cacheKey(input: DirectoryCacheInput): string {
   return `${documentResourceKey(input.workspace, input.path)}\0hidden:${Number(
@@ -41,8 +44,7 @@ export function readCachedDirectory(
   const key = cacheKey(input);
   const cached = directoryCache.get(key);
   if (!cached) return null;
-  directoryCache.delete(key);
-  directoryCache.set(key, cached);
+
   return cached;
 }
 
@@ -52,13 +54,7 @@ export function writeCachedDirectory(
   value: CachedDirectory,
 ): void {
   const key = cacheKey(input);
-  directoryCache.delete(key);
   directoryCache.set(key, value);
-  while (directoryCache.size > DIRECTORY_CACHE_LIMIT) {
-    const oldest = directoryCache.keys().next().value;
-    if (oldest === undefined) break;
-    directoryCache.delete(oldest);
-  }
 }
 
 /** 清空进程内目录缓存，仅供测试隔离使用。 */

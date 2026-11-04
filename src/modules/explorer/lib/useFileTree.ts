@@ -4,6 +4,12 @@
  */
 
 import {
+  readViewResource,
+  useViewActive,
+  useViewState,
+  useViewScopeKey,
+} from "@/modules/view-state";
+import {
   type DirEntry,
   readCachedDirectory,
   writeCachedDirectory,
@@ -74,27 +80,6 @@ export function ancestorDirs(root: string, path: string): string[] {
     dirs.push(current);
   }
   return dirs;
-}
-
-const EXPANSION_CACHE_LIMIT = 8;
-const expansionCache = new Map<string, string[]>();
-
-function rememberExpansion(root: string, expanded: Set<string>): void {
-  expansionCache.delete(root);
-  if (expanded.size > 0) expansionCache.set(root, [...expanded]);
-  while (expansionCache.size > EXPANSION_CACHE_LIMIT) {
-    const oldest = expansionCache.keys().next().value;
-    if (oldest === undefined) break;
-    expansionCache.delete(oldest);
-  }
-}
-
-function recallExpansion(root: string): string[] {
-  const v = expansionCache.get(root);
-  if (!v) return [];
-  expansionCache.delete(root);
-  expansionCache.set(root, v);
-  return v;
 }
 
 function isUnder(key: string, root: string): boolean {
@@ -181,7 +166,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       ? runtime.epoch
       : null;
   const remoteReady = workspace.kind !== "ssh" || remoteEpoch !== null;
-  const active = options?.active ?? true;
+  const active = useViewActive(options?.active ?? true);
+  const viewScope = useViewScopeKey();
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const { expansionScope, treeScope } = fileTreeScopes(
     workspace,
     rootPath,
@@ -192,7 +180,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
   const gitDecorationsRef = useRef(gitDecorations);
   const [nodes, setNodes] = useState<TreeState>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useViewState<Set<string>>(
+    `tree:expanded:${expansionScope}`,
+    () => new Set(),
+  );
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
     null,
   );
@@ -254,7 +245,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const fetchChildren = useCallback(
     async (path: string) => {
-      if (!remoteReady) return;
+      if (!remoteReady || !activeRef.current) return;
       if (treeScope !== activeTreeScopeRef.current) return;
       if (isPathDeleting(path, deletingPathsRef.current)) return;
       if (inFlightRef.current.has(path)) {
@@ -264,17 +255,21 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       const generation = requestGenerationRef.current;
       const requestId = ++requestIdRef.current;
       const request = { scope: treeScope, generation, id: requestId };
+      const options = {
+        workspace,
+        path,
+        showHidden: showHiddenRef.current,
+        gitDecorations: gitDecorationsRef.current,
+      };
       inFlightRef.current.set(path, requestId);
       if (nodesRef.current[path]?.status !== "loaded") {
         setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
       }
       try {
-        const entries = await invoke<DirEntry[]>("fs_read_dir", {
-          path,
-          showHidden: showHiddenRef.current,
-          gitDecorations: gitDecorationsRef.current,
-          workspace,
-        });
+        const entries = await readViewResource(
+          `directory:${treeScope}:${path}:${options.showHidden}:${options.gitDecorations}`,
+          () => invoke<DirEntry[]>("fs_read_dir", options),
+        );
         if (
           isPathDeleting(path, deletingPathsRef.current) ||
           !isCurrentTreeRequest(
@@ -287,16 +282,14 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           return;
         }
 
-        writeCachedDirectory(
-          {
-            workspace,
-            path,
-            showHidden: showHiddenRef.current,
-            gitDecorations: gitDecorationsRef.current,
-          },
-          { entries },
-        );
+        writeCachedDirectory(options, { entries });
 
+        if (
+          !activeRef.current ||
+          options.showHidden !== showHiddenRef.current ||
+          options.gitDecorations !== gitDecorationsRef.current
+        )
+          return;
         const prev = nodesRef.current[path];
         if (
           prev?.status === "loaded" &&
@@ -371,6 +364,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   );
 
   // 只有目录或连接域变化才恢复缓存；普通侧栏切换保留树数据及编辑状态。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 展开项只在切换作用域时恢复，不能在展开操作后重建树。
   useEffect(() => {
     requestGenerationRef.current += 1;
     inFlightRef.current.clear();
@@ -382,7 +376,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     deletionTokensRef.current.clear();
     setDeletingPaths(new Set());
 
-    const restored = new Set(rootPath ? recallExpansion(expansionScope) : []);
+    const restored = new Set(rootPath ? expanded : []);
     expandedRef.current = restored;
     setExpanded(restored);
     const cachedNodes: TreeState = {};
@@ -401,12 +395,11 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     // 后续可见性 effect 必须读取新域的数据，避免快速响应与旧缓存比较后跳过更新。
     nodesRef.current = cachedNodes;
     return () => {
-      rememberExpansion(expansionScope, expandedRef.current);
       requestGenerationRef.current += 1;
       inFlightRef.current.clear();
       pendingRefreshRef.current.clear();
     };
-  }, [expansionScope, rootPath, treeScope, workspace]);
+  }, [expansionScope, rootPath, treeScope, workspace, viewScope]);
 
   // 隐藏仅释放监听和过期读取；恢复时在现有行上刷新，不用缓存替换活跃树。
   // biome-ignore lint/correctness/useExhaustiveDependencies: 显示偏好通过 ref 供异步读取使用，变化时仍须主动刷新目录。
@@ -424,8 +417,6 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       void fetchChildren(path);
     }
     return () => {
-      requestGenerationRef.current += 1;
-      inFlightRef.current.clear();
       pendingRefreshRef.current.clear();
       for (const release of watchedRef.current.values()) release();
       watchedRef.current.clear();

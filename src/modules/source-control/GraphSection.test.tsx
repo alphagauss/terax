@@ -1,3 +1,4 @@
+import { resetViewCachesForTests } from "@/modules/view-state/cache";
 // @vitest-environment happy-dom
 
 import {
@@ -77,6 +78,7 @@ const files: GitCommitFileChange[] = [
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
+  resetViewCachesForTests();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   virtualRange.limit = Number.POSITIVE_INFINITY;
   vi.useFakeTimers();
@@ -625,7 +627,7 @@ it("搜索分页失败后等待手动重试，不循环请求或误报搜索结�
   expect(container.textContent).toContain("needle");
 });
 
-it("隐藏 Graph 时暂停继续搜索，重新显示才恢复分页", async () => {
+it("隐藏 Graph 时暂停搜索分页，恢复后等待用户重新查询", async () => {
   let finish!: (entries: GitLogEntry[]) => void;
   vi.mocked(native.gitLog)
     .mockReset()
@@ -648,6 +650,17 @@ it("隐藏 Graph 时暂停继续搜索，重新显示才恢复分页", async () 
   await wait(20);
   expect(native.gitLog).toHaveBeenCalledTimes(2);
   await act(async () => renderSearch());
+  await wait(20);
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  // 恢复阅读位置触发的滚动也不能重启旧查询。
+  await act(async () =>
+    container
+      .querySelector(".app-scrollbar")
+      ?.dispatchEvent(new Event("scroll")),
+  );
+  await wait(20);
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  await search("another");
   await wait(20);
   expect(native.gitLog).toHaveBeenCalledTimes(3);
 });

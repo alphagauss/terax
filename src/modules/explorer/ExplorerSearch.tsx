@@ -3,10 +3,15 @@
  * 负责结果分组、打开操作和与文件树一致的上下文菜单。
  */
 
+import {
+  useViewActive,
+  useViewCommand,
+  useViewState,
+  useViewScroll,
+} from "@/modules/view-state";
 import { Hint } from "@/components/controls/tooltip";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import { Input } from "@/components/controls/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -82,14 +87,25 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
   ) {
     const { t } = useTranslation("explorer");
     const showHidden = usePreferencesStore((s) => s.showHidden);
-    const [query, setQuery] = useState("");
-    const [results, setResults] = useState<SearchHit[]>([]);
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    const visible = useViewActive(open);
+    const [query, setQuery] = useViewState(`filenameQuery:${rootPath}`, "");
+    const [results, setResults] = useViewState<SearchHit[]>(
+      `filenameResults:${rootPath}`,
+      [],
+    );
+    const [selectedIndex, setSelectedIndex] = useViewState(
+      `filenameSelected:${rootPath}`,
+      0,
+    );
     const [searching, setSearching] = useState(false);
-    const [truncated, setTruncated] = useState(false);
+    const [truncated, setTruncated] = useViewState(
+      `filenameTruncated:${rootPath}`,
+      false,
+    );
     const inputRef = useRef<HTMLInputElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const lastKeyboardNavAt = useRef(0);
+    const revealSelection = useRef(false);
 
     const active = query.trim().length > 0;
 
@@ -109,48 +125,60 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
       }
     }, [open]);
 
-    useEffect(() => {
-      const q = query.trim();
-      if (q.length < MIN_QUERY_LEN) {
-        setResults([]);
-        setSelectedIndex(0);
-        setSearching(false);
-        setTruncated(false);
-        return;
-      }
-      setSearching(true);
-      let alive = true;
-      const handle = setTimeout(async () => {
-        try {
-          const res = await invoke<SearchResult>("fs_search", {
-            root: rootPath,
-            query: q,
-            limit: 200,
-            showHidden,
-            workspace: currentWorkspaceEnv(),
-          });
-          if (alive) {
-            setResults(res.hits);
-            setTruncated(res.truncated);
-            setSelectedIndex(0);
-          }
-        } catch (e) {
-          if (alive) {
-            console.error("fs_search failed:", e);
-            setResults([]);
-            setTruncated(false);
-            setSelectedIndex(0);
-          }
-        } finally {
-          if (alive) setSearching(false);
+    const attachScroll = useViewScroll(
+      "filename-results",
+      scrollRef,
+      results.map((hit) => hit.path),
+      visible,
+    );
+    useViewCommand(
+      "filename-search",
+      JSON.stringify([query, rootPath, showHidden]),
+      visible,
+      () => {
+        const q = query.trim();
+        if (q.length < MIN_QUERY_LEN) {
+          setResults([]);
+          setSelectedIndex(0);
+          setSearching(false);
+          setTruncated(false);
+          return;
         }
-      }, DEBOUNCE_MS);
+        setSearching(true);
+        let alive = true;
+        const handle = setTimeout(async () => {
+          try {
+            const res = await invoke<SearchResult>("fs_search", {
+              root: rootPath,
+              query: q,
+              limit: 200,
+              showHidden,
+              workspace: currentWorkspaceEnv(),
+            });
+            if (alive) {
+              setResults(res.hits);
+              setTruncated(res.truncated);
+              setSelectedIndex(0);
+            }
+          } catch (e) {
+            if (alive) {
+              console.error("fs_search failed:", e);
+              setResults([]);
+              setTruncated(false);
+              setSelectedIndex(0);
+            }
+          } finally {
+            if (alive) setSearching(false);
+          }
+        }, DEBOUNCE_MS);
 
-      return () => {
-        alive = false;
-        clearTimeout(handle);
-      };
-    }, [query, rootPath, showHidden]);
+        return () => {
+          alive = false;
+          clearTimeout(handle);
+          setSearching(false);
+        };
+      },
+    );
 
     useImperativeHandle(
       ref,
@@ -166,13 +194,14 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
     );
 
     useEffect(() => {
-      if (active && results.length > 0) {
+      if (revealSelection.current && visible && results.length > 0) {
+        revealSelection.current = false;
         const el = scrollRef.current?.querySelector(
           `[data-index="${selectedIndex}"]`,
         );
         el?.scrollIntoView({ block: "nearest" });
       }
-    }, [selectedIndex, results, active]);
+    }, [selectedIndex, results, visible]);
 
     const handleSelect = (hit: SearchHit) => {
       if (!hit.is_dir) {
@@ -205,10 +234,12 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     lastKeyboardNavAt.current = Date.now();
+                    revealSelection.current = true;
                     setSelectedIndex((prev) => (prev + 1) % results.length);
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     lastKeyboardNavAt.current = Date.now();
+                    revealSelection.current = true;
                     setSelectedIndex(
                       (prev) => (prev - 1 + results.length) % results.length,
                     );
@@ -235,8 +266,11 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
         ) : null}
 
         {active ? (
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="py-1" ref={scrollRef}>
+          <div
+            className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
+            ref={attachScroll}
+          >
+            <div className="py-1">
               {searching && results.length === 0 ? (
                 <div className="px-3 py-2 text-[11px] text-muted-foreground">
                   {t("searching")}
@@ -256,6 +290,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                           <button
                             aria-label={hit.path}
                             type="button"
+                            data-view-row={hit.path}
                             data-index={index}
                             onClick={() => handleSelect(hit)}
                             onMouseEnter={() => {
@@ -317,7 +352,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                 </div>
               ) : null}
             </div>
-          </ScrollArea>
+          </div>
         ) : null}
       </div>
     );

@@ -87,7 +87,12 @@
         "useExportType": "error"
       },
       "correctness": {
-        "useExhaustiveDependencies": "warn",
+        "useExhaustiveDependencies": {
+          "level": "warn",
+          "options": {
+            "hooks": [{ "name": "useViewState", "stableResult": [1] }]
+          }
+        },
         "useHookAtTopLevel": "warn",
         "useParseIntRadix": "warn",
         "noUnusedVariables": "warn"

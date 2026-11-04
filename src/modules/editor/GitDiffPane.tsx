@@ -3,6 +3,7 @@
  * 两类资源使用独立生命周期，工作区 diff 按 revision 后台刷新并保留旧内容，提交 diff 仅按不可变资源身份加载。
  */
 
+import { readViewResource, useViewActive } from "@/modules/view-state";
 import { Spinner } from "@/components/ui/spinner";
 import { native } from "@/modules/ai/lib/native";
 import type { FindHandle } from "@/modules/find";
@@ -87,7 +88,8 @@ export const WorkingGitDiffPane = forwardRef<
     source: GitDiffResource;
     active: boolean;
   }
->(function WorkingGitDiffPane({ source, active }, ref) {
+>(function WorkingGitDiffPane({ source, active: requestedActive }, ref) {
+  const active = useViewActive(requestedActive);
   const repository = useRepositorySnapshot();
   const { repoRoot, path, side, originalPath } = source;
   const revision =
@@ -113,7 +115,9 @@ export const WorkingGitDiffPane = forwardRef<
       setState({ kind: "loading" });
     }
     Promise.all([
-      native.gitDiffContent(repoRoot, path, side, originalPath),
+      readViewResource(`working-diff:${sourceKey}:${revision}`, () =>
+        native.gitDiffContent(repoRoot, path, side, originalPath),
+      ),
       resolveLanguage(path).catch(() => null),
     ])
       .then(([result, language]) => {
@@ -140,6 +144,9 @@ export const WorkingGitDiffPane = forwardRef<
       });
     return () => {
       cancelled = true;
+      loadedRef.current = loadedRef.current
+        ? { ...loadedRef.current, revision: -1 }
+        : null;
     };
   }, [active, originalPath, path, repoRoot, revision, side, sourceKey]);
 
@@ -157,18 +164,25 @@ export const CommitGitDiffPane = forwardRef<
   FindHandle,
   { source: CommitDiffResource }
 >(function CommitGitDiffPane({ source }, ref) {
+  const active = useViewActive();
+  const loaded = useRef<string | null>(null);
   const { repoRoot, sha, path, originalPath } = source;
+  const resourceKey = `${repoRoot}\0${sha}\0${path}\0${originalPath ?? ""}`;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
+    if (!active || loaded.current === resourceKey) return;
     let cancelled = false;
     setState({ kind: "loading" });
     Promise.all([
-      native.gitCommitFileDiff(repoRoot, sha, path, originalPath),
+      readViewResource(`commit-diff:${resourceKey}`, () =>
+        native.gitCommitFileDiff(repoRoot, sha, path, originalPath),
+      ),
       resolveLanguage(path).catch(() => null),
     ])
       .then(([result, language]) => {
         if (cancelled) return;
+        loaded.current = resourceKey;
         setState({
           kind: "loaded",
           originalContent: result.originalContent,
@@ -185,7 +199,7 @@ export const CommitGitDiffPane = forwardRef<
     return () => {
       cancelled = true;
     };
-  }, [originalPath, path, repoRoot, sha]);
+  }, [active, resourceKey, originalPath, path, repoRoot, sha]);
 
   return <DiffContent ref={ref} path={path} state={state} />;
 });

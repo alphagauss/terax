@@ -1,5 +1,6 @@
 /** 单文件 Git 时间线；分页与 Graph 共用，历史记录直接打开对应文件的提交 Diff。 */
 
+import { useViewActive, useViewScroll } from "@/modules/view-state";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { type CommitFileDiffOpenInput, native } from "@/modules/ai/lib/native";
@@ -9,7 +10,7 @@ import { useCommitGraph } from "@/modules/git-history/useCommitGraph";
 import { useCommitHistory } from "@/modules/git-history/useCommitHistory";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 const ROW_HEIGHT = 24;
@@ -20,7 +21,7 @@ export function FileTimeline({
   repoRoot,
   headSha,
   path,
-  enabled,
+  enabled: requestedEnabled,
   present,
   refreshToken,
   onOpenCommitFile,
@@ -33,23 +34,17 @@ export function FileTimeline({
   refreshToken: number;
   onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
 }) {
+  const enabled = useViewActive(requestedEnabled);
   const { t, i18n } = useTranslation("gitHistory");
   const scrollRef = useRef<HTMLElement>(null);
-  const scrollTop = useRef(0);
-  const attachScroll = useCallback((element: HTMLElement | null) => {
-    scrollRef.current = element;
-    if (element) element.scrollTop = scrollTop.current;
-  }, []);
   const queryKey =
-    repoRoot && path && headSha
-      ? JSON.stringify([repoRoot, path, headSha, refreshToken])
-      : null;
+    repoRoot && path && headSha ? JSON.stringify([repoRoot, path]) : null;
   const graph = useCommitGraph(repoRoot, enabled && present);
-  const { reset, close } = graph;
+  const { close } = graph;
   useEffect(() => {
     void queryKey;
-    reset();
-  }, [queryKey, reset]);
+    close();
+  }, [queryKey, close]);
   const fetchPage = useCallback(
     (options: { limit: number; skip?: number }) =>
       repoRoot && path && headSha
@@ -57,26 +52,33 @@ export function FileTimeline({
         : Promise.resolve([]),
     [repoRoot, path, headSha],
   );
-  const onInitialLoaded = useCallback(() => {
-    scrollTop.current = 0;
-    scrollRef.current?.scrollTo({ top: 0 });
-  }, []);
   const { commits, loadStatus, error, endReached, loadInitial, loadMore } =
     useCommitHistory({
       queryKey,
+      refreshKey: JSON.stringify([headSha, refreshToken]),
       enabled,
       fetchPage,
-      onInitialLoaded,
     });
   const virtualizer = useVirtualizer({
     enabled: present,
     count: commits.length,
     getScrollElement: () => scrollRef.current,
-    initialOffset: () => scrollTop.current,
     estimateSize: () => ROW_HEIGHT,
     getItemKey: (index) => commits[index].sha,
     overscan: 8,
   });
+
+  const commitKeys = useMemo(
+    () => commits.map((commit) => commit.sha),
+    [commits],
+  );
+  const attachScroll = useViewScroll(
+    `timeline:${path}`,
+    scrollRef,
+    commitKeys,
+    enabled && present,
+    ROW_HEIGHT,
+  );
 
   useEffect(() => {
     if (!enabled || loadStatus !== "idle" || endReached) return;
@@ -132,7 +134,6 @@ export function FileTimeline({
         className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
         onScroll={(event) => {
           close();
-          if (enabled) scrollTop.current = event.currentTarget.scrollTop;
           const {
             scrollHeight,
             scrollTop: top,

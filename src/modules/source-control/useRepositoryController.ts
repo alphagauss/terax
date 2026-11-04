@@ -3,6 +3,11 @@
  * 所有调用方共享真实快照与单调 revision；基础状态先发布，引用与可见统计共用串行刷新周期。
  */
 
+import {
+  createSnapshotCache,
+  readViewResource,
+  useViewActive,
+} from "@/modules/view-state";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
   type GitPanelDiffStats,
@@ -15,6 +20,7 @@ import {
   subscribeWorkspaceResume,
 } from "@/modules/filesystem";
 import { subscribeTerminalCommandFinished } from "@/modules/terminal/lib/commandCompletion";
+import { useRemoteRuntimeStore } from "@/modules/remote";
 import {
   useWorkspaceEnvStore,
   type WorkspaceEnv,
@@ -67,6 +73,8 @@ export type RepositoryController = {
   ) => Promise<RepositoryRemoteActionResult>;
 };
 
+const snapshots = createSnapshotCache<RepositoryControllerState>(16);
+
 type RepositoryControllerState = {
   contextPath: string | null;
   repo: GitRepoInfo | null;
@@ -116,11 +124,22 @@ function getContextualAction(
  */
 export function useRepositoryController(
   contextPath: string | null,
-  enabled: boolean = true,
+  requestedEnabled: boolean = true,
   foreground: boolean = true,
 ): RepositoryController {
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceKey = workspaceScopeKey(workspaceEnv);
+  const runtime = useRemoteRuntimeStore((s) => s.snapshot);
+  const epoch =
+    workspaceEnv.kind !== "ssh"
+      ? "native"
+      : runtime.phase === "connected" &&
+          runtime.profileId === workspaceEnv.profileId
+        ? runtime.epoch
+        : null;
+  const enabled = useViewActive(requestedEnabled && epoch !== null);
+  const epochRef = useRef(epoch);
+  epochRef.current = epoch;
   const [refreshing, setRefreshing] = useState(false);
   const [state, setState] = useState<RepositoryControllerState>({
     contextPath: null,
@@ -167,21 +186,25 @@ export function useRepositoryController(
   );
 
   useEffect(() => {
-    void workspaceKey;
+    void epoch;
     requestIdRef.current++;
     lastRefreshAtRef.current = 0;
-    updateState({
-      contextPath: null,
-      repo: null,
-      status: null,
-      localError: null,
-      busyAction: null,
-      lastRemoteError: null,
-      revision: 0,
-      graphRevision: null,
-      diffStats: null,
-    });
-  }, [updateState, workspaceKey]);
+    lastDurationRef.current = 0;
+    dirtyRef.current = true;
+    updateState(
+      snapshots.get(`${workspaceKey}\0${contextPath}`) ?? {
+        contextPath: null,
+        repo: null,
+        status: null,
+        localError: null,
+        busyAction: null,
+        lastRemoteError: null,
+        revision: 0,
+        graphRevision: null,
+        diffStats: null,
+      },
+    );
+  }, [updateState, workspaceKey, contextPath, epoch]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -197,13 +220,15 @@ export function useRepositoryController(
     const requestId = ++requestIdRef.current;
     const requestedContext = contextPathRef.current;
     const requestedWorkspace = workspaceKeyRef.current;
+    const requestedEpoch = epochRef.current;
     const includeGraph = foregroundRef.current;
     const isCurrentRequest = () =>
       mountedRef.current &&
       requestId === requestIdRef.current &&
       enabledRef.current &&
       contextPathRef.current === requestedContext &&
-      workspaceKeyRef.current === requestedWorkspace;
+      workspaceKeyRef.current === requestedWorkspace &&
+      epochRef.current === requestedEpoch;
 
     if (!requestedContext) {
       updateState((current) =>
@@ -229,10 +254,36 @@ export function useRepositoryController(
         stateRef.current.repo !== null &&
           stateRef.current.contextPath === requestedContext,
       );
-      const snapshot = await native.gitPanelSnapshot(
-        requestedContext,
-        includeGraph,
+      const cacheKey = `${requestedWorkspace}\0${requestedContext}`;
+      const snapshot = await readViewResource(
+        `git-snapshot:${cacheKey}:${requestedEpoch}:${includeGraph}`,
+        () => native.gitPanelSnapshot(requestedContext, includeGraph),
       );
+      if (!mountedRef.current || epochRef.current !== requestedEpoch) return;
+      const cached = snapshots.get(cacheKey);
+      const graphRevision = snapshot.repo
+        ? ((snapshot.graphRevision === "unavailable"
+            ? null
+            : snapshot.graphRevision) ??
+          (cached?.repo?.repoRoot === snapshot.repo.repoRoot
+            ? cached.graphRevision
+            : null) ??
+          (includeGraph ? "unavailable" : null))
+        : null;
+      snapshots.set(cacheKey, {
+        contextPath: requestedContext,
+        repo: snapshot.repo,
+        status: snapshot.status,
+        graphRevision,
+        diffStats:
+          cached?.repo?.repoRoot === snapshot.repo?.repoRoot
+            ? (cached?.diffStats ?? null)
+            : null,
+        revision: (cached?.revision ?? 0) + 1,
+        localError: null,
+        busyAction: null,
+        lastRemoteError: null,
+      });
       if (!isCurrentRequest()) return;
       if (!snapshot.repo || !snapshot.status) {
         updateState((current) =>
@@ -263,15 +314,8 @@ export function useRepositoryController(
         repo,
         status,
         revision: current.revision + 1,
-        graphRevision:
-          // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
-          (snapshot.graphRevision === "unavailable"
-            ? null
-            : snapshot.graphRevision) ??
-          (current.repo?.repoRoot === repo.repoRoot
-            ? current.graphRevision
-            : null) ??
-          (includeGraph ? "unavailable" : null),
+        // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
+        graphRevision,
         diffStats:
           current.repo?.repoRoot === repo.repoRoot ? current.diffStats : null,
         localError: null,
@@ -283,6 +327,12 @@ export function useRepositoryController(
             repo.repoRoot,
             snapshot.status,
           );
+          const cached = snapshots.get(cacheKey);
+          if (
+            epochRef.current === requestedEpoch &&
+            cached?.status === snapshot.status
+          )
+            snapshots.set(cacheKey, { ...cached, diffStats: stats });
           if (
             isCurrentRequest() &&
             foregroundRef.current &&
@@ -336,9 +386,10 @@ export function useRepositoryController(
       ),
     [doRefresh],
   );
+  useEffect(() => () => refreshQueue.cancelPending(), [refreshQueue]);
 
   const refresh = useCallback(() => {
-    if (!isWindowVisible()) {
+    if (!enabledRef.current || !isWindowVisible()) {
       dirtyRef.current = true;
       return Promise.resolve();
     }
@@ -405,19 +456,11 @@ export function useRepositoryController(
 
   useEffect(() => {
     void workspaceKey;
+    void contextPath;
+    void epoch;
     if (!enabled) {
-      requestIdRef.current++;
-      updateState({
-        contextPath: null,
-        repo: null,
-        status: null,
-        localError: null,
-        busyAction: null,
-        lastRemoteError: null,
-        revision: 0,
-        graphRevision: null,
-        diffStats: null,
-      });
+      refreshQueue.cancelPending();
+      dirtyRef.current = true;
       return;
     }
     updateState((current) =>
@@ -426,14 +469,6 @@ export function useRepositoryController(
         : { ...current, lastRemoteError: null },
     );
     const run = () => {
-      const fresh = Date.now() - lastRefreshAtRef.current < SC_STATUS_TTL_MS;
-      if (
-        fresh &&
-        contextPath === stateRef.current.contextPath &&
-        stateRef.current.repo
-      ) {
-        return;
-      }
       void refresh();
     };
     const idle =
@@ -451,7 +486,15 @@ export function useRepositoryController(
         window.clearTimeout(idle as number);
       }
     };
-  }, [refresh, contextPath, enabled, updateState, workspaceKey]);
+  }, [
+    refresh,
+    refreshQueue,
+    contextPath,
+    enabled,
+    updateState,
+    workspaceKey,
+    epoch,
+  ]);
 
   useEffect(() => {
     if (!enabled || !contextPath) return;
@@ -576,9 +619,12 @@ export function useRepositoryController(
   }, [foreground, enabled, contextPath, refresh]);
 
   return useMemo<RepositoryController>(() => {
-    // 空 Space 没有仓库，不能在异步清理完成前继续暴露上一根目录的快照。
-    const repo = contextPath ? state.repo : null;
-    const status = contextPath ? state.status : null;
+    const current =
+      state.contextPath === contextPath
+        ? state
+        : snapshots.get(`${workspaceKey}\0${contextPath}`);
+    const repo = contextPath ? (current?.repo ?? null) : null;
+    const status = contextPath ? (current?.status ?? null) : null;
     return {
       repo,
       status,
@@ -587,17 +633,26 @@ export function useRepositoryController(
       ahead: status?.ahead ?? 0,
       behind: status?.behind ?? 0,
       hasRepo: repo !== null,
-      isLoading: enabled && !!contextPath && state.contextPath !== contextPath,
+      isLoading:
+        enabled && !!contextPath && current?.contextPath !== contextPath,
       isRefreshing:
         refreshing && repo !== null && state.contextPath === contextPath,
-      localError: contextPath ? state.localError : null,
-      busyAction: state.busyAction,
-      lastRemoteError: state.lastRemoteError,
-      revision: state.revision,
-      graphRevision: repo ? state.graphRevision : null,
-      diffStats: repo ? state.diffStats : null,
+      localError: contextPath ? (current?.localError ?? null) : null,
+      busyAction: current?.busyAction ?? null,
+      lastRemoteError: current?.lastRemoteError ?? null,
+      revision: current?.revision ?? 0,
+      graphRevision: repo ? (current?.graphRevision ?? null) : null,
+      diffStats: repo ? (current?.diffStats ?? null) : null,
       refresh,
       runRemoteAction,
     };
-  }, [state, refreshing, enabled, contextPath, refresh, runRemoteAction]);
+  }, [
+    state,
+    refreshing,
+    enabled,
+    contextPath,
+    workspaceKey,
+    refresh,
+    runRemoteAction,
+  ]);
 }
