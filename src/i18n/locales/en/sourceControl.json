@@ -1,4 +1,10 @@
 {
+  "largeChanges": "{{count}} changed files. Automatic refresh and line counts are paused. Refresh manually to update.",
+  "pagination": {
+    "previous": "Previous",
+    "next": "Next",
+    "page": "{{page}} / {{pages}}"
+  },
   "groups": {
     "changes": "Changes",
     "staged": "Staged Changes",

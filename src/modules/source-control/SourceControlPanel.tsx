@@ -1,7 +1,7 @@
 /**
  * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
  * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
- * Changes 使用轻量普通行与共享菜单、提示，侧栏切换保留展示树；open 控制展示统计和 Graph，
+ * Changes 使用分页普通行与共享菜单、提示，侧栏切换保留展示树；open 控制展示统计和 Graph，
  * 共享仓库控制器仅为可见消费者校验基础状态，隐藏时停止展示统计。
  */
 
@@ -65,6 +65,10 @@ import { GraphSection } from "@/modules/source-control/GraphSection";
 import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { relativeTime } from "@/modules/source-control/relativeTime";
+import {
+  SC_AUTO_REFRESH_LIMIT,
+  SC_PAGE_SIZE,
+} from "@/modules/source-control/sourceControlLimits";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
 import {
   type SourceControlFileEntry,
@@ -690,16 +694,41 @@ function SourceControlViewContainerComponent({
   const contextEntry = contextRowKey
     ? (scm.fileEntries.find((entry) => entry.key === contextRowKey) ?? null)
     : null;
-  const rows = useMemo(
+  const allRows = useMemo(
     () =>
       groups.flatMap(({ side, entries }) =>
         collapsedGroups[side] ? [] : entries,
       ),
     [groups, collapsedGroups],
   );
+  const [requestedPage, setPage] = useViewState("changesPage", 0);
+  const pageCount = Math.max(1, Math.ceil(allRows.length / SC_PAGE_SIZE));
+  const page = Math.min(requestedPage, pageCount - 1);
+  const rows = useMemo(
+    () => allRows.slice(page * SC_PAGE_SIZE, (page + 1) * SC_PAGE_SIZE),
+    [allRows, page],
+  );
+  useEffect(() => {
+    if (requestedPage !== page) setPage(page);
+  }, [requestedPage, page]);
+  const repoRoot = scm.repo?.repoRoot;
+  useEffect(() => {
+    void repoRoot;
+    setPage(0);
+  }, [repoRoot]);
 
   const rowKeys = useMemo(() => rows.map((row) => row.key), [rows]);
   const attachScroll = useViewScroll("changes", scrollRef, rowKeys, open);
+  useLayoutEffect(() => {
+    void page;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [page]);
+  const changePage = (next: number) => {
+    clearHover();
+    setContextRowKey(null);
+    setFocusedRowKey(null);
+    setPage(next);
+  };
 
   const rowKeyToIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -1109,6 +1138,37 @@ function SourceControlViewContainerComponent({
                           <CommitFeedback feedback={footerFeedback} />
                         </div>
 
+                        {changedCount > SC_AUTO_REFRESH_LIMIT && (
+                          <p className="px-2 py-1 text-xs text-muted-foreground">
+                            {t("largeChanges", { count: changedCount })}
+                          </p>
+                        )}
+                        {pageCount > 1 && (
+                          <div className="flex shrink-0 items-center justify-between gap-1 px-2 py-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={page === 0}
+                              onClick={() => changePage(page - 1)}
+                            >
+                              {t("pagination.previous")}
+                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {t("pagination.page", {
+                                page: page + 1,
+                                pages: pageCount,
+                              })}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={page === pageCount - 1}
+                              onClick={() => changePage(page + 1)}
+                            >
+                              {t("pagination.next")}
+                            </Button>
+                          </div>
+                        )}
                         {scm.allClean ? (
                           <CleanTreeHint repoLabel={repoLabel} />
                         ) : (
@@ -1193,31 +1253,35 @@ function SourceControlViewContainerComponent({
                                         open={!collapsedGroups[side]}
                                         transitionKey={null}
                                       >
-                                        {entries.map((entry) => (
-                                          <EntryRow
-                                            key={entry.key}
-                                            entry={entry}
-                                            focused={
-                                              focusedRowKey === entry.key
-                                            }
-                                            hovered={
-                                              hoveredRowKey === entry.key
-                                            }
-                                            actionBusy={scm.actionBusy}
-                                            repoRoot={
-                                              scm.repo?.repoRoot ?? null
-                                            }
-                                            onFocusRow={setFocusedRowKey}
-                                            onOpenFileDiff={scm.openFileDiff}
-                                            onToggleStageFile={
-                                              scm.toggleStageFile
-                                            }
-                                            onDiscardFile={
-                                              scm.requestDiscardFile
-                                            }
-                                            onOpenFile={onOpenFile}
-                                          />
-                                        ))}
+                                        {rows
+                                          .filter(
+                                            (entry) => entry.side === side,
+                                          )
+                                          .map((entry) => (
+                                            <EntryRow
+                                              key={entry.key}
+                                              entry={entry}
+                                              focused={
+                                                focusedRowKey === entry.key
+                                              }
+                                              hovered={
+                                                hoveredRowKey === entry.key
+                                              }
+                                              actionBusy={scm.actionBusy}
+                                              repoRoot={
+                                                scm.repo?.repoRoot ?? null
+                                              }
+                                              onFocusRow={setFocusedRowKey}
+                                              onOpenFileDiff={scm.openFileDiff}
+                                              onToggleStageFile={
+                                                scm.toggleStageFile
+                                              }
+                                              onDiscardFile={
+                                                scm.requestDiscardFile
+                                              }
+                                              onOpenFile={onOpenFile}
+                                            />
+                                          ))}
                                       </ContentReveal>
                                     </div>
                                   ))}

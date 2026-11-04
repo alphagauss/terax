@@ -1,4 +1,10 @@
 {
+  "largeChanges": "共 {{count}} 个改动文件，已暂停自动刷新和行数统计。请手动刷新以更新。",
+  "pagination": {
+    "previous": "上一页",
+    "next": "下一页",
+    "page": "{{page}} / {{pages}}"
+  },
   "groups": {
     "changes": "更改",
     "staged": "暂存的更改",

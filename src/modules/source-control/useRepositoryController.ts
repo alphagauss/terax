@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRepositoryRefreshQueue } from "./repositoryRefresh";
 import { shareDiffStats, shareRepositorySnapshot } from "./repositorySharing";
+import { SC_AUTO_REFRESH_LIMIT } from "./sourceControlLimits";
 
 // 相同上下文在短时间内复用快照；路径一旦变化就重新发现仓库，避免漏掉嵌套仓库。
 const SC_STATUS_TTL_MS = 2000;
@@ -161,6 +162,17 @@ export function useRepositoryController(
   const schedulePollRef = useRef(() => {});
   const mountedRef = useRef(true);
   const dirtyRef = useRef(false);
+  // 显式刷新可以越过大量改动保护，并在隐藏期间保留到恢复；自动补查执行时仍需重新判断。
+  const explicitRefreshRef = useRef(false);
+  const isAutoRefreshPaused = useCallback(
+    () =>
+      !explicitRefreshRef.current &&
+      stateRef.current.contextPath === contextPathRef.current &&
+      lastRefreshAtRef.current > 0 &&
+      (stateRef.current.status?.changedFiles.length ?? 0) >
+        SC_AUTO_REFRESH_LIMIT,
+    [],
+  );
 
   foregroundRef.current = foreground;
   enabledRef.current = enabled;
@@ -213,6 +225,8 @@ export function useRepositoryController(
   const doRefresh = useCallback(async (): Promise<void> => {
     if (!mountedRef.current || !enabledRef.current || !isWindowVisible())
       return;
+    if (isAutoRefreshPaused()) return;
+    explicitRefreshRef.current = false;
     const startedAt = Date.now();
     const requestId = ++requestIdRef.current;
     const requestedContext = contextPathRef.current;
@@ -254,6 +268,8 @@ export function useRepositoryController(
       );
       if (!mountedRef.current || epochRef.current !== requestedEpoch) return;
       const cached = snapshots.get(cacheKey);
+      const largeChanges =
+        (snapshot.status?.changedFiles.length ?? 0) > SC_AUTO_REFRESH_LIMIT;
       const graphRevision = snapshot.repo
         ? ((snapshot.graphRevision === "unavailable"
             ? null
@@ -269,7 +285,7 @@ export function useRepositoryController(
         status: snapshot.status,
         graphRevision,
         diffStats:
-          cached?.repo?.repoRoot === snapshot.repo?.repoRoot
+          !largeChanges && cached?.repo?.repoRoot === snapshot.repo?.repoRoot
             ? (cached?.diffStats ?? null)
             : null,
         revision: (cached?.revision ?? 0) + 1,
@@ -310,11 +326,18 @@ export function useRepositoryController(
         // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
         graphRevision,
         diffStats:
-          current.repo?.repoRoot === repo.repoRoot ? current.diffStats : null,
+          !largeChanges && current.repo?.repoRoot === repo.repoRoot
+            ? current.diffStats
+            : null,
         localError: null,
       }));
       // 清单先显示，统计沿用本轮状态；慢统计计入周期，不能与下一轮自动读取重叠。
-      if (foregroundRef.current && isWindowVisible() && isCurrentRequest()) {
+      if (
+        !largeChanges &&
+        foregroundRef.current &&
+        isWindowVisible() &&
+        isCurrentRequest()
+      ) {
         try {
           const stats = await native.gitPanelDiffStats(
             repo.repoRoot,
@@ -367,7 +390,7 @@ export function useRepositoryController(
         schedulePollRef.current();
       }
     }
-  }, [updateState]);
+  }, [updateState, isAutoRefreshPaused]);
 
   const refreshQueue = useMemo(
     () =>
@@ -380,25 +403,31 @@ export function useRepositoryController(
   );
   useEffect(() => () => refreshQueue.cancelPending(), [refreshQueue]);
 
-  const refresh = useCallback(() => {
-    if (!enabledRef.current || !isWindowVisible()) {
-      dirtyRef.current = true;
-      return Promise.resolve();
-    }
-    dirtyRef.current = false;
-    return refreshQueue.request();
-  }, [refreshQueue]);
+  const refresh = useCallback(
+    (explicit = true) => {
+      if (!explicit && isAutoRefreshPaused()) return Promise.resolve();
+      explicitRefreshRef.current ||= explicit;
+      if (!enabledRef.current || !isWindowVisible()) {
+        dirtyRef.current = true;
+        return Promise.resolve();
+      }
+      dirtyRef.current = false;
+      return refreshQueue.request();
+    },
+    [refreshQueue, isAutoRefreshPaused],
+  );
 
   const check = useCallback(() => {
+    if (isAutoRefreshPaused()) return Promise.resolve();
     if (
       stateRef.current.contextPath !== contextPathRef.current ||
       dirtyRef.current
     )
-      return refresh();
+      return refresh(false);
     if (Date.now() - lastRefreshAtRef.current < SC_STATUS_TTL_MS)
       return Promise.resolve();
     return refreshQueue.request("check");
-  }, [refresh, refreshQueue]);
+  }, [refresh, refreshQueue, isAutoRefreshPaused]);
 
   const runRemoteAction = useCallback(
     async (
@@ -461,7 +490,7 @@ export function useRepositoryController(
         : { ...current, lastRemoteError: null },
     );
     const run = () => {
-      void refresh();
+      void refresh(false);
     };
     const idle =
       typeof window.requestIdleCallback === "function"
@@ -499,7 +528,7 @@ export function useRepositoryController(
         currentRepoRoot &&
         isPathInsideRepository(cwd, currentRepoRoot, workspaceEnv)
       ) {
-        void refresh();
+        void refresh(false);
       }
     });
   }, [enabled, contextPath, refresh, workspaceEnv]);
@@ -524,14 +553,14 @@ export function useRepositoryController(
         return;
       dirtyRef.current = true;
       window.clearTimeout(timer);
-      if (!isWindowVisible()) return;
+      if (!isWindowVisible() || isAutoRefreshPaused()) return;
       firstEventAt ??= Date.now();
       timer = window.setTimeout(
         () => {
           timer = 0;
           firstEventAt = null;
           // 恢复校验可能已消费此批失效；等待期间隐藏则留到下次恢复。
-          if (dirtyRef.current && isWindowVisible()) void refresh();
+          if (dirtyRef.current && isWindowVisible()) void refresh(false);
         },
         Math.min(120, Math.max(0, firstEventAt + 1000 - Date.now())),
       );
@@ -541,7 +570,7 @@ export function useRepositoryController(
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, [enabled, contextPath, refresh, workspaceEnv]);
+  }, [enabled, contextPath, refresh, workspaceEnv, isAutoRefreshPaused]);
 
   useEffect(() => {
     // 可见性切换立即重排间隔，不能等后台的旧计时器耗尽。
@@ -550,7 +579,8 @@ export function useRepositoryController(
     let disposed = false;
     let running = false;
     let timer = 0;
-    const canRefresh = () => !disposed && isWindowVisible();
+    const canRefresh = () =>
+      !disposed && isWindowVisible() && !isAutoRefreshPaused();
     const schedule = () => {
       window.clearTimeout(timer);
       timer = 0;
@@ -602,12 +632,12 @@ export function useRepositoryController(
       if (timer) window.clearTimeout(timer);
       unsubscribeResume();
     };
-  }, [contextPath, enabled, check, foreground]);
+  }, [contextPath, enabled, check, foreground, isAutoRefreshPaused]);
 
   useEffect(() => {
     const activated = foreground && !previousForegroundRef.current;
     previousForegroundRef.current = foreground;
-    if (activated && enabled && contextPath) void refresh();
+    if (activated && enabled && contextPath) void refresh(false);
   }, [foreground, enabled, contextPath, refresh]);
 
   return useMemo<RepositoryController>(() => {

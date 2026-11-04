@@ -337,6 +337,155 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
   }
 });
 
+it("万条改动只挂载一页，分页跨分组且批量操作使用完整清单", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const files = Array.from({ length: 10_000 }, (_, index) => ({
+    path: `file-${index}.ts`,
+    originalPath: null,
+    indexStatus: index < 60 ? "M" : " ",
+    worktreeStatus: index < 60 ? " " : "M",
+    staged: index < 60,
+    unstaged: index >= 60,
+    untracked: false,
+    statusLabel: "Modified",
+  }));
+  let controller: RepositoryController = {
+    repo: {
+      repoRoot: "/repo",
+      branch: "main",
+      upstream: null,
+      isDetached: false,
+    },
+    status: {
+      repoRoot: "/repo",
+      branch: "main",
+      headSha: "head",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      isDetached: false,
+      truncated: false,
+      changedFiles: files,
+    },
+    changedCount: files.length,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    hasRepo: true,
+    isLoading: false,
+    localError: null,
+    busyAction: null,
+    lastRemoteError: null,
+    revision: 1,
+    graphRevision: null,
+    diffStats: null,
+    refresh: vi.fn(),
+    runRemoteAction: vi.fn(),
+  };
+  const onOpenDiff = vi.fn();
+  const render = async (open = true) => {
+    await act(async () =>
+      root.render(
+        <SourceControlViewContainer
+          open={open}
+          sourceControl={controller}
+          onOpenDiff={onOpenDiff}
+        />,
+      ),
+    );
+  };
+  const rows = () => [
+    ...container.querySelectorAll<HTMLElement>('[role="option"]'),
+  ];
+  const button = (text: string) =>
+    [...container.querySelectorAll("button")].find(
+      (node) => node.textContent === text,
+    );
+  const click = async (node: HTMLElement | null | undefined) => {
+    if (!node) throw new Error("Missing button");
+    await act(async () => node.click());
+  };
+  const resize = async (count: number) => {
+    if (!controller.status) throw new Error("Missing status");
+    controller = {
+      ...controller,
+      changedCount: count,
+      status: { ...controller.status, changedFiles: files.slice(0, count) },
+    };
+    await render();
+  };
+  try {
+    await render();
+    expect(rows()).toHaveLength(50);
+    expect(container.textContent).toContain("largeChanges");
+    expect(button("pagination.previous")?.disabled).toBe(true);
+    await click(
+      container.querySelector<HTMLElement>('[aria-label="groups.stageAll"]'),
+    );
+    expect(io.stage).toHaveBeenLastCalledWith(
+      "/repo",
+      files.slice(60).map((file) => file.path),
+    );
+    expect(controller.refresh).toHaveBeenCalledOnce();
+    await click(
+      container.querySelector<HTMLElement>('[aria-label="groups.unstageAll"]'),
+    );
+    expect(io.unstage).toHaveBeenLastCalledWith(
+      "/repo",
+      files.slice(0, 60).map((file) => file.path),
+    );
+
+    await resize(121);
+    expect(container.textContent).not.toContain("largeChanges");
+    await click(button("pagination.next"));
+    expect(rows()).toHaveLength(50);
+    expect(rows()[0].dataset.scmRowKey).toBe("index:file-50.ts");
+    expect(rows()[10].dataset.scmRowKey).toBe("worktree:file-60.ts");
+    const firstRow = rows()[0];
+    await render(false);
+    await render(true);
+    expect(rows()[0]).toBe(firstRow);
+    const list = container.querySelector<HTMLElement>('[role="listbox"]');
+    if (!list) throw new Error("Missing Changes list");
+    await act(async () => {
+      list.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    await act(async () => {
+      list.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(onOpenDiff).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "file-50.ts", side: "index" }),
+    );
+    await click(button("pagination.next"));
+    expect(rows()).toHaveLength(21);
+    expect(rows()[0].dataset.scmRowKey).toBe("worktree:file-100.ts");
+    expect(button("pagination.next")?.disabled).toBe(true);
+    expect(list.getAttribute("aria-activedescendant")).toBeNull();
+    await click(button("pagination.previous"));
+    expect(rows()[0].dataset.scmRowKey).toBe("index:file-50.ts");
+
+    await resize(40);
+    expect(rows()).toHaveLength(40);
+    expect(rows()[0].dataset.scmRowKey).toBe("index:file-0.ts");
+    expect(button("pagination.next")).toBeUndefined();
+    await resize(121);
+    expect(rows()[0].dataset.scmRowKey).toBe("index:file-0.ts");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    io.stage.mockClear();
+    io.unstage.mockClear();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("keeps the no-repository UI stable during polling and discovers repository creation and removal", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();

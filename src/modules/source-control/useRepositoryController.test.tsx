@@ -122,6 +122,110 @@ afterEach(async () => {
 });
 
 describe("useRepositoryController", () => {
+  it("超过 200 个改动停止自动读取和统计，显式刷新后恢复，并拦截已排队的自动补查", async () => {
+    vi.useFakeTimers();
+    const snapshot = repositorySnapshot("C:/repo");
+    const status = snapshot.status;
+    if (!status) throw new Error("Missing status");
+    status.changedFiles = Array.from({ length: 200 }, (_, index) => ({
+      path: `file-${index}.ts`,
+      originalPath: null,
+      indexStatus: " ",
+      worktreeStatus: "M",
+      staged: false,
+      unstaged: true,
+      untracked: false,
+      statusLabel: "Modified",
+    }));
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.diffStats).not.toBeNull();
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledOnce();
+
+    const pending = deferred<GitPanelSnapshot>();
+    mocks.gitPanelSnapshot.mockReturnValueOnce(pending.promise);
+    let refreshing: Promise<void> | undefined;
+    await act(async () => {
+      refreshing = controller?.refresh();
+    });
+    await act(async () => {
+      mocks.changeListeners.forEach((listener) => {
+        listener(["C:/repo/file.ts"]);
+      });
+      await vi.advanceTimersByTimeAsync(120);
+    });
+    const large = {
+      ...snapshot,
+      status: {
+        ...status,
+        changedFiles: [
+          ...status.changedFiles,
+          {
+            ...status.changedFiles[0],
+            path: "extra.ts",
+          },
+        ],
+      },
+    };
+    await act(async () => pending.resolve(large));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    await act(async () => refreshing);
+    expect(controller?.changedCount).toBe(201);
+    expect(controller?.diffStats).toBeNull();
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      mocks.changeListeners.forEach((listener) => {
+        listener(["C:/repo/file.ts"]);
+      });
+      mocks.resumeListeners.forEach((listener) => {
+        listener();
+      });
+      notifyTerminalCommandFinished("C:/repo");
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/repo" foreground={false} />),
+    );
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+
+    mocks.gitPanelSnapshot.mockResolvedValue(large);
+    await act(async () => controller?.refresh());
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(3);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledOnce();
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    // Git 操作可能在窗口隐藏时完成；显式校验应留到恢复，不能被保护模式吞掉。
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    await act(async () =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    await act(async () => controller?.refresh());
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(3);
+    visibility.mockReturnValue("visible");
+    await act(async () =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.changedCount).toBe(200);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(5);
+    expect(mocks.gitPanelDiffStats).toHaveBeenCalledTimes(3);
+
+    mocks.gitPanelSnapshot.mockResolvedValue(large);
+    await act(async () => controller?.refresh());
+    mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/other"));
+    await act(async () => root?.render(<Probe contextPath="C:/other" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.repo?.repoRoot).toBe("C:/other");
+  });
+
   it("没有可见消费者时停止读取，切回仓库先显示缓存再校验", async () => {
     vi.useFakeTimers();
     mocks.gitPanelSnapshot.mockImplementation(async (path) =>
