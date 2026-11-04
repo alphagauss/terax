@@ -52,7 +52,7 @@ vi.mock("@/modules/explorer/lib/iconResolver", () => ({
   fileIconUrl: () => null,
 }));
 
-it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷新仓库", async () => {
+it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航到对应目录", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const branches: GitBranchEntry[] = [
     { name: "main", kind: "local", isHead: true },
@@ -66,6 +66,14 @@ it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷�
     isDetached: false,
     timestampSecs: null,
   }));
+  branches.push({
+    name: "feature",
+    kind: "worktree",
+    worktreePath: "/repo-feature",
+    isHead: false,
+    isDetached: false,
+    timestampSecs: null,
+  });
   io.branches.mockResolvedValue({ branches });
   io.checkoutBranch.mockResolvedValue(undefined);
   io.checkoutTag.mockResolvedValue(undefined);
@@ -95,6 +103,7 @@ it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷�
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  const onNavigateToPath = vi.fn();
   const menu = () => document.querySelector('[role="menu"]');
   const openMenu = async () => {
     const trigger = container.querySelector(
@@ -114,6 +123,7 @@ it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷�
           open
           sourceControl={controller}
           onOpenDiff={vi.fn()}
+          onNavigateToPath={onNavigateToPath}
         />,
       ),
     );
@@ -122,10 +132,11 @@ it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷�
     expect(menu()?.textContent).toContain("branch.localBranches");
     expect(menu()?.textContent).toContain("branch.remoteBranches");
     expect(menu()?.textContent).toContain("branch.tags");
+    expect(menu()?.textContent).toContain("branch.worktrees");
     const groups = menu()?.querySelectorAll(
       '[data-slot="dropdown-menu-group"]',
     );
-    expect(groups).toHaveLength(3);
+    expect(groups).toHaveLength(4);
     const tag = groups?.[2].querySelector<HTMLElement>('[role="menuitem"]');
     expect(tag?.textContent).toBe("main");
     await act(async () => tag?.click());
@@ -149,6 +160,17 @@ it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷�
         track,
       );
     }
+    await openMenu();
+    const worktree = menu()
+      ?.querySelectorAll('[data-slot="dropdown-menu-group"]')[3]
+      .querySelector<HTMLElement>('[role="menuitem"]');
+    expect(worktree?.textContent).toContain("feature");
+    expect(worktree?.textContent).toContain("/repo-feature");
+    await act(async () => worktree?.click());
+    expect(onNavigateToPath).toHaveBeenCalledExactlyOnceWith("/repo-feature");
+    expect(io.checkoutBranch).toHaveBeenCalledTimes(2);
+    expect(io.checkoutTag).toHaveBeenCalledOnce();
+    expect(menu()).toBeNull();
   } finally {
     await act(async () => root.unmount());
     container.remove();
