@@ -17,6 +17,10 @@ const sizes = {
   "icon-lg": "size-9",
 } as const;
 
+/** 半透明反馈叠加所在面板底色，避免固定底色在相近背景上失去悬停层次。 */
+const ghostBackground =
+  "hover:bg-interactive-hover aria-expanded:bg-interactive-hover dark:hover:bg-interactive-hover";
+
 /** 次要操作共用 ghost 的背景与打开反馈，语义变体只改变文字及继承它的图标颜色。 */
 const ghostColors = {
   ghost:
@@ -66,6 +70,7 @@ export function Button({
       className={cn(
         "rounded-md text-xs leading-4 duration-control ease-standard focus-visible:border-transparent focus-visible:ring-0 data-[variant=outline]:focus-visible:border-border",
         sizes[size],
+        baseVariant === "ghost" && ghostBackground,
         color,
         className,
       )}

@@ -32,7 +32,9 @@ it("普通菜单触发器默认弱化，打开和悬停反馈由公共控件提�
   expect(button?.classList.contains("aria-expanded:text-foreground")).toBe(
     true,
   );
-  expect(button?.classList.contains("aria-expanded:bg-muted")).toBe(true);
+  expect(button?.classList.contains("aria-expanded:bg-interactive-hover")).toBe(
+    true,
+  );
   expect(button?.getAttribute("aria-pressed")).toBe("true");
   expect(button?.className).not.toContain("aria-pressed:");
   expect(button?.querySelector("svg")?.getAttribute("class")).toBeNull();
@@ -72,8 +74,9 @@ it.each([
       normal,
       hover,
       expanded,
-      "hover:bg-muted",
-      "aria-expanded:bg-muted",
+      "hover:bg-interactive-hover",
+      "aria-expanded:bg-interactive-hover",
+      "dark:hover:bg-interactive-hover",
     ])
       expect(button?.classList.contains(token)).toBe(true);
     expect(button?.classList.contains("hover:text-foreground")).toBe(false);
