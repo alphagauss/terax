@@ -46,7 +46,7 @@ function WindowEnvironmentLabel() {
   return (
     <span
       {...WINDOW_DRAG_REGION}
-      className="flex min-w-0 items-center gap-1.5 self-stretch text-xs text-muted-foreground"
+      className="flex min-w-0 items-center gap-1.5 self-stretch text-xs text-info"
     >
       {env.kind === "local" ? (
         t("workspace.local")
@@ -55,7 +55,7 @@ function WindowEnvironmentLabel() {
           <span {...WINDOW_DRAG_REGION} className="shrink-0">
             {env.kind === "ssh" ? "SSH" : "WSL"}
           </span>
-          <span {...WINDOW_DRAG_REGION} className="truncate text-foreground">
+          <span {...WINDOW_DRAG_REGION} className="truncate">
             {env.kind === "ssh" ? (profileName ?? env.profileId) : env.distro}
           </span>
         </>
