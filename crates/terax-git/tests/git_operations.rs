@@ -1322,6 +1322,84 @@ fn checkout_branch_rejects_unsafe_names() {
 }
 
 #[test]
+fn tags_keep_their_namespace_and_checkout_detaches_without_overwriting_changes() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "old\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-qm", "old"]);
+    fx.run_git(&["tag", "main"]);
+    fx.run_git(&["tag", "-a", "release/v1", "-m", "release"]);
+    fx.run_git(&["branch", "origin/feature", "refs/heads/main"]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+    let old_head = std::fs::read_to_string(fx.repo_path.join(".git/refs/heads/main")).unwrap();
+    fx.write_file("a.txt", "new\n");
+    fx.run_git(&["commit", "-qam", "new"]);
+
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert!(result
+        .branches
+        .iter()
+        .any(|entry| entry.kind == "local" && entry.name == "main" && entry.is_head));
+    let tags: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|entry| entry.kind == "tag")
+        .collect();
+    assert_eq!(tags.len(), 2);
+    assert!(tags.iter().any(|entry| entry.name == "main"));
+    assert!(tags.iter().any(|entry| entry.name == "release/v1"));
+    assert!(tags.iter().all(|entry| entry.timestamp_secs.is_some()));
+    for kind in ["local", "remote"] {
+        assert!(result
+            .branches
+            .iter()
+            .any(|entry| entry.kind == kind && entry.name == "origin/feature"));
+    }
+
+    fx.write_file("a.txt", "uncommitted\n");
+    assert!(operations::checkout_tag(&fx.registry, &fx.repo_str(), "main", &fx.workspace).is_err());
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_path.join("a.txt")).unwrap(),
+        "uncommitted\n"
+    );
+    assert!(
+        !operations::resolve_repo(&fx.registry, &fx.repo_str(), &fx.workspace)
+            .unwrap()
+            .unwrap()
+            .is_detached
+    );
+    fx.run_git(&["restore", "a.txt"]);
+
+    for tag in ["main", "release/v1"] {
+        operations::checkout_tag(&fx.registry, &fx.repo_str(), tag, &fx.workspace).unwrap();
+        let head = std::fs::read_to_string(fx.repo_path.join(".git/HEAD")).unwrap();
+        assert_eq!(head.trim(), old_head.trim());
+        assert!(
+            operations::resolve_repo(&fx.registry, &fx.repo_str(), &fx.workspace)
+                .unwrap()
+                .unwrap()
+                .is_detached
+        );
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "main", false, &fx.workspace)
+            .unwrap();
+    }
+
+    for invalid in ["", "--detach", "main~1", "main^{}", "missing"] {
+        assert!(
+            operations::checkout_tag(&fx.registry, &fx.repo_str(), invalid, &fx.workspace).is_err()
+        );
+    }
+    let unauthorized = WorkspaceRegistry::default();
+    assert!(matches!(
+        operations::checkout_tag(&unauthorized, &fx.repo_str(), "main", &fx.workspace),
+        Err(GitError::PathOutsideWorkspace(_))
+    ));
+}
+
+#[test]
 fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     if skip_if_no_git() {
         return;

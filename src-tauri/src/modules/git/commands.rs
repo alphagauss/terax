@@ -400,3 +400,17 @@ pub async fn git_checkout_branch(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn git_checkout_tag(
+    repo_root: String,
+    tag: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::checkout_tag(r, &repo_root, &tag, &workspace).map_err(Into::into)
+    })
+    .await
+}

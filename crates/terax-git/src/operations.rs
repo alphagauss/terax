@@ -1738,7 +1738,12 @@ pub fn list_branches(
         for line in &lines {
             let mut parts = line.split('\0');
             let refname = parts.next().unwrap_or("");
-            let name = parts.next().unwrap_or("").to_string();
+            let name = parts.next().unwrap_or("");
+            let name = refname
+                .strip_prefix("refs/heads/")
+                .or_else(|| refname.strip_prefix("refs/remotes/"))
+                .unwrap_or(name)
+                .to_string();
             let timestamp_secs = parts.next().and_then(|value| value.parse::<i64>().ok());
             let head_marker = parts.next().unwrap_or("");
             let is_head = head_marker == "*";
@@ -1821,10 +1826,12 @@ pub fn list_branches(
 
     // Prefer a branch's worktree entry over its local one, except for the current
     // branch: the main worktree is always listed, so !is_head keeps it local.
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut seen: HashMap<(bool, String), usize> = HashMap::new();
     let mut deduped: Vec<GitBranchEntry> = Vec::with_capacity(branches.len());
     for b in branches {
-        if let Some(&existing_idx) = seen.get(&b.name) {
+        // 本地分支与工作树共享名称，远程分支必须保留自己的命名空间。
+        let key = (b.kind == "remote", b.name.clone());
+        if let Some(&existing_idx) = seen.get(&key) {
             let existing = &deduped[existing_idx];
             let should_replace = b.kind == "worktree"
                 && existing.kind == "local"
@@ -1839,21 +1846,46 @@ pub fn list_branches(
                 deduped[existing_idx] = updated;
             }
         } else {
-            seen.insert(b.name.clone(), deduped.len());
+            seen.insert(key, deduped.len());
             deduped.push(b);
         }
+    }
+
+    // 标签使用独立命名空间，不能与同名分支或工作树合并。
+    let tags = git_stdout_lines(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        [
+            "for-each-ref",
+            "--format=%(refname:strip=2)%00%(creatordate:unix)",
+            "refs/tags",
+        ],
+    )?;
+    for line in tags {
+        let mut parts = line.split('\0');
+        let name = parts.next().unwrap_or("").to_string();
+        let timestamp_secs = parts.next().and_then(|value| value.parse::<i64>().ok());
+        deduped.push(GitBranchEntry {
+            name,
+            kind: "tag".into(),
+            worktree_path: None,
+            is_head: false,
+            is_detached: false,
+            timestamp_secs,
+        });
     }
 
     deduped.sort_by(|a, b| {
         let kind_ord = |k: &str| match k {
             "local" => 0u8,
             "remote" => 1u8,
-            _ => 2u8,
+            "tag" => 2u8,
+            _ => 3u8,
         };
         kind_ord(&a.kind)
             .cmp(&kind_ord(&b.kind))
             .then_with(|| {
-                if matches!(a.kind.as_str(), "local" | "remote") {
+                if matches!(a.kind.as_str(), "local" | "remote" | "tag") {
                     b.timestamp_secs.cmp(&a.timestamp_secs)
                 } else {
                     std::cmp::Ordering::Equal
@@ -1925,6 +1957,35 @@ pub fn checkout_branch(
         )?
     };
     ensure_success(&output, "git switch failed")
+}
+
+/// 检出标签对应的提交，使用完整引用避免同名分支歧义，并保留工作区冲突保护。
+pub fn checkout_tag(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    tag_name: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if tag_name.starts_with('-') || tag_name.is_empty() {
+        return Err(GitError::InvalidPath(tag_name.into()));
+    }
+    let tag_ref = format!("refs/tags/{tag_name}");
+    let validation = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["check-ref-format", &tag_ref],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&validation, "invalid tag name")?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["switch", "--detach", &tag_ref],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git switch tag failed")
 }
 
 #[cfg(test)]

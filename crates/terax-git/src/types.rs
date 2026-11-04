@@ -206,7 +206,7 @@ pub struct GitPushResult {
 #[serde(rename_all = "camelCase")]
 pub struct GitBranchEntry {
     pub name: String,
-    pub kind: String, // "local" | "remote" | "worktree"
+    pub kind: String, // 本地分支、远程分支、工作树或标签：local | remote | worktree | tag
     pub worktree_path: Option<String>,
     pub is_head: bool,
     pub is_detached: bool,

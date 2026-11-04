@@ -29,6 +29,7 @@
     "loading": "Loading branches…",
     "localBranches": "Local Branches",
     "remoteBranches": "Remote Branches",
+    "tags": "Tags",
     "worktrees": "Worktrees",
     "noBranches": "No branches found."
   },

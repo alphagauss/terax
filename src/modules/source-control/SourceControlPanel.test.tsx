@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import type { GitPanelSnapshot } from "@/modules/ai/lib/native";
+import type { GitBranchEntry, GitPanelSnapshot } from "@/modules/ai/lib/native";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
@@ -14,6 +14,9 @@ const io = vi.hoisted(() => ({
   stats: vi.fn(async () => ({ index: null, worktree: null })),
   stage: vi.fn(),
   unstage: vi.fn(),
+  branches: vi.fn(),
+  checkoutBranch: vi.fn(),
+  checkoutTag: vi.fn(),
 }));
 vi.mock("@/modules/ai/lib/native", async (original) => {
   const module = await original<typeof import("@/modules/ai/lib/native")>();
@@ -25,6 +28,9 @@ vi.mock("@/modules/ai/lib/native", async (original) => {
       gitPanelDiffStats: io.stats,
       gitStage: io.stage,
       gitUnstage: io.unstage,
+      gitListBranches: io.branches,
+      gitCheckoutBranch: io.checkoutBranch,
+      gitCheckoutTag: io.checkoutTag,
     },
   };
 });
@@ -45,6 +51,112 @@ vi.mock("@/modules/source-control/GraphSection", () => ({
 vi.mock("@/modules/explorer/lib/iconResolver", () => ({
   fileIconUrl: () => null,
 }));
+
+it("分支浮窗分别展示分支与同名标签，标签检出后关闭并刷新仓库", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const branches: GitBranchEntry[] = [
+    { name: "main", kind: "local", isHead: true },
+    { name: "origin/main", kind: "remote", isHead: false },
+    { name: "origin/feature", kind: "remote", isHead: false },
+    { name: "main", kind: "tag", isHead: false },
+  ].map((entry) => ({
+    ...entry,
+    kind: entry.kind as GitBranchEntry["kind"],
+    worktreePath: null,
+    isDetached: false,
+    timestampSecs: null,
+  }));
+  io.branches.mockResolvedValue({ branches });
+  io.checkoutBranch.mockResolvedValue(undefined);
+  io.checkoutTag.mockResolvedValue(undefined);
+  const controller: RepositoryController = {
+    repo: {
+      repoRoot: "/repo",
+      branch: "main",
+      upstream: null,
+      isDetached: false,
+    },
+    status: null,
+    changedCount: 0,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    hasRepo: true,
+    isLoading: false,
+    localError: null,
+    busyAction: null,
+    lastRemoteError: null,
+    revision: 1,
+    graphRevision: null,
+    diffStats: null,
+    refresh: vi.fn(),
+    runRemoteAction: vi.fn(),
+  };
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const menu = () => document.querySelector('[role="menu"]');
+  const openMenu = async () => {
+    const trigger = container.querySelector(
+      '[data-slot="dropdown-menu-trigger"]',
+    );
+    if (!trigger) throw new Error("Missing branch trigger");
+    await act(async () => {
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+  };
+  try {
+    await act(async () =>
+      root.render(
+        <SourceControlViewContainer
+          open
+          sourceControl={controller}
+          onOpenDiff={vi.fn()}
+        />,
+      ),
+    );
+    await openMenu();
+    expect(io.branches).toHaveBeenLastCalledWith("/repo");
+    expect(menu()?.textContent).toContain("branch.localBranches");
+    expect(menu()?.textContent).toContain("branch.remoteBranches");
+    expect(menu()?.textContent).toContain("branch.tags");
+    const groups = menu()?.querySelectorAll(
+      '[data-slot="dropdown-menu-group"]',
+    );
+    expect(groups).toHaveLength(3);
+    const tag = groups?.[2].querySelector<HTMLElement>('[role="menuitem"]');
+    expect(tag?.textContent).toBe("main");
+    await act(async () => tag?.click());
+    expect(io.checkoutTag).toHaveBeenCalledWith("/repo", "main");
+    expect(io.checkoutBranch).not.toHaveBeenCalled();
+    expect(controller.refresh).toHaveBeenCalledOnce();
+    expect(menu()).toBeNull();
+
+    for (const [name, target, track] of [
+      ["origin/main", "main", false],
+      ["origin/feature", "origin/feature", true],
+    ] as const) {
+      await openMenu();
+      const item = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((entry) => entry.textContent === name);
+      await act(async () => item?.click());
+      expect(io.checkoutBranch).toHaveBeenLastCalledWith(
+        "/repo",
+        target,
+        track,
+      );
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    io.checkoutBranch.mockClear();
+    io.checkoutTag.mockClear();
+    vi.unstubAllGlobals();
+  }
+});
 
 it("keeps all Changes rows and the commit input mounted across switches and supports keyboard navigation", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

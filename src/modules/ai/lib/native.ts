@@ -307,7 +307,7 @@ export type GitDiscardEntry = {
 
 export type GitBranchEntry = {
   name: string;
-  kind: "local" | "remote" | "worktree";
+  kind: "local" | "remote" | "worktree" | "tag";
   worktreePath: string | null;
   isHead: boolean;
   isDetached: boolean;
@@ -609,4 +609,6 @@ export const native = {
       branch,
       trackRemote,
     }),
+  gitCheckoutTag: (repoRoot: string, tag: string) =>
+    invoke<void>("git_checkout_tag", { repoRoot, tag }),
 };

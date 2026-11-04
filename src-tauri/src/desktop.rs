@@ -288,6 +288,7 @@ pub fn run() {
             git::commands::git_remote_url,
             git::commands::git_list_branches,
             git::commands::git_checkout_branch,
+            git::commands::git_checkout_tag,
             commands::shell::shell_run_command,
             commands::shell::shell_environment,
             commands::shell::shell_exec,

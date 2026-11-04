@@ -85,6 +85,7 @@ import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Tag01Icon from "@hugeicons/core-free-icons/Tag01Icon";
 import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -93,6 +94,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -158,8 +160,23 @@ function BranchDropdown({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [panelSize, setPanelSize] = useState({ width: 280, height: 800 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const requestRef = useRef(0);
   const checkoutInFlight = useRef(false);
+
+  useLayoutEffect(() => {
+    const panel = triggerRef.current?.closest("aside");
+    if (!panel) return;
+    const updateSize = () => {
+      const { width, height } = panel.getBoundingClientRect();
+      if (width > 0 && height > 0) setPanelSize({ width, height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
 
   const loadBranches = useCallback(async () => {
     const id = ++requestRef.current;
@@ -198,7 +215,11 @@ function BranchDropdown({
       checkoutInFlight.current = true;
       setCheckingOut(true);
       try {
-        await native.gitCheckoutBranch(repoRoot, branch.name, trackRemote);
+        if (branch.kind === "tag") {
+          await native.gitCheckoutTag(repoRoot, branch.name);
+        } else {
+          await native.gitCheckoutBranch(repoRoot, branch.name, trackRemote);
+        }
         setBranches([]);
         setOpen(false);
         onRefresh();
@@ -224,6 +245,10 @@ function BranchDropdown({
     () => branches.filter((b) => b.kind === "remote"),
     [branches],
   );
+  const tags = useMemo(
+    () => branches.filter((b) => b.kind === "tag"),
+    [branches],
+  );
 
   const checkoutTarget = useCallback(
     (branch: GitBranchEntry) => {
@@ -244,6 +269,7 @@ function BranchDropdown({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           disabled={checkingOut}
           className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-interactive-hover px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-interactive-active disabled:cursor-default disabled:opacity-70"
@@ -257,7 +283,17 @@ function BranchDropdown({
           <span className="max-w-35 truncate">{repoLabel}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
+      <DropdownMenuContent
+        align="start"
+        className="flex min-w-0 max-w-(--radix-dropdown-menu-content-available-width) flex-col overflow-hidden"
+        style={{
+          width: Math.min(
+            360,
+            Math.max(240, Math.floor(panelSize.width * 0.9)),
+          ),
+          maxHeight: `min(${Math.min(640, Math.floor(panelSize.height * 0.7))}px, var(--radix-dropdown-menu-content-available-height))`,
+        }}
+      >
         {loading ? (
           <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
             <Spinner className="size-3" />
@@ -270,11 +306,11 @@ function BranchDropdown({
         ) : (
           <>
             {localBranches.length > 0 && (
-              <>
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="flex min-h-0 flex-col">
+                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.localBranches")}
                 </DropdownMenuLabel>
-                <DropdownMenuGroup>
+                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
                   {localBranches.map((b) => (
                     <DropdownMenuItem
                       key={b.name}
@@ -296,15 +332,15 @@ function BranchDropdown({
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
-              </>
+              </div>
             )}
             {remoteBranches.length > 0 && (
-              <>
+              <div className="flex min-h-0 flex-col">
                 {localBranches.length > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.remoteBranches")}
                 </DropdownMenuLabel>
-                <DropdownMenuGroup>
+                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
                   {remoteBranches.map((b) => (
                     <DropdownMenuItem
                       key={b.name}
@@ -322,17 +358,47 @@ function BranchDropdown({
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
-              </>
+              </div>
             )}
-            {worktrees.length > 0 && (
-              <>
+            {tags.length > 0 && (
+              <div className="flex min-h-0 flex-col">
                 {(localBranches.length > 0 || remoteBranches.length > 0) && (
                   <DropdownMenuSeparator />
                 )}
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  {t("branch.tags")}
+                </DropdownMenuLabel>
+                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
+                  {tags.map((tag) => (
+                    <DropdownMenuItem
+                      key={tag.name}
+                      onSelect={() => checkoutTarget(tag)}
+                      className="flex cursor-pointer items-center gap-2 text-[12px]"
+                    >
+                      <HugeiconsIcon
+                        icon={Tag01Icon}
+                        size={14}
+                        strokeWidth={1.5}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        {tag.name}
+                      </span>
+                      <BranchTimestamp timestampSecs={tag.timestampSecs} />
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </div>
+            )}
+            {worktrees.length > 0 && (
+              <div className="flex min-h-0 flex-col">
+                {(localBranches.length > 0 ||
+                  remoteBranches.length > 0 ||
+                  tags.length > 0) && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.worktrees")}
                 </DropdownMenuLabel>
-                <DropdownMenuGroup>
+                <DropdownMenuGroup className="no-scrollbar min-h-0 max-h-48 overflow-y-auto overscroll-contain">
                   {worktrees.map((b) => (
                     <DropdownMenuItem
                       key={b.worktreePath ?? b.name}
@@ -361,7 +427,7 @@ function BranchDropdown({
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
-              </>
+              </div>
             )}
             {branches.length === 0 && (
               <div className="px-3 py-3 text-[11px] text-muted-foreground">

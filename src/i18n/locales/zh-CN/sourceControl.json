@@ -29,6 +29,7 @@
     "loading": "正在加载分支…",
     "localBranches": "本地分支",
     "remoteBranches": "远程分支",
+    "tags": "标签",
     "worktrees": "工作树",
     "noBranches": "未找到分支。"
   },
