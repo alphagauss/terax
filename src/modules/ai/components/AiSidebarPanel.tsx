@@ -563,16 +563,13 @@ function SessionPicker() {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Hint content={t("miniWindow.switchSession")}>
-          <button
+          <Button
             ref={triggerRef}
             aria-label={t("miniWindow.switchSession")}
             type="button"
-            className={cn(
-              "flex min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 py-1",
-              "text-[11px] text-foreground outline-none transition-colors",
-              "hover:bg-accent hover:text-foreground",
-              "focus-visible:outline-none",
-            )}
+            variant="ghost"
+            size="xs"
+            className="min-w-0 max-w-48 shrink"
           >
             <span className="truncate">
               {active?.title || t("miniWindow.newChat")}
@@ -583,7 +580,7 @@ function SessionPicker() {
               strokeWidth={2}
               className="opacity-70"
             />
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

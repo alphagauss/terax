@@ -1,5 +1,6 @@
 /** Markdown 表格共用复制、原生另存为和全屏操作，格式转换由 Streamdown 负责。 */
 import { writeClipboardHtml } from "@/lib/clipboard";
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
@@ -41,8 +42,6 @@ import {
 type Format = "markdown" | "csv" | "tsv";
 type Action = "copy" | "download";
 const formats: Format[] = ["markdown", "csv", "tsv"];
-const buttonClass =
-  "cursor-pointer p-1 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50";
 
 function tableHeight(value: number | string): string | undefined {
   if (typeof value === "number") {
@@ -136,9 +135,10 @@ export function MarkdownTable({
                 }
               >
                 <DropdownMenuTrigger asChild>
-                  <button
+                  <Button
                     type="button"
-                    className={buttonClass}
+                    variant="ghost"
+                    size="icon-xs"
                     disabled={disabled}
                     aria-label={t(
                       `table.${action === "copy" && copied ? "copied" : action}`,
@@ -154,7 +154,7 @@ export function MarkdownTable({
                             : Copy01Icon
                       }
                     />
-                  </button>
+                  </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {formats.map((format) => (
@@ -171,25 +171,27 @@ export function MarkdownTable({
             ),
         )}
         {expanded ? (
-          <button
+          <Button
             type="button"
-            className={buttonClass}
+            variant="ghost"
+            size="icon-xs"
             aria-label={t("table.exitFullscreen")}
             onClick={() => setFullscreen(false)}
           >
             <HugeiconsIcon icon={Cancel01Icon} size={20} />
-          </button>
+          </Button>
         ) : (
           options.fullscreen !== false && (
             <DialogTrigger asChild>
-              <button
+              <Button
                 type="button"
-                className={buttonClass}
+                variant="ghost"
+                size="icon-xs"
                 disabled={disabled}
                 aria-label={t("table.viewFullscreen")}
               >
                 <HugeiconsIcon icon={MaximizeScreenIcon} size={14} />
-              </button>
+              </Button>
             </DialogTrigger>
           )
         )}

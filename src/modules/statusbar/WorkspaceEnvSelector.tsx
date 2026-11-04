@@ -4,6 +4,7 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -118,10 +119,12 @@ export function WorkspaceEnvSelector({
       <DropdownMenu onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
           <Hint content={triggerTitle}>
-            <button
+            <Button
               aria-label={triggerTitle}
               type="button"
-              className="status-bar-item text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+              variant="ghost"
+              size="xs"
+              className="status-bar-item"
             >
               <HugeiconsIcon icon={ServerStack03Icon} strokeWidth={1.75} />
               {env.kind === "ssh" ? (
@@ -143,7 +146,7 @@ export function WorkspaceEnvSelector({
                 </>
               ) : null}
               <span className="whitespace-nowrap">{label}</span>
-            </button>
+            </Button>
           </Hint>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className={COMPACT_MENU_CONTENT}>

@@ -286,12 +286,13 @@ export function SpaceSwitcher({
         <Hint
           content={shortcut ? t("titleWithShortcut", { shortcut }) : t("title")}
         >
-          <button
+          <Button
             aria-label={
               shortcut ? t("titleWithShortcut", { shortcut }) : t("title")
             }
             type="button"
-            className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+            variant="ghost"
+            size="sm"
           >
             <span className="max-w-36 truncate text-xs font-medium">
               {current.id === DEFAULT_SPACE_ID
@@ -304,7 +305,7 @@ export function SpaceSwitcher({
               strokeWidth={1.75}
               className="shrink-0 opacity-65"
             />
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

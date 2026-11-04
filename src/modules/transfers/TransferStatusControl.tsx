@@ -147,12 +147,11 @@ function TransferStatusPanel({ showTiming }: { showTiming: boolean }) {
     >
       <PopoverTrigger asChild>
         <Hint content={t("transfers.title")}>
-          <button
+          <Button
             type="button"
-            className={cn(
-              "status-bar-item text-muted-foreground hover:bg-accent hover:text-foreground",
-              failed > 0 && "text-destructive",
-            )}
+            variant={failed > 0 ? "ghost-destructive" : "ghost"}
+            size="xs"
+            className="status-bar-item"
             aria-label={t("transfers.title")}
           >
             {processing ? (
@@ -183,7 +182,7 @@ function TransferStatusPanel({ showTiming }: { showTiming: boolean }) {
                 {t("transfers.failedCount", { count: failed })}
               </span>
             ) : null}
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

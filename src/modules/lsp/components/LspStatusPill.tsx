@@ -1,5 +1,6 @@
 import { writeClipboardText } from "@/lib/clipboard";
 import { Hint } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverContent,
@@ -86,16 +87,18 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
     <Popover>
       <PopoverTrigger asChild>
         <Hint content={t("serverStoppedTitle")}>
-          <button
+          <Button
             aria-label={t("serverStoppedTitle")}
             type="button"
+            variant="ghost"
+            size="xs"
             className={PILL_CLASS}
           >
             <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
             <span className="truncate">
               {t("pillLabel", { name: preset.name })}
             </span>
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent
@@ -168,12 +171,17 @@ function InstallPill({ preset }: { preset: LspPreset }) {
     <Popover>
       <span className={PILL_CLASS}>
         <PopoverTrigger asChild>
-          <button type="button" className="flex min-w-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="h-auto min-w-0 shrink p-0"
+          >
             <HugeiconsIcon icon={SourceCodeIcon} strokeWidth={2} />
             <span className="truncate">
               {t("installLsp", { name: preset.name })}
             </span>
-          </button>
+          </Button>
         </PopoverTrigger>
         <DismissButton preset={preset} />
       </span>
@@ -254,11 +262,13 @@ function ActivePill({
         <Hint
           content={starting ? t("serverStartingTitle") : t("serverActiveTitle")}
         >
-          <button
+          <Button
             aria-label={
               starting ? t("serverStartingTitle") : t("serverActiveTitle")
             }
             type="button"
+            variant="ghost"
+            size="xs"
             className={PILL_CLASS}
           >
             {starting ? (
@@ -273,7 +283,7 @@ function ActivePill({
             <span className="truncate">
               {t("pillLabel", { name: preset.name })}
             </span>
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

@@ -4,6 +4,7 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverContent,
@@ -222,9 +223,11 @@ function SshTrafficPanel() {
     <Popover>
       <PopoverTrigger asChild>
         <Hint content={t("sshTraffic.label")}>
-          <button
+          <Button
             type="button"
-            className="status-bar-item tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            variant="ghost"
+            size="xs"
+            className="status-bar-item tabular-nums"
             aria-label={t("sshTraffic.label")}
           >
             <span className="status-bar-rate">
@@ -239,7 +242,7 @@ function SshTrafficPanel() {
               </span>
               <span>{downloadRate}</span>
             </span>
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

@@ -4,6 +4,7 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverContent,
@@ -108,15 +109,17 @@ export function SshCapabilityControl() {
     <Popover>
       <PopoverTrigger asChild>
         <Hint content={t("sshCapabilities.aria", { state: label })}>
-          <button
+          <Button
             type="button"
-            className="status-bar-item min-w-6 justify-center hover:bg-accent"
+            variant="ghost"
+            size="icon-xs"
+            className="status-bar-item"
             aria-label={t("sshCapabilities.aria", { state: label })}
           >
             <span
               className={cn("size-1.5 rounded-full", lampClass[current.state])}
             />
-          </button>
+          </Button>
         </Hint>
       </PopoverTrigger>
       <PopoverContent

@@ -305,20 +305,22 @@ function BranchDropdown({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button
+        <Button
           ref={triggerRef}
           type="button"
+          variant="secondary"
+          size="xs"
           disabled={checkingOut}
-          className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-interactive-hover px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-interactive-active disabled:cursor-default disabled:opacity-70"
+          className="min-w-0 shrink"
         >
           <HugeiconsIcon
             icon={FolderGitTwoIcon}
             size={12}
             strokeWidth={1.9}
-            className="shrink-0 text-muted-foreground"
+            className="size-3 shrink-0 text-muted-foreground"
           />
           <span className="max-w-35 truncate">{repoLabel}</span>
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         ref={contentRef}
