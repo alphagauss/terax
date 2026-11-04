@@ -308,7 +308,7 @@ function BranchDropdown({
         <Button
           ref={triggerRef}
           type="button"
-          variant="secondary"
+          variant="ghost"
           size="xs"
           disabled={checkingOut}
           className="min-w-0 shrink"
@@ -317,9 +317,15 @@ function BranchDropdown({
             icon={FolderGitTwoIcon}
             size={12}
             strokeWidth={1.9}
-            className="size-3 shrink-0 text-muted-foreground"
+            className="size-3 shrink-0"
           />
           <span className="max-w-35 truncate">{repoLabel}</span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={12}
+            strokeWidth={1.9}
+            className="size-3 shrink-0"
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
