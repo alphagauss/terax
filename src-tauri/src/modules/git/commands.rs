@@ -41,12 +41,13 @@ pub async fn git_resolve_repo(
 #[tauri::command]
 pub async fn git_panel_snapshot(
     cwd: String,
+    include_graph: bool,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitPanelSnapshot, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::panel_snapshot(r, &cwd, &workspace).map_err(Into::into)
+        operations::panel_snapshot(r, &cwd, &workspace, include_graph).map_err(Into::into)
     })
     .await
 }
@@ -54,25 +55,13 @@ pub async fn git_panel_snapshot(
 #[tauri::command]
 pub async fn git_panel_diff_stats(
     repo_root: String,
+    status: GitStatusSnapshot,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitPanelDiffStats, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::panel_diff_stats(r, &repo_root, &workspace).map_err(Into::into)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn git_graph_revision(
-    repo_root: String,
-    workspace: Option<WorkspaceEnv>,
-    app: AppHandle,
-) -> Result<String, String> {
-    let workspace = WorkspaceEnv::from_option(workspace);
-    blocking(app, move |r| {
-        operations::graph_revision(r, &repo_root, &workspace).map_err(Into::into)
+        operations::panel_diff_stats(r, &repo_root, &workspace, &status).map_err(Into::into)
     })
     .await
 }

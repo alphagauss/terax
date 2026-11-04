@@ -46,20 +46,26 @@ describe("repository refresh queue", () => {
     await next;
     expect(run).toHaveBeenCalledTimes(3);
   });
-  it("runs one trailing refresh for requests received while inflight", async () => {
-    const firstRun = deferred();
-    const run = vi
-      .fn<() => Promise<void>>()
-      .mockReturnValueOnce(firstRun.promise)
-      .mockResolvedValue(undefined);
-    const queue = createRepositoryRefreshQueue(run);
-
-    const first = queue.request();
-    const second = queue.request();
-    firstRun.resolve();
-    await first;
-
-    expect(second).toBe(first);
-    expect(run).toHaveBeenCalledTimes(2);
+  it("bounds pending invalidations and leaves a gap between slow rounds", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstRun = deferred();
+      const run = vi
+        .fn<() => Promise<void>>()
+        .mockReturnValueOnce(firstRun.promise)
+        .mockResolvedValue(undefined);
+      const queue = createRepositoryRefreshQueue(run, () => 4000);
+      const first = queue.request();
+      for (let i = 0; i < 100; i++) expect(queue.request()).toBe(first);
+      firstRun.resolve();
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(run).toHaveBeenCalledOnce();
+      for (let i = 0; i < 100; i++) queue.request();
+      await vi.advanceTimersByTimeAsync(1);
+      await first;
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,10 +1,11 @@
 /**
  * 本文件维护工作区当前 Git 仓库的唯一控制器。
- * 所有调用方共享真实快照与单调 revision；工作区状态与 Git 引用分别合并刷新。
+ * 所有调用方共享真实快照与单调 revision；基础状态先发布，引用与可见统计共用串行刷新周期。
  */
 
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
+  type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
   native,
@@ -21,12 +22,13 @@ import {
 } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRepositoryRefreshQueue } from "./repositoryRefresh";
-import { shareRepositorySnapshot } from "./repositorySharing";
+import { shareDiffStats, shareRepositorySnapshot } from "./repositorySharing";
 
 // 相同上下文在短时间内复用快照；路径一旦变化就重新发现仓库，避免漏掉嵌套仓库。
 const SC_STATUS_TTL_MS = 2000;
 const FOREGROUND_REFRESH_MS = 3000;
-const MAX_REFRESH_MS = 30000;
+const BACKGROUND_REFRESH_MS = 5000;
+const isWindowVisible = () => document.visibilityState !== "hidden";
 
 type RepositoryRemoteAction = "fetch" | "pull" | "push";
 type RepositoryRemoteActionMode = "contextual" | RepositoryRemoteAction;
@@ -56,8 +58,9 @@ export type RepositoryController = {
   lastRemoteError: string | null;
   /** 每次成功读取真实仓库快照后递增，供可见派生视图重新加载。 */
   revision: number;
-  /** Git 引用摘要；首次 probe 完成前为空，避免加载存在竞态的提交图。 */
+  /** Git 引用摘要；首次引用校验完成前为空，避免加载存在竞态的提交图。 */
   graphRevision: string | null;
+  diffStats: GitPanelDiffStats | null;
   refresh: () => Promise<void>;
   runRemoteAction: (
     mode?: RepositoryRemoteActionMode,
@@ -73,6 +76,7 @@ type RepositoryControllerState = {
   lastRemoteError: string | null;
   revision: number;
   graphRevision: string | null;
+  diffStats: GitPanelDiffStats | null;
 };
 
 function isPathInsideRepository(
@@ -108,11 +112,12 @@ function getContextualAction(
 /**
  * 维护当前工作区上下文对应的唯一 Git 仓库快照。
  *
- * 本地事件和 Git 操作共用状态刷新队列；引用 probe 独立合并，避免普通文件事件重读提交图。
+ * 本地事件、恢复校验与 Git 操作共用串行队列，统计不另建请求链。
  */
 export function useRepositoryController(
   contextPath: string | null,
   enabled: boolean = true,
+  foreground: boolean = true,
 ): RepositoryController {
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceKey = workspaceScopeKey(workspaceEnv);
@@ -126,6 +131,7 @@ export function useRepositoryController(
     lastRemoteError: null,
     revision: 0,
     graphRevision: null,
+    diffStats: null,
   });
   const stateRef = useRef(state);
   const requestIdRef = useRef(0);
@@ -133,9 +139,14 @@ export function useRepositoryController(
   const contextPathRef = useRef(contextPath);
   const workspaceKeyRef = useRef(workspaceKey);
   const lastRefreshAtRef = useRef(0);
-  const pollDelayRef = useRef(FOREGROUND_REFRESH_MS);
+  const foregroundRef = useRef(foreground);
+  const previousForegroundRef = useRef(foreground);
+  const lastDurationRef = useRef(0);
+  const schedulePollRef = useRef(() => {});
+  const mountedRef = useRef(true);
   const dirtyRef = useRef(false);
 
+  foregroundRef.current = foreground;
   enabledRef.current = enabled;
   contextPathRef.current = contextPath;
   workspaceKeyRef.current = workspaceKey;
@@ -168,16 +179,27 @@ export function useRepositoryController(
       lastRemoteError: null,
       revision: 0,
       graphRevision: null,
+      diffStats: null,
     });
   }, [updateState, workspaceKey]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const doRefresh = useCallback(async (): Promise<void> => {
-    if (!enabledRef.current) return;
+    if (!mountedRef.current || !enabledRef.current || !isWindowVisible())
+      return;
     const startedAt = Date.now();
     const requestId = ++requestIdRef.current;
     const requestedContext = contextPathRef.current;
     const requestedWorkspace = workspaceKeyRef.current;
+    const includeGraph = foregroundRef.current;
     const isCurrentRequest = () =>
+      mountedRef.current &&
       requestId === requestIdRef.current &&
       enabledRef.current &&
       contextPathRef.current === requestedContext &&
@@ -192,6 +214,8 @@ export function useRepositoryController(
               contextPath: null,
               repo: null,
               status: null,
+              diffStats: null,
+              graphRevision: null,
               localError: null,
               busyAction: null,
               lastRemoteError: null,
@@ -205,7 +229,10 @@ export function useRepositoryController(
         stateRef.current.repo !== null &&
           stateRef.current.contextPath === requestedContext,
       );
-      const snapshot = await native.gitPanelSnapshot(requestedContext);
+      const snapshot = await native.gitPanelSnapshot(
+        requestedContext,
+        includeGraph,
+      );
       if (!isCurrentRequest()) return;
       if (!snapshot.repo || !snapshot.status) {
         updateState((current) =>
@@ -218,6 +245,8 @@ export function useRepositoryController(
                 contextPath: requestedContext,
                 repo: null,
                 status: null,
+                graphRevision: null,
+                diffStats: null,
                 localError: null,
               },
         );
@@ -227,15 +256,6 @@ export function useRepositoryController(
       const shared = shareRepositorySnapshot(previous, snapshot);
       const repo = shared.repo ?? snapshot.repo;
       const status = shared.status ?? snapshot.status;
-      const unchanged = previous.repo === repo && previous.status === status;
-      pollDelayRef.current = Math.min(
-        MAX_REFRESH_MS,
-        Math.max(
-          FOREGROUND_REFRESH_MS,
-          (Date.now() - startedAt) * 2,
-          unchanged ? pollDelayRef.current * 2 : FOREGROUND_REFRESH_MS,
-        ),
-      );
 
       updateState((current) => ({
         ...current,
@@ -244,11 +264,41 @@ export function useRepositoryController(
         status,
         revision: current.revision + 1,
         graphRevision:
-          current.repo?.repoRoot === repo.repoRoot
+          // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
+          (snapshot.graphRevision === "unavailable"
+            ? null
+            : snapshot.graphRevision) ??
+          (current.repo?.repoRoot === repo.repoRoot
             ? current.graphRevision
-            : null,
+            : null) ??
+          (includeGraph ? "unavailable" : null),
+        diffStats:
+          current.repo?.repoRoot === repo.repoRoot ? current.diffStats : null,
         localError: null,
       }));
+      // 清单先显示，统计沿用本轮状态；慢统计计入周期，不能与下一轮自动读取重叠。
+      if (foregroundRef.current && isWindowVisible() && isCurrentRequest()) {
+        try {
+          const stats = await native.gitPanelDiffStats(
+            repo.repoRoot,
+            snapshot.status,
+          );
+          if (
+            isCurrentRequest() &&
+            foregroundRef.current &&
+            isWindowVisible()
+          ) {
+            updateState((current) => ({
+              ...current,
+              diffStats: shareDiffStats(current.diffStats, stats),
+            }));
+          }
+        } catch {
+          // 展示统计失败不覆盖已成功读取的仓库状态。
+          if (isCurrentRequest())
+            updateState((current) => ({ ...current, diffStats: null }));
+        }
+      }
     } catch (error) {
       if (!isCurrentRequest()) return;
       const localError = normalizeError(error);
@@ -262,22 +312,36 @@ export function useRepositoryController(
           contextPath: requestedContext,
           repo: null,
           status: null,
+          graphRevision: null,
+          diffStats: null,
           localError,
         };
       });
     } finally {
-      setRefreshing(false);
-      if (isCurrentRequest()) lastRefreshAtRef.current = Date.now();
+      if (mountedRef.current) setRefreshing(false);
+      if (isCurrentRequest()) {
+        lastDurationRef.current = Date.now() - startedAt;
+        lastRefreshAtRef.current = Date.now();
+        schedulePollRef.current();
+      }
     }
   }, [updateState]);
 
   const refreshQueue = useMemo(
-    () => createRepositoryRefreshQueue(doRefresh),
+    () =>
+      createRepositoryRefreshQueue(doRefresh, () =>
+        stateRef.current.contextPath === contextPathRef.current
+          ? Math.max(120, lastDurationRef.current)
+          : 0,
+      ),
     [doRefresh],
   );
 
   const refresh = useCallback(() => {
-    pollDelayRef.current = FOREGROUND_REFRESH_MS;
+    if (!isWindowVisible()) {
+      dirtyRef.current = true;
+      return Promise.resolve();
+    }
     dirtyRef.current = false;
     return refreshQueue.request();
   }, [refreshQueue]);
@@ -292,49 +356,6 @@ export function useRepositoryController(
       return Promise.resolve();
     return refreshQueue.request("check");
   }, [refresh, refreshQueue]);
-
-  const probeGraphRevision = useCallback(async (): Promise<void> => {
-    const repoRoot = stateRef.current.repo?.repoRoot;
-    const requestedWorkspace = workspaceKeyRef.current;
-    if (!enabledRef.current || !repoRoot) return;
-    try {
-      const signature = await native.gitGraphRevision(repoRoot);
-      if (
-        !enabledRef.current ||
-        stateRef.current.repo?.repoRoot !== repoRoot ||
-        workspaceKeyRef.current !== requestedWorkspace
-      ) {
-        return;
-      }
-      updateState((current) =>
-        current.graphRevision === signature
-          ? current
-          : { ...current, graphRevision: signature },
-      );
-    } catch {
-      // 首次 probe 失败也允许 Graph 加载；后续语义事件会再次校验。
-      if (
-        enabledRef.current &&
-        stateRef.current.repo?.repoRoot === repoRoot &&
-        workspaceKeyRef.current === requestedWorkspace &&
-        stateRef.current.graphRevision === null
-      ) {
-        updateState((current) => ({
-          ...current,
-          graphRevision: "unavailable",
-        }));
-      }
-    }
-  }, [updateState]);
-
-  const graphProbeQueue = useMemo(
-    () => createRepositoryRefreshQueue(probeGraphRevision),
-    [probeGraphRevision],
-  );
-  const probeGraph = useCallback(
-    () => graphProbeQueue.request(),
-    [graphProbeQueue],
-  );
 
   const runRemoteAction = useCallback(
     async (
@@ -366,7 +387,6 @@ export function useRepositoryController(
         }
         updateState((current) => ({ ...current, lastRemoteError: null }));
         await refresh();
-        await probeGraph();
         return { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
@@ -375,20 +395,13 @@ export function useRepositoryController(
           lastRemoteError: message,
         }));
         await refresh().catch(() => {});
-        await probeGraph();
         return { ok: false, action, error: message };
       } finally {
         updateState((current) => ({ ...current, busyAction: null }));
       }
     },
-    [probeGraph, refresh, updateState],
+    [refresh, updateState],
   );
-
-  const repoRoot = state.repo?.repoRoot ?? null;
-  useEffect(() => {
-    if (!repoRoot) return;
-    void probeGraph();
-  }, [probeGraph, repoRoot]);
 
   useEffect(() => {
     void workspaceKey;
@@ -403,6 +416,7 @@ export function useRepositoryController(
         lastRemoteError: null,
         revision: 0,
         graphRevision: null,
+        diffStats: null,
       });
       return;
     }
@@ -440,24 +454,30 @@ export function useRepositoryController(
   }, [refresh, contextPath, enabled, updateState, workspaceKey]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !contextPath) return;
     return subscribeTerminalCommandFinished((cwd) => {
-      const currentRepoRoot = stateRef.current.repo?.repoRoot;
+      const currentRepoRoot =
+        stateRef.current.contextPath === contextPath
+          ? stateRef.current.repo?.repoRoot
+          : null;
       if (
         currentRepoRoot &&
         isPathInsideRepository(cwd, currentRepoRoot, workspaceEnv)
       ) {
-        void probeGraph();
         void refresh();
       }
     });
-  }, [enabled, probeGraph, refresh, workspaceEnv]);
+  }, [enabled, contextPath, refresh, workspaceEnv]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !contextPath) return;
     let timer = 0;
+    let firstEventAt: number | null = null;
     const schedule = (paths: string[]) => {
-      const root = stateRef.current.repo?.repoRoot;
+      const root =
+        stateRef.current.contextPath === contextPath
+          ? (stateRef.current.repo?.repoRoot ?? contextPath)
+          : contextPath;
       if (
         root &&
         !paths.some(
@@ -468,60 +488,92 @@ export function useRepositoryController(
       )
         return;
       dirtyRef.current = true;
-      pollDelayRef.current = FOREGROUND_REFRESH_MS;
       window.clearTimeout(timer);
-      if (document.visibilityState === "hidden") return;
-      timer = window.setTimeout(() => {
-        timer = 0;
-        // 恢复校验可能已消费此批失效；等待期间隐藏则留到下次恢复。
-        if (dirtyRef.current && document.visibilityState !== "hidden")
-          void refresh();
-      }, 120);
+      if (!isWindowVisible()) return;
+      firstEventAt ??= Date.now();
+      timer = window.setTimeout(
+        () => {
+          timer = 0;
+          firstEventAt = null;
+          // 恢复校验可能已消费此批失效；等待期间隐藏则留到下次恢复。
+          if (dirtyRef.current && isWindowVisible()) void refresh();
+        },
+        Math.min(120, Math.max(0, firstEventAt + 1000 - Date.now())),
+      );
     };
     const unsubscribe = subscribeFileSystemChanges(workspaceEnv, schedule);
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, [enabled, refresh, workspaceEnv]);
+  }, [enabled, contextPath, refresh, workspaceEnv]);
 
   useEffect(() => {
+    // 可见性切换立即重排间隔，不能等后台的旧计时器耗尽。
+    void foreground;
     if (!enabled || !contextPath) return;
     let disposed = false;
     let running = false;
     let timer = 0;
-    const canRefresh = () => !disposed && document.visibilityState !== "hidden";
+    const canRefresh = () => !disposed && isWindowVisible();
     const schedule = () => {
       window.clearTimeout(timer);
       timer = 0;
-      if (!canRefresh()) return;
-      timer = window.setTimeout(() => {
-        timer = 0;
-        void run();
-      }, pollDelayRef.current);
+      if (!canRefresh() || running) return;
+      timer = window.setTimeout(
+        () => {
+          timer = 0;
+          void run();
+        },
+        Math.max(
+          foregroundRef.current ? FOREGROUND_REFRESH_MS : BACKGROUND_REFRESH_MS,
+          lastDurationRef.current,
+        ),
+      );
     };
     const run = async () => {
-      if (!canRefresh() || running) return;
+      if (!canRefresh()) return;
+      // 先接收恢复产生的失效，再复用等待者，不能因旧轮询未结束而漏查。
+      const task = check();
+      if (running) return;
       running = true;
       try {
-        await Promise.all([check(), graphProbeQueue.request("check")]);
+        await task;
       } finally {
         running = false;
         schedule();
       }
     };
+    schedulePollRef.current = schedule;
     const unsubscribeResume = subscribeWorkspaceResume(() => {
       window.clearTimeout(timer);
       timer = 0;
       void run();
     });
+    const onVisibility = () => {
+      if (!canRefresh()) {
+        // 隐藏期间可能没有文件事件，恢复时不能复用隐藏前的短期快照。
+        dirtyRef.current = true;
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     schedule();
     return () => {
+      schedulePollRef.current = () => {};
+      document.removeEventListener("visibilitychange", onVisibility);
       disposed = true;
       if (timer) window.clearTimeout(timer);
       unsubscribeResume();
     };
-  }, [contextPath, enabled, check, graphProbeQueue]);
+  }, [contextPath, enabled, check, foreground]);
+
+  useEffect(() => {
+    const activated = foreground && !previousForegroundRef.current;
+    previousForegroundRef.current = foreground;
+    if (activated && enabled && contextPath) void refresh();
+  }, [foreground, enabled, contextPath, refresh]);
 
   return useMemo<RepositoryController>(() => {
     // 空 Space 没有仓库，不能在异步清理完成前继续暴露上一根目录的快照。
@@ -543,6 +595,7 @@ export function useRepositoryController(
       lastRemoteError: state.lastRemoteError,
       revision: state.revision,
       graphRevision: repo ? state.graphRevision : null,
+      diffStats: repo ? state.diffStats : null,
       refresh,
       runRemoteAction,
     };

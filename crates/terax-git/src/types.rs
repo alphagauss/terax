@@ -20,7 +20,7 @@ pub struct GitRepoInfo {
     pub is_detached: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChangedFile {
     pub path: String,
@@ -33,7 +33,7 @@ pub struct GitChangedFile {
     pub status_label: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitStatusSnapshot {
     pub repo_root: String,
@@ -50,6 +50,8 @@ pub struct GitStatusSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPanelSnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_revision: Option<String>,
     pub repo: Option<GitRepoInfo>,
     pub status: Option<GitStatusSnapshot>,
 }

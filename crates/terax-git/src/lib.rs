@@ -4,5 +4,6 @@ pub mod errors;
 pub mod operations;
 mod parser;
 mod process;
+mod remote;
 pub mod types;
 mod utils;

@@ -295,6 +295,7 @@ export type GitPanelDiffStats = {
 };
 
 export type GitPanelSnapshot = {
+  graphRevision?: string | null;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
 };
@@ -481,14 +482,13 @@ export const native = {
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,
     }),
-  gitPanelSnapshot: (cwd: string) =>
+  gitPanelSnapshot: (cwd: string, includeGraph = false) =>
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
+      includeGraph,
     }),
-  gitPanelDiffStats: (repoRoot: string) =>
-    invoke<GitPanelDiffStats>("git_panel_diff_stats", { repoRoot }),
-  gitGraphRevision: (repoRoot: string) =>
-    invoke<string>("git_graph_revision", { repoRoot }),
+  gitPanelDiffStats: (repoRoot: string, status: GitStatusSnapshot) =>
+    invoke<GitPanelDiffStats>("git_panel_diff_stats", { repoRoot, status }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,

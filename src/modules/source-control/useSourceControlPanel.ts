@@ -29,7 +29,6 @@ import {
   setCommitMessageDraft,
 } from "@/modules/source-control/commitMessage";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useRepositoryDiffStats } from "./useRepositoryDiffStats";
 import { shareEqual } from "./repositorySharing";
 import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
@@ -181,11 +180,7 @@ export function useSourceControlPanel(
   const refreshRepository = controller.refresh;
   const busyAction = controller.busyAction;
   const runRemoteAction = controller.runRemoteAction;
-  const diffStats = useRepositoryDiffStats(
-    repo?.repoRoot ?? null,
-    controller.revision,
-    isOpen,
-  );
+  const diffStats = controller.diffStats;
   const previousEntries = useRef(new Map<string, SourceControlFileEntry>());
   // 可见性不改变数据状态，避免普通侧栏切换卸载 Changes 滚动节点。
   const panelState: PanelState = controller.isLoading

@@ -43,13 +43,6 @@ pub fn graph_revision(
         ["show-ref", "--head", "--dereference"],
         DEFAULT_TIMEOUT_SECS,
     )?;
-    if output.timed_out {
-        return Err(GitError::TimedOut("git show-ref"));
-    }
-    // 空仓库没有引用，show-ref 以 1 退出；空摘要仍是有效 revision。
-    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && output.stdout.is_empty()) {
-        ensure_success(&output, "git show-ref failed")?;
-    }
     // show-ref 不区分指向同一提交的当前分支，也不记录当前选择的 upstream。
     // rev-parse 在没有 upstream 时会非零退出，但仍先输出 HEAD，因此这里只取 stdout。
     let symbolic = run_git(
@@ -58,8 +51,22 @@ pub fn graph_revision(
         ["rev-parse", "--symbolic-full-name", "HEAD", "@{upstream}"],
         DEFAULT_TIMEOUT_SECS,
     )?;
-    if symbolic.timed_out {
-        return Err(GitError::TimedOut("git rev-parse"));
+    graph_revision_from_outputs(&output, &symbolic)
+}
+
+pub(super) fn graph_revision_from_outputs(
+    output: &GitOutput,
+    symbolic: &GitOutput,
+) -> Result<String> {
+    if output.timed_out || symbolic.timed_out {
+        return Err(GitError::TimedOut("Git references"));
+    }
+    if output.truncated || symbolic.truncated {
+        return Err(GitError::command("Git references", "output truncated"));
+    }
+    // 空仓库没有引用，show-ref 以 1 退出；空摘要仍是有效 revision。
+    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && output.stdout.is_empty()) {
+        ensure_success(output, "git show-ref failed")?;
     }
     let mut hasher = Sha256::new();
     hasher.update(&output.stdout);
@@ -148,7 +155,12 @@ pub fn panel_snapshot(
     registry: &WorkspaceRegistry,
     cwd: &str,
     workspace: &WorkspaceEnv,
+    include_graph: bool,
 ) -> Result<GitPanelSnapshot> {
+    if workspace.is_ssh() {
+        ensure_git_available(workspace)?;
+        return crate::remote::snapshot(cwd, workspace, include_graph);
+    }
     let cwd = canonical_dir(registry, cwd, workspace)?;
     if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
@@ -156,6 +168,7 @@ pub fn panel_snapshot(
     ensure_git_available(&cwd.workspace)?;
     let Some(canonical_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
         return Ok(GitPanelSnapshot {
+            graph_revision: None,
             repo: None,
             status: None,
         });
@@ -168,6 +181,14 @@ pub fn panel_snapshot(
         is_detached: status.is_detached,
     };
     Ok(GitPanelSnapshot {
+        graph_revision: if include_graph {
+            Some(
+                graph_revision(registry, &repo.repo_root, workspace)
+                    .unwrap_or_else(|_| "unavailable".into()),
+            )
+        } else {
+            None
+        },
         repo: Some(repo),
         status: Some(status),
     })
@@ -178,13 +199,19 @@ pub fn panel_diff_stats(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     workspace: &WorkspaceEnv,
+    status: &GitStatusSnapshot,
 ) -> Result<GitPanelDiffStats> {
+    if status.repo_root != repo_root {
+        return Err(GitError::InvalidPath(repo_root.into()));
+    }
+    if workspace.is_ssh() {
+        return crate::remote::statistics(repo_root, status, workspace);
+    }
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    let status = status_inner(&repo_root)?;
     Ok(GitPanelDiffStats {
-        worktree: panel_line_stats(&repo_root, &status, false).ok(),
-        index: panel_line_stats(&repo_root, &status, true).ok(),
+        worktree: panel_line_stats(&repo_root, status, false).ok(),
+        index: panel_line_stats(&repo_root, status, true).ok(),
     })
 }
 
@@ -217,20 +244,7 @@ fn panel_line_stats(
         return Err(GitError::command("git diff statistics", "output truncated"));
     }
     let mut stats = sum_numstat(&output.stdout)?;
-    stats.incomplete = status.truncated;
-    for file in &status.changed_files {
-        if !(if staged { file.staged } else { file.unstaged }) {
-            continue;
-        }
-        // 未合并索引没有可靠的普通比较基线，不展示看似精确的单文件数字。
-        if matches!(
-            (file.index_status.as_str(), file.worktree_status.as_str()),
-            ("U", _) | (_, "U") | ("A", "A") | ("D", "D")
-        ) {
-            stats.files.entry(file.path.clone()).or_default().incomplete = true;
-            stats.incomplete = true;
-        }
-    }
+    mark_incomplete_stats(&mut stats, status, staged);
     if !staged {
         for file in status.changed_files.iter().filter(|file| file.untracked) {
             let value = stats.files.entry(file.path.clone()).or_default();
@@ -264,8 +278,29 @@ fn panel_line_stats(
     Ok(stats)
 }
 
+pub(super) fn mark_incomplete_stats(
+    stats: &mut GitLineStats,
+    status: &GitStatusSnapshot,
+    staged: bool,
+) {
+    stats.incomplete = status.truncated;
+    for file in &status.changed_files {
+        if !(if staged { file.staged } else { file.unstaged }) {
+            continue;
+        }
+        // 未合并索引没有可靠的普通比较基线，不展示看似精确的单文件数字。
+        if matches!(
+            (file.index_status.as_str(), file.worktree_status.as_str()),
+            ("U", _) | (_, "U") | ("A", "A") | ("D", "D")
+        ) {
+            stats.files.entry(file.path.clone()).or_default().incomplete = true;
+            stats.incomplete = true;
+        }
+    }
+}
+
 /// 按 NUL 边界读取文件路径，重命名使用目标路径，制表符和换行不参与统计解析。
-fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
+pub(super) fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
     let invalid = || GitError::command("git diff statistics", "invalid numstat output");
     let mut stats = GitLineStats::default();
     let mut records = bytes.split(|byte| *byte == 0);
@@ -342,11 +377,15 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     )?;
     ensure_success(&output, "git status failed")?;
 
+    Ok(status_from_output(&repo_root.git_path, &output))
+}
+
+pub(super) fn status_from_output(repo_root: &str, output: &GitOutput) -> GitStatusSnapshot {
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
     let parsed = parse_porcelain_v2(stdout);
 
-    Ok(GitStatusSnapshot {
-        repo_root: repo_root.git_path.clone(),
+    GitStatusSnapshot {
+        repo_root: repo_root.to_string(),
         branch: parsed.branch,
         head_sha: parsed.head_sha,
         upstream: parsed.upstream,
@@ -355,7 +394,7 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
         is_detached: parsed.is_detached,
         truncated: output.truncated,
         changed_files: parsed.files,
-    })
+    }
 }
 
 /// 读取工作区或暂存区的 unified diff。

@@ -6,7 +6,10 @@
 type RefreshRunner = () => Promise<void>;
 
 /** 创建串行队列；check 只加入当前任务，invalidate 保证读取期间的变化得到补查。 */
-export function createRepositoryRefreshQueue(run: RefreshRunner): {
+export function createRepositoryRefreshQueue(
+  run: RefreshRunner,
+  trailingDelay: () => number = () => 0,
+): {
   request: (mode?: "invalidate" | "check") => Promise<void>;
 } {
   let pending = false;
@@ -23,6 +26,11 @@ export function createRepositoryRefreshQueue(run: RefreshRunner): {
       while (pending) {
         pending = false;
         await run();
+        if (pending) {
+          const delay = trailingDelay();
+          if (delay > 0)
+            await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        }
       }
     })().finally(() => {
       if (inflight === task) inflight = null;

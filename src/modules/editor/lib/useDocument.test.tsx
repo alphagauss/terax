@@ -85,6 +85,7 @@ const controller = {
   lastRemoteError: null,
   revision: 1,
   graphRevision: null,
+  diffStats: null,
   refresh: vi.fn(),
   runRemoteAction: vi.fn(),
 } satisfies RepositoryController;

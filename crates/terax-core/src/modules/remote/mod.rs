@@ -5,6 +5,7 @@
 
 mod channels;
 pub(crate) mod file_service;
+pub mod git_service;
 mod health;
 pub mod host_key;
 pub mod manager;

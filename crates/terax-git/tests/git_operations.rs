@@ -36,6 +36,13 @@ fn git_stdout(fx: &GitRepoFixture, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn panel_diff_stats(
+    fx: &GitRepoFixture,
+) -> terax_git::errors::Result<terax_git::types::GitPanelDiffStats> {
+    let status = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace)?;
+    operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace, &status)
+}
+
 #[test]
 fn resolve_repo_returns_none_outside_repo() {
     if skip_if_no_git() {
@@ -861,8 +868,12 @@ fn panel_snapshot_returns_repo_and_status_after_commit() {
     fx.run_git(&["commit", "-q", "-m", "seed"]);
     fx.write_file("b.txt", "beta\n");
 
-    let snap = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace)
+    let snap = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, true)
         .expect("panel_snapshot");
+    assert_eq!(
+        snap.graph_revision,
+        Some(operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap())
+    );
     let repo = snap.repo.expect("repo present");
     assert_eq!(repo.branch, "main");
     let status = snap.status.expect("status present");
@@ -879,8 +890,13 @@ fn panel_snapshot_outside_repo_is_empty() {
     let registry = WorkspaceRegistry::default();
     registry.authorize(&canonical).unwrap();
 
-    let snap = operations::panel_snapshot(&registry, &to_canon(&canonical), &WorkspaceEnv::Local)
-        .expect("panel_snapshot");
+    let snap = operations::panel_snapshot(
+        &registry,
+        &to_canon(&canonical),
+        &WorkspaceEnv::Local,
+        false,
+    )
+    .expect("panel_snapshot");
     assert!(snap.repo.is_none());
     assert!(snap.status.is_none());
 }
@@ -1263,17 +1279,16 @@ fn unauthorized_path_is_rejected() {
     if skip_if_no_git() {
         return;
     }
-    let tmp = TempDir::new().unwrap();
-    let canonical = std::fs::canonicalize(tmp.path()).unwrap();
+    let fx = GitRepoFixture::new();
     let registry = WorkspaceRegistry::default();
+    let status = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
 
-    match operations::status(&registry, &to_canon(&canonical), &WorkspaceEnv::Local) {
-        Err(GitError::PathOutsideWorkspace(_)) => {}
-        Err(other) => panic!("expected PathOutsideWorkspace, got {other}"),
-        Ok(_) => panic!("expected error for unauthorized dir"),
-    }
     assert!(matches!(
-        operations::panel_diff_stats(&registry, &to_canon(&canonical), &WorkspaceEnv::Local),
+        operations::status(&registry, &fx.repo_str(), &fx.workspace),
+        Err(GitError::PathOutsideWorkspace(_))
+    ));
+    assert!(matches!(
+        operations::panel_diff_stats(&registry, &fx.repo_str(), &fx.workspace, &status),
         Err(GitError::PathOutsideWorkspace(_))
     ));
 }
@@ -1495,8 +1510,15 @@ fn panel_line_stats_separates_index_and_worktree_and_counts_untracked() {
     fx.write_file("untracked.txt", "one\r\ntwo");
     fx.write_file("empty.txt", "");
     fx.write_file("binary.dat", "\0binary\n");
-    let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let snapshot =
+        operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, false).unwrap();
+    let stats = operations::panel_diff_stats(
+        &fx.registry,
+        &fx.repo_str(),
+        &fx.workspace,
+        snapshot.status.as_ref().unwrap(),
+    )
+    .unwrap();
     let index = stats.index.unwrap();
     let worktree = stats.worktree.unwrap();
     assert_eq!((index.added, index.removed), (2, 1));
@@ -1520,12 +1542,16 @@ fn panel_line_stats_separates_index_and_worktree_and_counts_untracked() {
     assert_eq!(worktree.files["empty.txt"].added, 0);
     assert!(worktree.files["binary.dat"].is_binary);
     assert!(!index.files.contains_key("untracked.txt"));
-    assert!(snapshot
-        .status
-        .unwrap()
+    let mut status = snapshot.status.unwrap();
+    assert!(status
         .changed_files
         .iter()
         .any(|file| file.path == "untracked.txt" && file.untracked));
+    status.repo_root.push_str("/other");
+    assert!(matches!(
+        operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace, &status),
+        Err(GitError::InvalidPath(_))
+    ));
 }
 
 #[test]
@@ -1537,31 +1563,22 @@ fn panel_line_stats_handles_unborn_head_and_unstaged_then_staged_moves() {
     let content = "one\ntwo\nthree\nfour\nfive\n";
     fx.write_file("old.txt", content);
     fx.run_git(&["add", "."]);
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let stats = panel_diff_stats(&fx).unwrap();
     assert_eq!(stats.index.unwrap().added, 5);
     assert_eq!(stats.worktree.unwrap().added, 0);
     fx.run_git(&["commit", "-qm", "seed"]);
     std::fs::rename(fx.repo_path.join("old.txt"), fx.repo_path.join("new.txt")).unwrap();
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace)
-        .unwrap()
-        .worktree
-        .unwrap();
+    let stats = panel_diff_stats(&fx).unwrap().worktree.unwrap();
     assert_eq!((stats.added, stats.removed), (5, 5));
     fx.run_git(&["config", "diff.renames", "false"]);
     fx.run_git(&["add", "-A"]);
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace)
-        .unwrap()
-        .index
-        .unwrap();
+    let stats = panel_diff_stats(&fx).unwrap().index.unwrap();
     assert_eq!((stats.added, stats.removed), (0, 0));
     assert_eq!(stats.files["new.txt"].added, 0);
     assert!(!stats.files.contains_key("old.txt"));
     fx.write_file("new.txt", "one\ntwo\nthree\nfour\nchanged\n");
     fx.run_git(&["add", "-A"]);
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace)
-        .unwrap()
-        .index
-        .unwrap();
+    let stats = panel_diff_stats(&fx).unwrap().index.unwrap();
     assert_eq!((stats.added, stats.removed), (1, 1));
     operations::unstage(
         &fx.registry,
@@ -1570,21 +1587,20 @@ fn panel_line_stats_handles_unborn_head_and_unstaged_then_staged_moves() {
         &fx.workspace,
     )
     .unwrap();
-    let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let snapshot =
+        operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, false).unwrap();
     assert!(!snapshot
         .status
         .unwrap()
         .changed_files
         .iter()
         .any(|file| file.staged));
-    assert!(
-        operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace)
-            .unwrap()
-            .index
-            .unwrap()
-            .files
-            .is_empty()
-    );
+    assert!(panel_diff_stats(&fx)
+        .unwrap()
+        .index
+        .unwrap()
+        .files
+        .is_empty());
 }
 
 #[test]
@@ -1594,12 +1610,10 @@ fn panel_line_stats_marks_unreadable_large_files_without_losing_status() {
     }
     let fx = GitRepoFixture::new();
     fx.write_file("large.txt", &"x".repeat(2 * 1024 * 1024 + 1));
-    let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let snapshot =
+        operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, false).unwrap();
     assert_eq!(snapshot.status.unwrap().changed_files.len(), 1);
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace)
-        .unwrap()
-        .worktree
-        .unwrap();
+    let stats = panel_diff_stats(&fx).unwrap().worktree.unwrap();
     assert!(stats.incomplete);
     assert!(stats.files["large.txt"].incomplete);
 }
@@ -1625,14 +1639,15 @@ fn panel_line_stats_marks_merge_conflicts_incomplete() {
         .output()
         .unwrap();
     assert!(!merge.status.success());
-    let snapshot = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let snapshot =
+        operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace, false).unwrap();
     assert!(snapshot
         .status
         .unwrap()
         .changed_files
         .iter()
         .any(|file| file.index_status == "U"));
-    let stats = operations::panel_diff_stats(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let stats = panel_diff_stats(&fx).unwrap();
     assert!(stats.index.unwrap().files["conflict.txt"].incomplete);
     assert!(stats.worktree.unwrap().files["conflict.txt"].incomplete);
 }

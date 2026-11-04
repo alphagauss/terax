@@ -1024,7 +1024,10 @@ export default function App() {
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
-  const { sourceControl } = useSourceControlContext(explorerRoot);
+  const { sourceControl } = useSourceControlContext(
+    explorerRoot,
+    sidebar.isVisible("source-control"),
+  );
 
   const openWebPreviewTab = useCallback(
     (url: string, groupId?: number) => {

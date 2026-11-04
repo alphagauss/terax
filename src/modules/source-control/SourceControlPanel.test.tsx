@@ -12,7 +12,6 @@ import { useRepositoryController } from "./useRepositoryController";
 const io = vi.hoisted(() => ({
   snapshot: vi.fn(),
   stats: vi.fn(async () => ({ index: null, worktree: null })),
-  graphRevision: vi.fn(),
   stage: vi.fn(),
   unstage: vi.fn(),
 }));
@@ -24,7 +23,6 @@ vi.mock("@/modules/ai/lib/native", async (original) => {
       ...module.native,
       gitPanelSnapshot: io.snapshot,
       gitPanelDiffStats: io.stats,
-      gitGraphRevision: io.graphRevision,
       gitStage: io.stage,
       gitUnstage: io.unstage,
     },
@@ -93,6 +91,7 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
     lastRemoteError: null,
     revision: 1,
     graphRevision: null,
+    diffStats: null,
     refresh: vi.fn(),
     runRemoteAction: vi.fn(),
   };
@@ -193,7 +192,6 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
       complete = resolve;
     });
   io.snapshot.mockImplementation(pending);
-  io.graphRevision.mockResolvedValue("refs-1");
   let controller!: RepositoryController;
   function View() {
     controller = useRepositoryController("/project");
@@ -251,6 +249,7 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
     await act(async () => vi.advanceTimersByTimeAsync(3_000));
     await act(async () =>
       complete({
+        graphRevision: "refs-1",
         repo: {
           repoRoot: "/project",
           branch: "main",
@@ -283,7 +282,6 @@ it("keeps the no-repository UI stable during polling and discovers repository cr
     await act(async () => root.unmount());
     container.remove();
     io.snapshot.mockReset();
-    io.graphRevision.mockReset();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -294,6 +292,7 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   const snapshot: GitPanelSnapshot = {
+    graphRevision: "refs-1",
     repo: {
       repoRoot: "/repo",
       branch: "main",
@@ -313,7 +312,6 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
     },
   };
   io.snapshot.mockResolvedValue(snapshot);
-  io.graphRevision.mockResolvedValue("refs-1");
   let controller!: RepositoryController;
   function View({ path }: { path: string | null }) {
     controller = useRepositoryController(path);
@@ -374,7 +372,7 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
       finish(snapshot);
     });
     expect(graph()).toBeNull();
-    expect(io.snapshot).toHaveBeenLastCalledWith("/repo/second");
+    expect(io.snapshot).toHaveBeenLastCalledWith("/repo/second", true);
     await act(async () => {
       load(snapshot);
       await refresh;
@@ -404,7 +402,6 @@ it("根目录切换立即卸载旧 Graph，同仓库检测完成后重新加载�
     await act(async () => root.unmount());
     container.remove();
     io.snapshot.mockReset();
-    io.graphRevision.mockReset();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   }
@@ -456,6 +453,7 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     lastRemoteError: null,
     revision: 1,
     graphRevision: null,
+    diffStats: null,
     refresh: vi.fn(),
     runRemoteAction: vi.fn(),
   };
@@ -466,10 +464,10 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     incomplete: false,
     isBinary: false,
   });
-  io.stats.mockResolvedValue({
+  controller.diffStats = {
     index: { ...counts(3), files: { "a.ts": counts(3) } },
     worktree: { ...counts(7), files: { "a.ts": counts(7) } },
-  } as never);
+  };
   const onOpenDiff = vi.fn();
   const onOpenFile = vi.fn();
   const render = () =>
