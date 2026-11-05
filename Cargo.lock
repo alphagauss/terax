@@ -6815,6 +6815,7 @@ dependencies = [
  "shared_child",
  "tempfile",
  "terax-core",
+ "uuid",
 ]
 
 [[package]]

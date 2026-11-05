@@ -2,7 +2,7 @@
 
 mod batch;
 pub mod errors;
-mod network;
+pub mod network;
 pub mod operations;
 mod parser;
 mod process;

@@ -1,4 +1,17 @@
 {
+  "remote": {
+    "fetchRunning": "正在获取…",
+    "pullRunning": "正在拉取…",
+    "pushRunning": "正在推送…",
+    "fetchSuccess": "获取完成",
+    "pullSuccess": "拉取完成",
+    "pushSuccess": "推送完成",
+    "cancel": "终止 Git 操作",
+    "cancelling": "正在取消…",
+    "cancelled": "操作已取消",
+    "notReady": "Git 仍在启动或已经结束。如仍在执行，可再次尝试终止。",
+    "cancelFailed": "无法确认操作已终止，可重试：{{error}}"
+  },
   "remoteActionBusy": "此仓库已有 Git 远程操作正在执行，请等待完成。",
   "largeChanges": "共 {{count}} 个改动文件，已暂停自动刷新和行数统计。请手动刷新以更新。",
   "pagination": {

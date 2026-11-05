@@ -111,6 +111,8 @@ it("分支浮窗展示四类引用，标签检出刷新仓库，工作树导航�
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision: 1,
     graphRevision: null,
     diffStats: null,
@@ -245,6 +247,8 @@ it("keeps all Changes rows and the commit input mounted across switches and supp
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision: 1,
     graphRevision: null,
     diffStats: null,
@@ -379,6 +383,8 @@ it("万条改动只挂载一页，分页跨分组且批量操作使用完整清�
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision: 1,
     graphRevision: null,
     diffStats: null,
@@ -751,6 +757,8 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision: 1,
     graphRevision: null,
     diffStats: null,
@@ -953,3 +961,122 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
     vi.unstubAllGlobals();
   }
 });
+
+it.each(["fetch", "pull", "push"] as const)(
+  "%s 复用反馈位置，延迟提供终止并在完成后隐藏",
+  async (action) => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const controller: RepositoryController = {
+      repo: {
+        repoRoot: "/feedback",
+        branch: "main",
+        upstream: "origin/main",
+        isDetached: false,
+      },
+      status: {
+        repoRoot: "/feedback",
+        branch: "main",
+        headSha: "head",
+        upstream: "origin/main",
+        ahead: 1,
+        behind: 1,
+        isDetached: false,
+        truncated: false,
+        changedFiles: [],
+      },
+      changedCount: 0,
+      upstream: "origin/main",
+      ahead: 1,
+      behind: 1,
+      hasRepo: true,
+      isLoading: false,
+      localError: null,
+      busyAction: action,
+      lastRemoteError: null,
+      remoteOperation: {
+        id: "operation",
+        action,
+        startedAt: Date.now(),
+        phase: "running",
+      },
+      cancelRemoteAction: vi.fn(async () => {}),
+      revision: 1,
+      graphRevision: null,
+      diffStats: null,
+      refresh: vi.fn(),
+      runRemoteAction: vi.fn(),
+    };
+    const render = () =>
+      act(async () =>
+        root.render(
+          <SourceControlViewContainer
+            open
+            sourceControl={{ ...controller }}
+            onOpenDiff={vi.fn()}
+            onOpenFile={vi.fn()}
+          />,
+        ),
+      );
+    const cancel = () =>
+      container.querySelector<HTMLButtonElement>(
+        '[aria-label="remote.cancel"]',
+      );
+    const feedback = () => container.querySelector('[role="status"][title]');
+    try {
+      await render();
+      expect(feedback()?.textContent).toBe(`remote.${action}Running`);
+      await act(async () => {
+        vi.advanceTimersByTime(2999);
+      });
+      expect(cancel()).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(cancel()).not.toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(feedback()?.className).toContain("opacity-100");
+      await act(async () => cancel()?.click());
+      expect(controller.cancelRemoteAction).toHaveBeenCalledOnce();
+      controller.remoteOperation = {
+        ...controller.remoteOperation!,
+        phase: "cancelling",
+      };
+      await render();
+      expect(
+        container.querySelector<HTMLButtonElement>(
+          '[aria-label="remote.cancelling"]',
+        )?.disabled,
+      ).toBe(true);
+      expect(feedback()?.textContent).toBe("remote.cancelling");
+      controller.busyAction = null;
+      controller.remoteOperation = {
+        ...controller.remoteOperation!,
+        phase: "cancelled",
+      };
+      await render();
+      expect(cancel()).toBeNull();
+      expect(
+        container.querySelector('[aria-label="remote.cancelling"]'),
+      ).toBeNull();
+      expect(container.querySelectorAll('[role="status"][title]')).toHaveLength(
+        1,
+      );
+      expect(feedback()?.textContent).toBe("remote.cancelled");
+      await act(async () => {
+        vi.advanceTimersByTime(4000);
+      });
+      expect(feedback()).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  },
+);

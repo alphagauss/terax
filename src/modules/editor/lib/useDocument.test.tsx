@@ -82,6 +82,8 @@ const controller = {
   localError: null,
   busyAction: null,
   lastRemoteError: null,
+  remoteOperation: null,
+  cancelRemoteAction: vi.fn(),
   revision: 1,
   graphRevision: null,
   diffStats: null,

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   gitFetch: vi.fn(),
   gitPullFfOnly: vi.fn(),
   gitPush: vi.fn(),
+  gitCancelRemoteOperation: vi.fn(),
   workspaceKey: "local",
   resumeListeners: new Set<() => void>(),
   changeListeners: new Set<(paths: string[]) => void>(),
@@ -32,6 +33,7 @@ vi.mock("@/modules/ai/lib/native", () => ({
     gitFetch: mocks.gitFetch,
     gitPullFfOnly: mocks.gitPullFfOnly,
     gitPush: mocks.gitPush,
+    gitCancelRemoteOperation: mocks.gitCancelRemoteOperation,
   },
 }));
 vi.mock("@/modules/workspace", () => ({
@@ -162,6 +164,114 @@ describe("useRepositoryController", () => {
     expect(controller?.lastRemoteError).toBeNull();
     expect(controller?.busyAction).toBeNull();
     expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(reads);
+  });
+
+  it("切走仓库再返回仍能终止同一操作，不重复启动联网命令", async () => {
+    vi.useFakeTimers();
+    mocks.gitPanelSnapshot.mockImplementation(async (path: string) => {
+      const snapshot = repositorySnapshot(path);
+      if (snapshot.status) snapshot.status.upstream = "origin/main";
+      return snapshot;
+    });
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    let reject!: (error: string) => void;
+    mocks.gitFetch.mockReturnValueOnce(
+      new Promise<void>((_, fail) => {
+        reject = fail;
+      }),
+    );
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      action = controller?.runRemoteAction("fetch");
+    });
+    const operationId = controller?.remoteOperation?.id;
+    await act(async () => root?.render(<Probe contextPath="C:/b" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.remoteOperation).toBeNull();
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.remoteOperation?.id).toBe(operationId);
+    expect(controller?.busyAction).toBe("fetch");
+    mocks.gitCancelRemoteOperation.mockResolvedValueOnce(true);
+    await act(async () => {
+      await controller?.cancelRemoteAction();
+    });
+    expect(mocks.gitCancelRemoteOperation).toHaveBeenCalledWith(operationId);
+    await act(async () => {
+      reject("git_operation_cancelled");
+      await action;
+    });
+    expect(controller?.busyAction).toBeNull();
+    expect(controller?.remoteOperation?.phase).toBe("cancelled");
+    expect(mocks.gitFetch).toHaveBeenCalledOnce();
+  });
+
+  it("取消失败允许重试，确认取消前保留仓库锁，迟到响应不覆盖后续结果", async () => {
+    vi.useFakeTimers();
+    const snapshot = repositorySnapshot("C:/repo");
+    if (snapshot.status) snapshot.status.upstream = "origin/main";
+    mocks.gitPanelSnapshot.mockResolvedValue(snapshot);
+    root = createRoot(document.createElement("div"));
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    let reject!: (error: string) => void;
+    mocks.gitFetch.mockReturnValueOnce(
+      new Promise<void>((_, fail) => {
+        reject = fail;
+      }),
+    );
+    let action: ReturnType<RepositoryController["runRemoteAction"]> | undefined;
+    await act(async () => {
+      action = controller?.runRemoteAction("fetch");
+    });
+    const operationId = controller?.remoteOperation?.id;
+    expect(mocks.gitFetch).toHaveBeenCalledWith("C:/repo", operationId);
+    mocks.gitCancelRemoteOperation.mockRejectedValueOnce(
+      new Error("unreachable"),
+    );
+    await act(async () => {
+      await controller?.cancelRemoteAction();
+    });
+    expect(controller?.remoteOperation?.phase).toBe("running");
+    expect(controller?.remoteOperation?.cancelError).toBeTruthy();
+    expect(controller?.busyAction).toBe("fetch");
+    const cancelled = deferred<boolean>();
+    mocks.gitCancelRemoteOperation.mockReturnValueOnce(cancelled.promise);
+    let cancellation: Promise<void> | undefined;
+    await act(async () => {
+      cancellation = controller?.cancelRemoteAction();
+    });
+    expect(controller?.remoteOperation?.phase).toBe("cancelling");
+    await act(async () => {
+      await controller?.cancelRemoteAction();
+      expect(await controller?.runRemoteAction("fetch")).toMatchObject({
+        blocked: "busy",
+      });
+    });
+    expect(mocks.gitCancelRemoteOperation).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      reject("git_operation_cancelled");
+      await action;
+    });
+    expect(controller?.remoteOperation?.phase).toBe("cancelled");
+    expect(controller?.lastRemoteError).toBeNull();
+    expect(controller?.busyAction).toBeNull();
+    mocks.gitFetch.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      await controller?.runRemoteAction("fetch");
+    });
+    const nextId = controller?.remoteOperation?.id;
+    expect(nextId).not.toBe(operationId);
+    await act(async () => {
+      cancelled.resolve(false);
+      await cancellation;
+    });
+    expect(controller?.remoteOperation).toMatchObject({
+      id: nextId,
+      phase: "success",
+    });
   });
 
   it("拉取只联网一次并拦截重复触发，快照发布后结束忙碌而统计继续串行", async () => {

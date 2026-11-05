@@ -28,7 +28,7 @@ import {
   generateRepositoryCommitMessage,
   setCommitMessageDraft,
 } from "@/modules/source-control/commitMessage";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shareEqual } from "./repositorySharing";
 import { reportError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
@@ -205,6 +205,13 @@ export function useSourceControlPanel(
   const [localActionBusy, setLocalActionBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const remoteOperationId = controller.remoteOperation?.id;
+  useEffect(() => {
+    if (!remoteOperationId) return;
+    setActionError(null);
+    setActionMessage(null);
+  }, [remoteOperationId]);
+
   const [pendingDiscard, setPendingDiscard] = useState<
     | { scope: "single"; entry: CommitMessageEntry }
     | { scope: "all"; entries: CommitMessageEntry[] }
@@ -500,19 +507,13 @@ export function useSourceControlPanel(
     setActionMessage(null);
     setActionError(null);
     const result = await runRemoteAction("push");
-    if (result.ok) {
-      setActionMessage(
-        status?.upstream ? `Pushed to ${status.upstream}` : "Push completed",
-      );
-      return;
-    }
     if (result.error) {
       reportError(t("common:errors.operationFailed"), {
         error: result.error,
         source: repo.repoRoot,
       });
     }
-  }, [runRemoteAction, repo, status?.upstream, t]);
+  }, [runRemoteAction, repo, t]);
 
   const pendingDiscardView = useMemo<PendingDiscard | null>(() => {
     if (!pendingDiscard) return null;

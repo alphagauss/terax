@@ -639,15 +639,72 @@ function SourceControlViewContainerComponent({
     !sourceControl.busyAction;
   const canFetch = hasUpstream && !scm.actionBusy && !sourceControl.busyAction;
 
+  const remoteOperation = sourceControl.remoteOperation;
+  const remoteRunning =
+    remoteOperation?.phase === "running" ||
+    remoteOperation?.phase === "cancelling";
+  const remoteStartedAt = remoteOperation?.startedAt;
+  const [showCancel, setShowCancel] = useState(false);
+  useEffect(() => {
+    setShowCancel(false);
+    if (!open || !remoteRunning || remoteStartedAt === undefined) return;
+    const timer = window.setTimeout(
+      () => setShowCancel(true),
+      Math.max(0, 3000 - (Date.now() - remoteStartedAt)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [open, remoteRunning, remoteStartedAt]);
+  const cancelButton =
+    showCancel && remoteRunning ? (
+      <IconActionButton
+        label={t(
+          remoteOperation?.phase === "cancelling"
+            ? "remote.cancelling"
+            : "remote.cancel",
+        )}
+        disabled={remoteOperation?.phase === "cancelling"}
+        onClick={() => void sourceControl.cancelRemoteAction()}
+        side="bottom"
+      >
+        <span aria-hidden="true" className="size-2.5 rounded-sm bg-current" />
+      </IconActionButton>
+    ) : null;
+
   const footerFeedback = useMemo(() => {
+    if (remoteRunning && remoteOperation)
+      return {
+        tone: remoteOperation.cancelError ? "error" : "progress",
+        message:
+          remoteOperation.cancelError ??
+          t(
+            remoteOperation.phase === "cancelling"
+              ? "remote.cancelling"
+              : `remote.${remoteOperation.action}Running`,
+          ),
+        persistent: true,
+      } as const;
     if (scm.actionError)
       return { tone: "error", message: scm.actionError } as const;
     if (scm.remoteError)
       return { tone: "error", message: scm.remoteError } as const;
     if (scm.actionMessage)
       return { tone: "success", message: scm.actionMessage } as const;
+    if (remoteOperation?.phase === "success")
+      return {
+        tone: "success",
+        message: t(`remote.${remoteOperation.action}Success`),
+      } as const;
+    if (remoteOperation?.phase === "cancelled")
+      return { tone: "success", message: t("remote.cancelled") } as const;
     return null;
-  }, [scm.actionError, scm.actionMessage, scm.remoteError]);
+  }, [
+    scm.actionError,
+    scm.actionMessage,
+    scm.remoteError,
+    remoteRunning,
+    remoteOperation,
+    t,
+  ]);
 
   const handleCommitShortcut = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -869,6 +926,7 @@ function SourceControlViewContainerComponent({
               minSize: 180,
               actions: (
                 <>
+                  {fetchBusy ? cancelButton : null}
                   <IconActionButton
                     label={t(fetchBusy ? "fetch.fetching" : "fetch.label")}
                     disabled={!canFetch}
@@ -885,6 +943,7 @@ function SourceControlViewContainerComponent({
                       />
                     )}
                   </IconActionButton>
+                  {pullBusy ? cancelButton : null}
                   <IconActionButton
                     label={
                       pullBusy
@@ -1120,27 +1179,32 @@ function SourceControlViewContainerComponent({
                                 {commitHint}
                               </TooltipContent>
                             </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  className="cursor-pointer font-medium disabled:cursor-not-allowed"
-                                  disabled={!scm.canPush || !!scm.actionBusy}
-                                  onClick={() => void scm.push()}
+                            <div className="flex min-w-0 items-center gap-1">
+                              {sourceControl.busyAction === "push"
+                                ? cancelButton
+                                : null}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="min-w-0 flex-1 cursor-pointer font-medium disabled:cursor-not-allowed"
+                                    disabled={!scm.canPush || !!scm.actionBusy}
+                                    onClick={() => void scm.push()}
+                                  >
+                                    {scm.actionBusy === "push"
+                                      ? "Pushing…"
+                                      : "Push"}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="bottom"
+                                  className="max-w-64"
                                 >
-                                  {scm.actionBusy === "push"
-                                    ? "Pushing…"
-                                    : "Push"}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent
-                                side="bottom"
-                                className="max-w-64"
-                              >
-                                {pushDisabledReason}
-                              </TooltipContent>
-                            </Tooltip>
+                                  {pushDisabledReason}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
                           </div>
 
                           <CommitFeedback feedback={footerFeedback} />
@@ -1840,7 +1904,11 @@ function IconActionButton({
 function CommitFeedback({
   feedback,
 }: {
-  feedback: { tone: "error" | "success"; message: string } | null;
+  feedback: {
+    tone: "error" | "success" | "progress";
+    message: string;
+    persistent?: boolean;
+  } | null;
 }) {
   const [visibleFeedback, setVisibleFeedback] = useState(feedback);
   const [isVisible, setIsVisible] = useState(false);
@@ -1852,6 +1920,7 @@ function CommitFeedback({
     }
     setVisibleFeedback(feedback);
     setIsVisible(true);
+    if (feedback.persistent) return;
     const hideTimer = window.setTimeout(() => setIsVisible(false), 3600);
     const clearTimer = window.setTimeout(() => {
       setVisibleFeedback((current) =>
@@ -1871,6 +1940,8 @@ function CommitFeedback({
   const isError = visibleFeedback.tone === "error";
   return (
     <div
+      role="status"
+      title={visibleFeedback.message}
       className={cn(
         "pointer-events-none absolute inset-x-3 top-[calc(100%-0.25rem)] z-20 flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] leading-snug shadow-lg shadow-black/15 backdrop-blur transition-[color,background-color,border-color,opacity,transform] duration-surface",
         isVisible ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",

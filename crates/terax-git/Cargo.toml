@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true, features = ["v4"] }
 sha2 = { workspace = true }
 shared_child = { workspace = true }
 terax-core = { path = "../terax-core", features = ["workspace-runtime"] }

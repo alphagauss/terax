@@ -277,6 +277,7 @@ pub fn run() {
             git::commands::git_commit,
             git::commands::git_undo_commit,
             git::commands::git_fetch,
+            git::commands::git_cancel_remote_operation,
             git::commands::git_pull_ff_only,
             git::commands::git_push,
             git::commands::git_log,

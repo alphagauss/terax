@@ -122,6 +122,8 @@ function repositoryController(revision: number): RepositoryController {
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision,
     graphRevision: null,
     diffStats: null,

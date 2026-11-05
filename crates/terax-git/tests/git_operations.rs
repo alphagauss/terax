@@ -73,14 +73,15 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     std::thread::scope(|scope| {
-        let first = scope.spawn(|| operations::push(&fx.registry, &fx.repo_str(), &fx.workspace));
+        let first =
+            scope.spawn(|| operations::push(&fx.registry, &fx.repo_str(), &fx.workspace, None));
         let started = Instant::now();
         let marker = fx.repo_path.join(".git/push-started");
         while !marker.exists() && started.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(10));
         }
         let entered_hook = marker.exists();
-        let duplicate = operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace);
+        let duplicate = operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None);
         std::fs::write(fx.repo_path.join(".git/push-release"), "release").unwrap();
         assert!(first.join().unwrap().is_err());
         assert!(entered_hook, "push never reached the test hook");
@@ -90,8 +91,44 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
         std::fs::read_to_string(fx.repo_path.join(".git/push-calls")).unwrap(),
         "push\n"
     );
+    // 真实 Git hook 的子进程也必须被终止，不能只让调用方停止等待。
+    std::fs::remove_file(fx.repo_path.join(".git/push-started")).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\n(sleep 3; printf alive >.git/child-survived) &\n: >.git/push-started\nsleep 30\n").unwrap();
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(|| {
+            operations::push(
+                &fx.registry,
+                &fx.repo_str(),
+                &fx.workspace,
+                Some(&operation_id),
+            )
+        });
+        let started = Instant::now();
+        while !fx.repo_path.join(".git/push-started").exists()
+            && started.elapsed() < Duration::from_secs(10)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(fx.repo_path.join(".git/push-started").exists());
+        assert!(!terax_git::network::cancel(
+            &WorkspaceEnv::Ssh {
+                profile_id: "unrelated".into()
+            },
+            &operation_id
+        )
+        .unwrap());
+        assert!(terax_git::network::cancel(&fx.workspace, &operation_id).unwrap());
+        assert!(matches!(running.join().unwrap(), Err(GitError::Cancelled)));
+    });
+    assert!(!terax_git::network::cancel(&fx.workspace, &operation_id).unwrap());
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        !fx.repo_path.join(".git/child-survived").exists(),
+        "Git descendant escaped cancellation"
+    );
     // 失败后释放原生防重入，后续显式获取可以正常执行。
-    operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None).unwrap();
     fx.run_git(&[
         "remote",
         "set-url",

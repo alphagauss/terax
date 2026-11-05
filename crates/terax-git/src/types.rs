@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub(crate) const NETWORK_TIMEOUT_SECS: u64 = 120;
 pub(crate) const MAX_TIMEOUT_SECS: u64 = 180;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;

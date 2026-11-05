@@ -22,12 +22,12 @@ pub enum GitRemoteAction {
 }
 
 impl GitBatchKind {
-    /// 联网操作保留原有较长预算，只读批次共享一个较短预算。
-    pub fn timeout_secs(&self) -> u64 {
+    /// 联网操作由 Git 退出或手动取消结束，只读批次保留总时限。
+    pub fn timeout_secs(&self) -> Option<u64> {
         if matches!(self, Self::RemoteAction { .. }) {
-            120
+            None
         } else {
-            30
+            Some(30)
         }
     }
 }
@@ -38,6 +38,22 @@ pub const HISTORY_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s";
 /// 生成固定批次脚本，供 WSL 和 SSH 使用同一份执行协议。
 pub fn batch_script(path: &str, kind: GitBatchKind) -> Result<String, String> {
     git_batch::script(path, kind)
+}
+
+/// Git 固定批次完成时自行删除进程组登记，正常路径不增加清理 channel 往返。
+/// 握手先于业务输出；取消时共用终止脚本负责清理尚未完成的登记。
+pub fn network_command(pid_file: &str) -> String {
+    let payload = format!(
+        "printf 'TERAX_PROCESS_READY\\n'; sh -s; rc=$?; rm -f -- {}; exit $rc",
+        super::session::shell_quote(pid_file),
+    );
+    let wrapper = crate::modules::proc::group::posix_group_wrapper(
+        &payload, pid_file, "/bin/sh", false, false,
+    );
+    format!(
+        "exec setsid --wait /bin/sh -c {}",
+        super::session::shell_quote(&wrapper)
+    )
 }
 
 /// 解码固定批次，保留各命令的原始字节和退出状态。
@@ -53,16 +69,17 @@ pub struct GitBatchOutput {
     pub exit_code: i32,
 }
 
-/// 一次 channel 完成固定 Git 批次，超时和输出上限覆盖整个阶段。
+/// 一次执行 channel 完成固定 Git 批次；联网操作另由控制句柄终止，只读操作保留超时。
 pub async fn execute(
     profile_id: &str,
     path: &str,
     kind: GitBatchKind,
+    control: Option<&std::sync::Arc<crate::modules::proc::cancellation::ProcessCancellation>>,
 ) -> Result<Vec<GitBatchOutput>, String> {
     validate_remote_path(path)?;
     if !path.starts_with('/') {
         return Err("Git batch requires an absolute remote directory".into());
     }
     let workspace = global_manager()?.workspace(profile_id).await?;
-    git_batch::execute(&workspace, path, kind).await
+    git_batch::execute(&workspace, path, kind, control).await
 }

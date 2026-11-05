@@ -207,12 +207,13 @@ pub async fn git_undo_commit(
 #[tauri::command]
 pub async fn git_fetch(
     repo_root: String,
+    operation_id: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::fetch(r, &repo_root, &workspace).map_err(Into::into)
+        operations::fetch(r, &repo_root, &workspace, operation_id.as_deref()).map_err(Into::into)
     })
     .await
 }
@@ -220,12 +221,14 @@ pub async fn git_fetch(
 #[tauri::command]
 pub async fn git_pull_ff_only(
     repo_root: String,
+    operation_id: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::pull_ff_only(r, &repo_root, &workspace).map_err(Into::into)
+        operations::pull_ff_only(r, &repo_root, &workspace, operation_id.as_deref())
+            .map_err(Into::into)
     })
     .await
 }
@@ -233,12 +236,13 @@ pub async fn git_pull_ff_only(
 #[tauri::command]
 pub async fn git_push(
     repo_root: String,
+    operation_id: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitPushResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::push(r, &repo_root, &workspace).map_err(Into::into)
+        operations::push(r, &repo_root, &workspace, operation_id.as_deref()).map_err(Into::into)
     })
     .await
 }
@@ -411,6 +415,20 @@ pub async fn git_checkout_tag(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::checkout_tag(r, &repo_root, &tag, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+/// 请求终止指定联网操作；实际结束仍由原调用返回，取消失败允许重试。
+#[tauri::command]
+pub async fn git_cancel_remote_operation(
+    operation_id: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |_| {
+        terax_git::network::cancel(&workspace, &operation_id).map_err(Into::into)
     })
     .await
 }

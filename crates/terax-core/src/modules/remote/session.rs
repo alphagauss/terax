@@ -36,6 +36,10 @@ use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
 pub(crate) const EXEC_CANCELLED_ERROR: &str = "remote command cancelled";
 
+#[cfg(test)]
+#[path = "session_git_tests.rs"]
+mod git_integration_tests;
+
 /// 处理 SSH 客户端事件、主机密钥确认和远端转发请求。
 pub struct ClientHandler {
     pub app: crate::modules::remote::RemoteHost,
@@ -728,6 +732,104 @@ impl RemoteWorkspace {
         run_exec_channel_with_input(channel, command, Some(input), timeout, max_output, None).await
     }
 
+    /// Git 联网批次不设总时限；收到进程组登记握手后才允许明确终止。
+    pub(crate) async fn exec_git_on_channel(
+        self: &Arc<Self>,
+        mut channel: SessionChannel,
+        input: Vec<u8>,
+        max_output: usize,
+        control: &Arc<crate::modules::proc::cancellation::ProcessCancellation>,
+    ) -> Result<ExecOutput, String> {
+        use crate::modules::proc::cancellation::{PROCESS_CANCELLED, PROCESS_READY};
+        let pid_file = format!("/tmp/terax-git-{}.pid", uuid::Uuid::new_v4());
+        let command = super::git_service::network_command(&pid_file);
+        channel
+            .exec(true, command.into_bytes())
+            .await
+            .map_err(|e| format!("start Git command: {e}"))?;
+        channel
+            .data_bytes(input)
+            .await
+            .map_err(|e| format!("write Git batch: {e}"))?;
+        channel
+            .eof()
+            .await
+            .map_err(|e| format!("finish Git input: {e}"))?;
+        let mut output = ExecOutput::default();
+        let mut completion = ExecCompletion::default();
+        let mut ready = Vec::new();
+        let mut registered = false;
+        while let Some(message) = channel.wait().await {
+            if let ChannelMsg::Data { data } = &message {
+                if !registered {
+                    let consumed = match consume_git_ready(&mut ready, data) {
+                        Ok(consumed) => consumed,
+                        Err(error) => {
+                            let _ = channel.close().await;
+                            self.terminate_process_group(&pid_file, false).await?;
+                            return Err(error);
+                        }
+                    };
+                    if ready.len() == PROCESS_READY.len() {
+                        let workspace = self.clone();
+                        let pid = pid_file.clone();
+                        control.register(move || {
+                            crate::runtime::block_on(workspace.terminate_process_group(&pid, false))
+                        });
+                        registered = true;
+                        append_bounded(
+                            &mut output.stdout,
+                            &data[consumed..],
+                            &mut output.truncated,
+                            max_output,
+                        );
+                    }
+                    continue;
+                }
+            }
+            if collect_exec_message_bounded(&mut output, &mut completion, message, max_output) {
+                break;
+            }
+        }
+        let _ = channel.close().await;
+        let finished_control = control.clone();
+        let cancelled = tokio::task::spawn_blocking(move || finished_control.finish())
+            .await
+            .map_err(|e| e.to_string())?;
+        if registered && !cancelled && output.exit_code.is_none() {
+            self.terminate_process_group(&pid_file, false).await?;
+        }
+        // 完整批次已返回时保留 Git 的真实结果，取消不能覆盖已经完成的操作。
+        if cancelled && output.exit_code != Some(0) {
+            return Err(PROCESS_CANCELLED.into());
+        }
+        Ok(output)
+    }
+
+    /// 使用同一连接的控制通道清理进程组，失败时不宣称远端任务已经结束。
+    pub(crate) async fn terminate_process_group(
+        &self,
+        pid_file: &str,
+        release_exited: bool,
+    ) -> Result<(), String> {
+        let command =
+            crate::modules::proc::group::posix_group_kill_command(pid_file, release_exited);
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            self.exec(&command, None, Duration::from_secs(5)),
+        )
+        .await
+        .map_err(|_| "remote process termination timed out".to_string())??;
+        if output.exit_code == Some(0) {
+            Ok(())
+        } else {
+            Err(format!(
+                "remote process termination could not be confirmed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    }
+
     /// 执行可取消的内部只读任务，取消后主动关闭所属 channel。
     pub(crate) async fn exec_task_on_channel_cancellable(
         &self,
@@ -749,6 +851,17 @@ impl RemoteWorkspace {
         )
         .await
     }
+}
+
+/// 握手可能跨 SSH 数据包，剩余字节仍属于原 Git 长度帧，不能丢弃或重复。
+fn consume_git_ready(ready: &mut Vec<u8>, data: &[u8]) -> Result<usize, String> {
+    use crate::modules::proc::cancellation::PROCESS_READY;
+    let consumed = (PROCESS_READY.len() - ready.len()).min(data.len());
+    ready.extend_from_slice(&data[..consumed]);
+    if !PROCESS_READY.starts_with(ready) {
+        return Err("invalid Git process group handshake".into());
+    }
+    Ok(consumed)
 }
 
 /// 构造一次远端命令，保持工作目录参数的既有转义规则。
@@ -1321,6 +1434,24 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod path_tests {
+    #[test]
+    fn git_ready_handshake_preserves_frames_across_packet_boundaries() {
+        use crate::modules::proc::cancellation::PROCESS_READY;
+        let frame = b"action\0data\0";
+        let bytes = [PROCESS_READY, frame].concat();
+        for split in 0..=PROCESS_READY.len() {
+            let mut ready = Vec::new();
+            assert_eq!(
+                super::consume_git_ready(&mut ready, &bytes[..split]).unwrap(),
+                split
+            );
+            let consumed = super::consume_git_ready(&mut ready, &bytes[split..]).unwrap();
+            assert_eq!(ready, PROCESS_READY);
+            assert_eq!(&bytes[split + consumed..], frame);
+        }
+        assert!(super::consume_git_ready(&mut Vec::new(), b"unexpected output").is_err());
+    }
+
     use super::{
         build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
         password_auth_result, workspace_root_assignment, ConnectFailure, ExecCompletion,

@@ -4,6 +4,9 @@
 #[cfg(windows)]
 pub mod job;
 
+pub mod cancellation;
+pub mod group;
+
 use std::process::Command;
 
 #[cfg(windows)]

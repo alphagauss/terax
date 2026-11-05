@@ -3,13 +3,15 @@
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use terax_core::modules::proc::cancellation::{ProcessCancellation, PROCESS_READY};
+use terax_core::modules::proc::group;
 
 use shared_child::SharedChild;
 
@@ -344,25 +346,69 @@ where
     run_child(cmd, dur, MAX_OUTPUT_BYTES, None)
 }
 
+/// 联网操作由 Git 退出或显式取消结束，不使用总执行时长限制。
+pub(super) fn run_git_network(
+    workspace: &WorkspaceEnv,
+    path: &str,
+    args: &[&str],
+    control: &Arc<ProcessCancellation>,
+) -> Result<GitOutput> {
+    let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+    let mut cmd = build_git_command(workspace, Some(path), &args)?;
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .env("GCM_PROVIDER", "")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    terax_core::modules::proc::hide_console(&mut cmd);
+    run_child_inner(cmd, None, MAX_OUTPUT_BYTES, None, Some(control), None)
+}
+
 /// WSL 每个固定批次只启动一次入口，批次内各 Git 命令沿用 SSH 的字节协议。
 #[cfg(windows)]
 pub(super) fn execute_wsl_batch(
     distro: &str,
     path: &str,
     kind: terax_core::modules::remote::git_service::GitBatchKind,
+    control: Option<&Arc<ProcessCancellation>>,
 ) -> Result<Vec<terax_core::modules::remote::git_service::GitBatchOutput>> {
     use terax_core::modules::remote::git_service;
     validate_wsl_distro_name(distro).map_err(GitError::Spawn)?;
-    let timeout = Duration::from_secs(kind.timeout_secs());
+    let timeout = kind.timeout_secs().map(Duration::from_secs);
     let script = git_service::batch_script(path, kind).map_err(GitError::Spawn)?;
     let mut cmd = Command::new("wsl.exe");
     // 脚本包含未跟踪文件路径，不能放进有长度上限的 Windows 命令行。
-    cmd.args(["-d", distro, "--exec", "sh", "-s"])
-        .stdin(Stdio::piped())
+    let pid_file = format!("/tmp/terax-git-{}.pid", uuid::Uuid::new_v4());
+    if control.is_some() {
+        cmd.args([
+            "-d",
+            distro,
+            "--exec",
+            "/bin/sh",
+            "-c",
+            &git_service::network_command(&pid_file),
+        ]);
+    } else {
+        cmd.args(["-d", distro, "--exec", "sh", "-s"]);
+    }
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     terax_core::modules::proc::hide_console(&mut cmd);
-    let output = run_child(cmd, timeout, 8 * 1024 * 1024, Some(script.into_bytes()))?;
+    let wsl = control.map(|_| (distro.to_owned(), pid_file.clone()));
+    let output = run_child_inner(
+        cmd,
+        timeout,
+        8 * 1024 * 1024,
+        Some(script.into_bytes()),
+        control,
+        wsl,
+    )?;
     ensure_success(&output, "WSL Git batch failed")?;
     if output.truncated {
         return Err(GitError::command("WSL Git batch", "output truncated"));
@@ -371,12 +417,40 @@ pub(super) fn execute_wsl_batch(
 }
 
 pub(super) fn run_child(
-    mut cmd: Command,
+    cmd: Command,
     dur: Duration,
     max_output: usize,
     input: Option<Vec<u8>>,
 ) -> Result<GitOutput> {
-    let child = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?);
+    run_child_inner(cmd, Some(dur), max_output, input, None, None)
+}
+
+fn run_child_inner(
+    mut cmd: Command,
+    timeout: Option<Duration>,
+    max_output: usize,
+    input: Option<Vec<u8>>,
+    control: Option<&Arc<ProcessCancellation>>,
+    wsl: Option<(String, String)>,
+) -> Result<GitOutput> {
+    #[cfg(unix)]
+    if control.is_some() {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    let (child, job) = if control.is_some() {
+        let (child, job) =
+            terax_core::modules::proc::job::ProcessJob::spawn(&mut cmd).map_err(GitError::Io)?;
+        (child, Some(job))
+    } else {
+        (SharedChild::spawn(&mut cmd).map_err(GitError::Io)?, None)
+    };
+    #[cfg(not(windows))]
+    let child = SharedChild::spawn(&mut cmd).map_err(GitError::Io)?;
+    let child = Arc::new(child);
+    #[cfg(windows)]
+    let job = Arc::new(Mutex::new(job));
     let mut stdout_pipe = child
         .take_stdout()
         .ok_or_else(|| GitError::Spawn("no stdout pipe".into()))?;
@@ -384,7 +458,23 @@ pub(super) fn run_child(
         .take_stderr()
         .ok_or_else(|| GitError::Spawn("no stderr pipe".into()))?;
 
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, 64 * 1024, max_output));
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let needs_ready = wsl.is_some();
+    let stdout_handle = thread::spawn(move || {
+        if needs_ready {
+            let mut reader = BufReader::new(stdout_pipe);
+            let mut ready = Vec::new();
+            let _ = reader.by_ref().take(64).read_until(b'\n', &mut ready);
+            if ready == PROCESS_READY {
+                let _ = ready_tx.send(());
+            } else {
+                return (ready, false);
+            }
+            drain(&mut reader, 64 * 1024, max_output)
+        } else {
+            drain(&mut stdout_pipe, 64 * 1024, max_output)
+        }
+    });
     let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024, max_output));
 
     // 输入和输出并行传输，避免批次超过管道容量时互相等待；超时仍由统一等待器控制。
@@ -393,13 +483,36 @@ pub(super) fn run_child(
         thread::spawn(move || stdin.write_all(&input))
     });
 
+    if let Some(control) = control {
+        // WSL 的进程组登记先于握手输出；未收到握手时取消入口不会误报成功。
+        if !needs_ready || ready_rx.recv().is_ok() {
+            let stopped_child = child.clone();
+            #[cfg(windows)]
+            let stopped_job = job.clone();
+            control.register(move || {
+                if let Some((distro, pid_file)) = &wsl {
+                    group::terminate_wsl_group(distro, pid_file, false)?;
+                }
+                #[cfg(unix)]
+                group::terminate_local_group(stopped_child.id())?;
+                #[cfg(windows)]
+                stopped_job.lock().expect("Git job poisoned").take();
+                stopped_child.wait().map_err(|error| error.to_string())?;
+                Ok(())
+            });
+        }
+    }
     let (tx, rx) = mpsc::channel();
     let waiter = Arc::clone(&child);
     thread::spawn(move || {
         let _ = tx.send(waiter.wait());
     });
 
-    let (exit_code, timed_out) = match rx.recv_timeout(dur) {
+    let waited = match timeout {
+        Some(timeout) => rx.recv_timeout(timeout),
+        None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+    };
+    let (exit_code, timed_out) = match waited {
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(GitError::Io(e)),
         Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -422,6 +535,10 @@ pub(super) fn run_child(
         }
     }
 
+    // Windows Job 终止成员时也可能返回 0，已确认的取消必须独立于退出码。
+    if control.is_some_and(|control| control.finish()) {
+        return Err(GitError::Cancelled);
+    }
     Ok(GitOutput {
         stdout,
         stderr,
@@ -624,6 +741,90 @@ mod tests {
             std::fs::read_to_string(lock_path).unwrap(),
             "lock owned elsewhere"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires TERAX_TEST_WSL_DISTRO"]
+    fn wsl_network_batch_cancel_kills_descendants_and_preserves_completed_frames() {
+        use super::*;
+        use terax_core::modules::remote::git_service::{GitBatchKind, GitRemoteAction};
+        let distro = std::env::var("TERAX_TEST_WSL_DISTRO").unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = Command::new("wsl.exe")
+            .args(["-d", &distro, "--exec", "wslpath", "-u"])
+            .arg(temp.path())
+            .output()
+            .unwrap();
+        assert!(path.status.success());
+        let path = String::from_utf8(path.stdout).unwrap().trim().to_owned();
+        let mut setup = Command::new("wsl.exe");
+        setup
+            .args(["-d", &distro, "--cd", &path, "--exec", "sh", "-s"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let script = b"set -e\ngit init -q -b main\ngit config user.name Test\ngit config user.email test@example.com\ngit config commit.gpgsign false\necho seed > file\ngit add file\ngit commit -qm seed\ngit init -q --bare origin\ngit remote add origin ./origin\ngit push -qu origin main\n";
+        let output = run_child(
+            setup,
+            Duration::from_secs(30),
+            MAX_OUTPUT_BYTES,
+            Some(script.to_vec()),
+        )
+        .unwrap();
+        ensure_success(&output, "WSL fixture").unwrap();
+        std::fs::write(temp.path().join(".git/hooks/pre-push"), "#!/bin/sh\n(sh -c 'touch child-ready; i=0; while [ ! -f release ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done; [ ! -f release ] || echo alive > survived') &\nwait\n").unwrap();
+        let mut chmod = Command::new("wsl.exe");
+        chmod.args([
+            "-d",
+            &distro,
+            "--cd",
+            &path,
+            "--exec",
+            "chmod",
+            "+x",
+            ".git/hooks/pre-push",
+        ]);
+        terax_core::modules::proc::hide_console(&mut chmod);
+        assert!(chmod.status().unwrap().success());
+        let control = Arc::new(ProcessCancellation::default());
+        std::thread::scope(|scope| {
+            let running = scope.spawn(|| {
+                execute_wsl_batch(
+                    &distro,
+                    &path,
+                    GitBatchKind::RemoteAction {
+                        action: GitRemoteAction::Push,
+                    },
+                    Some(&control),
+                )
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !temp.path().join("child-ready").exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert!(temp.path().join("child-ready").exists());
+            assert!(control.cancel().unwrap());
+            assert!(matches!(running.join().unwrap(), Err(GitError::Cancelled)));
+        });
+        std::fs::write(temp.path().join("release"), "continue").unwrap();
+        thread::sleep(Duration::from_millis(500));
+        assert!(!temp.path().join("survived").exists());
+        std::fs::remove_file(temp.path().join(".git/hooks/pre-push")).unwrap();
+        let control = Arc::new(ProcessCancellation::default());
+        let output = execute_wsl_batch(
+            &distro,
+            &path,
+            GitBatchKind::RemoteAction {
+                action: GitRemoteAction::Fetch,
+            },
+            Some(&control),
+        )
+        .unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].name, "action");
+        assert_eq!(output[0].exit_code, 0);
+        assert!(!control.cancel().unwrap());
     }
 
     #[test]

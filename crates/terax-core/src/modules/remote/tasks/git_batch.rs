@@ -17,20 +17,32 @@ pub(crate) async fn execute(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     kind: GitBatchKind,
+    control: Option<&Arc<crate::modules::proc::cancellation::ProcessCancellation>>,
 ) -> Result<Vec<GitBatchOutput>, String> {
-    let timeout = Duration::from_secs(kind.timeout_secs());
+    let timeout = kind.timeout_secs().map(Duration::from_secs);
     let script = script(path, kind)?;
-    let output = workspace
-        .tasks
-        .run(
-            workspace,
-            TaskKind::GitBatch,
-            "exec sh -s",
-            Some(script.into_bytes()),
-            timeout,
-            OUTPUT_LIMIT,
-        )
-        .await?;
+    let output = if let Some(timeout) = timeout {
+        workspace
+            .tasks
+            .run(
+                workspace,
+                TaskKind::GitBatch,
+                "exec sh -s",
+                Some(script.into_bytes()),
+                timeout,
+                OUTPUT_LIMIT,
+            )
+            .await?
+    } else {
+        let control = control.ok_or("Git network operation requires cancellation control")?;
+        let channel = workspace
+            .tasks
+            .take_channel(workspace, TaskKind::GitBatch)
+            .await?;
+        workspace
+            .exec_git_on_channel(channel, script.into_bytes(), OUTPUT_LIMIT, control)
+            .await?
+    };
     if output.timed_out {
         return Err("remote Git batch timed out".into());
     }

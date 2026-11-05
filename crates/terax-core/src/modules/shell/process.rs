@@ -20,6 +20,9 @@ use shared_child::SharedChild;
 #[cfg(feature = "workspace-runtime")]
 use tokio::sync::{mpsc, oneshot};
 
+#[cfg(test)]
+use crate::modules::proc::group::posix_group_kill_command;
+
 use super::output::{OutputLog, OutputSlice, OutputStream};
 #[cfg(feature = "workspace-runtime")]
 use crate::modules::remote;
@@ -1148,27 +1151,11 @@ fn stop_descendants_after_exit(control: &LocalControl, release_posix_children: b
 }
 
 fn terminate_wsl_group(termination: &WslTermination, release_exited: bool) -> Result<(), String> {
-    let command = posix_group_kill_command(&termination.pid_file, release_exited);
-    let mut process = Command::new("wsl.exe");
-    process
-        .args([
-            "-d",
-            &termination.distro,
-            "--exec",
-            "/bin/sh",
-            "-c",
-            &command,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    crate::modules::proc::hide_console(&mut process);
-    let status = process
-        .status()
-        .map_err(|error| format!("terminate WSL Agent process group: {error}"))?;
-    if !status.success() {
-        return Err(format!("terminate WSL Agent process group: {status}"));
-    }
+    crate::modules::proc::group::terminate_wsl_group(
+        &termination.distro,
+        &termination.pid_file,
+        release_exited,
+    )?;
     termination.cleanup_pending.store(false, Ordering::Release);
     Ok(())
 }
@@ -1179,47 +1166,9 @@ async fn remote_group_kill(
     pid_file: &str,
     release_exited: bool,
 ) -> Result<(), String> {
-    let output = workspace
-        .exec(
-            &posix_group_kill_command(pid_file, release_exited),
-            None,
-            Duration::from_secs(5),
-        )
-        .await?;
-    if output.exit_code == Some(0) {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).into_owned())
-    }
-}
-
-fn posix_group_kill_command(pid_file: &str, release_exited: bool) -> String {
-    let file = crate::modules::shell::quote::shell_quote(pid_file);
-    // 只有正常收完输出时释放后代；管道仍被后代持有时，显式取消仍必须终止进程组。
-    let release = if release_exited {
-        format!("if [ \"$state\" = exited ]; then rm -f -- {file}; exit 0; fi")
-    } else {
-        String::new()
-    };
-    // 只将明确的 ESRCH 当作幂等成功；其他失败保留 pid 文件供后续重试。
-    format!(
-        r#"i=0; while [ ! -s {file} ] && [ $i -lt 20 ]; do sleep 0.05; i=$((i+1)); done
-[ -e {file} ] || exit 0
-{{ read -r pid || exit 1; read -r state || state=; }} < {file} || exit 1
-{release}
-case "$pid" in ''|0|*[!0-9]*) printf '%s\n' 'invalid Agent process group id' >&2; exit 1;; esac
-for signal in TERM KILL; do
-    if error=$(LC_ALL=C kill -"$signal" -"$pid" 2>&1); then
-        [ "$signal" = KILL ] || sleep 1
-    else
-        case "$error" in
-            *'No such process'*|*'no such process'*) break;;
-            *) printf '%s\n' "$error" >&2; exit 1;;
-        esac
-    fi
-done
-rm -f -- {file}"#
-    )
+    workspace
+        .terminate_process_group(pid_file, release_exited)
+        .await
 }
 
 /// 构造本地或 WSL 命令，进程身份仅用于 WSL 进程组控制文件。
@@ -1357,19 +1306,12 @@ fn posix_group_wrapper(
     login: bool,
     purpose: ProcessPurpose,
 ) -> String {
-    let login_flag = if login { " -l" } else { "" };
-    let pid_file = crate::modules::shell::quote::shell_quote(pid_file);
-    // 追加完成标记而不覆盖 PID，避免并发取消读到截断的登记。
-    // 收完输出后只删除登记，显式取消仍可读取原进程组。
-    // 取消或断线触发的信号会终止包装器，不会写入该标记。
-    let release = if purpose == ProcessPurpose::Shell {
-        format!("printf 'exited\\n' >> {pid_file}; ")
-    } else {
-        String::new()
-    };
-    format!(
-        "printf '%s\\n' \"$$\" > {pid_file}; trap 'trap - TERM INT HUP; kill -TERM -$$ 2>/dev/null || true' TERM INT HUP; {shell}{login_flag} -c {}; rc=$?; {release}exit $rc",
-        crate::modules::shell::quote::shell_quote(payload)
+    crate::modules::proc::group::posix_group_wrapper(
+        payload,
+        pid_file,
+        shell,
+        login,
+        purpose == ProcessPurpose::Shell,
     )
 }
 

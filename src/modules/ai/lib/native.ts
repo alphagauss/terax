@@ -534,18 +534,23 @@ export const native = {
       repoRoot,
       expectedHead,
     }),
-  gitFetch: (repoRoot: string) =>
+  gitFetch: (repoRoot: string, operationId?: string) =>
     invoke<void>("git_fetch", {
       repoRoot,
+      operationId,
     }),
-  gitPullFfOnly: (repoRoot: string) =>
+  gitPullFfOnly: (repoRoot: string, operationId?: string) =>
     invoke<void>("git_pull_ff_only", {
       repoRoot,
+      operationId,
     }),
-  gitPush: (repoRoot: string) =>
+  gitPush: (repoRoot: string, operationId?: string) =>
     invoke<GitPushResult>("git_push", {
       repoRoot,
+      operationId,
     }),
+  gitCancelRemoteOperation: (operationId: string) =>
+    invoke<boolean>("git_cancel_remote_operation", { operationId }),
   gitLog: (repoRoot: string, options?: { limit?: number; skip?: number }) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,

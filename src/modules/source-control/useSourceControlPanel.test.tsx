@@ -79,6 +79,8 @@ it("can generate with its own model while chat is running and keeps drafts scope
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
+    cancelRemoteAction: vi.fn(),
     revision: 1,
     graphRevision: null,
     diffStats: null,

@@ -1,6 +1,8 @@
 //! WSL 与 SSH 通过固定批次采集原始字节，与本地共用 Git 结果解析和组装。
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use terax_core::modules::proc::cancellation::ProcessCancellation;
 
 use crate::errors::{GitError, Result};
 use crate::operations::{
@@ -20,13 +22,30 @@ fn collect(
     workspace: &WorkspaceEnv,
     kind: GitBatchKind,
 ) -> Result<HashMap<String, GitOutput>> {
+    collect_controlled(path, workspace, kind, None)
+}
+
+fn collect_controlled(
+    path: &str,
+    workspace: &WorkspaceEnv,
+    kind: GitBatchKind,
+    control: Option<&Arc<ProcessCancellation>>,
+) -> Result<HashMap<String, GitOutput>> {
     let values = match workspace {
         WorkspaceEnv::Ssh { profile_id } => {
-            terax_core::runtime::block_on(git_service::execute(profile_id, path, kind))
-                .map_err(GitError::Spawn)?
+            terax_core::runtime::block_on(git_service::execute(profile_id, path, kind, control))
+                .map_err(|error| {
+                    if error == terax_core::modules::proc::cancellation::PROCESS_CANCELLED {
+                        GitError::Cancelled
+                    } else {
+                        GitError::Spawn(error)
+                    }
+                })?
         }
         #[cfg(windows)]
-        WorkspaceEnv::Wsl { distro } => crate::process::execute_wsl_batch(distro, path, kind)?,
+        WorkspaceEnv::Wsl { distro } => {
+            crate::process::execute_wsl_batch(distro, path, kind, control)?
+        }
         _ => return Err(GitError::command("Git batch", "unsupported workspace")),
     };
     Ok(decode(values))
@@ -220,8 +239,14 @@ pub(super) fn remote_action(
     path: &str,
     workspace: &WorkspaceEnv,
     action: git_service::GitRemoteAction,
+    control: &Arc<ProcessCancellation>,
 ) -> Result<Option<String>> {
-    let values = collect(path, workspace, GitBatchKind::RemoteAction { action })?;
+    let values = collect_controlled(
+        path,
+        workspace,
+        GitBatchKind::RemoteAction { action },
+        Some(control),
+    )?;
     let upstream = if matches!(action, git_service::GitRemoteAction::Push) {
         Some(first_line(output(&values, "upstream")?)?.ok_or(GitError::NoUpstream)?)
     } else {

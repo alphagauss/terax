@@ -45,7 +45,16 @@ type RepositoryRemoteActionResult = {
   ok: boolean;
   action: RepositoryRemoteAction | null;
   error?: string;
+  cancelled?: boolean;
   blocked?: "diverged" | "missing-upstream" | "no-repo" | "busy";
+};
+
+type RemoteOperation = {
+  id: string;
+  action: RepositoryRemoteAction;
+  startedAt: number;
+  phase: "running" | "cancelling" | "success" | "cancelled" | "error";
+  cancelError?: string;
 };
 
 /** 当前工作区仓库的唯一可观察快照与操作入口。 */
@@ -62,12 +71,14 @@ export type RepositoryController = {
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
+  remoteOperation: RemoteOperation | null;
   /** 每次成功读取真实仓库快照后递增，供可见派生视图重新加载。 */
   revision: number;
   /** Git 引用摘要；首次引用校验完成前为空，避免加载存在竞态的提交图。 */
   graphRevision: string | null;
   diffStats: GitPanelDiffStats | null;
   refresh: () => Promise<void>;
+  cancelRemoteAction: () => Promise<void>;
   runRemoteAction: (
     mode?: RepositoryRemoteActionMode,
   ) => Promise<RepositoryRemoteActionResult>;
@@ -84,6 +95,7 @@ type RepositoryControllerState = {
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
+  remoteOperation: RemoteOperation | null;
   revision: number;
   graphRevision: string | null;
   diffStats: GitPanelDiffStats | null;
@@ -155,6 +167,7 @@ export function useRepositoryController(
     localError: null,
     busyAction: null,
     lastRemoteError: null,
+    remoteOperation: null,
     revision: 0,
     graphRevision: null,
     diffStats: null,
@@ -173,7 +186,7 @@ export function useRepositoryController(
   const dirtyRef = useRef(false);
   // 显式刷新可以越过大量改动保护，并在隐藏期间保留到恢复；自动补查执行时仍需重新判断。
   const explicitRefreshRef = useRef(false);
-  const remoteActionsRef = useRef(new Set<string>());
+  const remoteActionsRef = useRef(new Map<string, RemoteOperation>());
   const isAutoRefreshPaused = useCallback(
     () =>
       !explicitRefreshRef.current &&
@@ -218,6 +231,7 @@ export function useRepositoryController(
         localError: null,
         busyAction: null,
         lastRemoteError: null,
+        remoteOperation: null,
         revision: 0,
         graphRevision: null,
         diffStats: null,
@@ -269,6 +283,7 @@ export function useRepositoryController(
                 localError: null,
                 busyAction: null,
                 lastRemoteError: null,
+                remoteOperation: null,
               },
         );
         return;
@@ -311,6 +326,7 @@ export function useRepositoryController(
           localError: null,
           busyAction: null,
           lastRemoteError: null,
+          remoteOperation: null,
         });
         if (!isCurrentRequest()) return;
         if (!snapshot.repo || !snapshot.status) {
@@ -335,12 +351,23 @@ export function useRepositoryController(
         const shared = shareRepositorySnapshot(previous, snapshot);
         const repo = shared.repo ?? snapshot.repo;
         const status = shared.status ?? snapshot.status;
+        const activeOperation = remoteActionsRef.current.get(
+          `${requestedWorkspace}\0${repo.repoRoot}`,
+        );
 
         updateState((current) => ({
           ...current,
           contextPath: requestedContext,
           repo,
           status,
+          busyAction: activeOperation?.action ?? null,
+          remoteOperation:
+            activeOperation ??
+            (current.repo?.repoRoot === repo.repoRoot &&
+            current.remoteOperation?.phase !== "running" &&
+            current.remoteOperation?.phase !== "cancelling"
+              ? current.remoteOperation
+              : null),
           revision: current.revision + 1,
           // 瞬时引用错误不替换已知摘要，首次失败仍允许历史区域加载。
           graphRevision,
@@ -472,38 +499,67 @@ export function useRepositoryController(
         return { ok: false, action: null, blocked: "diverged" };
       }
 
-      const requestedContext = contextPathRef.current;
       const requestedWorkspace = workspaceKeyRef.current;
       const requestedEpoch = epochRef.current;
       const operationKey = `${requestedWorkspace}\0${repo.repoRoot}`;
       if (remoteActionsRef.current.has(operationKey)) {
         return { ok: false, action, blocked: "busy" };
       }
-      remoteActionsRef.current.add(operationKey);
       const isCurrentAction = () =>
         mountedRef.current &&
-        contextPathRef.current === requestedContext &&
+        stateRef.current.contextPath === contextPathRef.current &&
+        stateRef.current.repo?.repoRoot === repo.repoRoot &&
         workspaceKeyRef.current === requestedWorkspace &&
         epochRef.current === requestedEpoch;
-      updateState((current) => ({ ...current, busyAction: action }));
+      const operationId = crypto.randomUUID();
+      const operation: RemoteOperation = {
+        id: operationId,
+        action,
+        startedAt: Date.now(),
+        phase: "running",
+      };
+      remoteActionsRef.current.set(operationKey, operation);
+      updateState((current) => ({
+        ...current,
+        busyAction: action,
+        lastRemoteError: null,
+        remoteOperation: operation,
+      }));
+      const finishOperation = (
+        phase: RemoteOperation["phase"],
+        error: string | null,
+      ) => {
+        const finished: RemoteOperation = { ...operation, phase };
+        remoteActionsRef.current.set(operationKey, finished);
+        if (isCurrentAction())
+          updateState((current) => ({
+            ...current,
+            lastRemoteError: error,
+            remoteOperation: finished,
+          }));
+      };
 
       let result: RepositoryRemoteActionResult;
       try {
         if (action === "fetch") {
-          await native.gitFetch(repo.repoRoot);
+          await native.gitFetch(repo.repoRoot, operationId);
         } else if (action === "pull") {
-          await native.gitPullFfOnly(repo.repoRoot);
+          await native.gitPullFfOnly(repo.repoRoot, operationId);
         } else {
-          await native.gitPush(repo.repoRoot);
+          await native.gitPush(repo.repoRoot, operationId);
         }
-        if (isCurrentAction())
-          updateState((current) => ({ ...current, lastRemoteError: null }));
+        finishOperation("success", null);
         result = { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
-        if (isCurrentAction())
-          updateState((current) => ({ ...current, lastRemoteError: message }));
-        result = { ok: false, action, error: message };
+        const cancelled = message === "git_operation_cancelled";
+        finishOperation(
+          cancelled ? "cancelled" : "error",
+          cancelled ? null : message,
+        );
+        result = cancelled
+          ? { ok: false, action, cancelled: true }
+          : { ok: false, action, error: message };
       }
       mutationRevisions.set(
         requestedWorkspace,
@@ -521,6 +577,52 @@ export function useRepositoryController(
     },
     [refresh, updateState],
   );
+
+  const cancelRemoteAction = useCallback(async () => {
+    const operation = stateRef.current.remoteOperation;
+    if (operation?.phase !== "running") return;
+    const requestedContext = contextPathRef.current;
+    const requestedWorkspace = workspaceKeyRef.current;
+    const requestedEpoch = epochRef.current;
+    const key = `${requestedWorkspace}\0${stateRef.current.repo?.repoRoot}`;
+    const isCurrent = () =>
+      mountedRef.current &&
+      contextPathRef.current === requestedContext &&
+      workspaceKeyRef.current === requestedWorkspace &&
+      epochRef.current === requestedEpoch;
+    const updateOperation = (next: RemoteOperation) => {
+      remoteActionsRef.current.set(key, next);
+      if (isCurrent())
+        updateState((current) => ({ ...current, remoteOperation: next }));
+    };
+    updateOperation({
+      ...operation,
+      phase: "cancelling",
+      cancelError: undefined,
+    });
+    const stillCancelling = () => {
+      const active = remoteActionsRef.current.get(key);
+      return active?.id === operation.id && active.phase === "cancelling";
+    };
+    try {
+      const accepted = await native.gitCancelRemoteOperation(operation.id);
+      if (!accepted && stillCancelling())
+        updateOperation({
+          ...operation,
+          phase: "running",
+          cancelError: i18n.t("sourceControl:remote.notReady"),
+        });
+    } catch (error) {
+      if (stillCancelling())
+        updateOperation({
+          ...operation,
+          phase: "running",
+          cancelError: i18n.t("sourceControl:remote.cancelFailed", {
+            error: normalizeError(error),
+          }),
+        });
+    }
+  }, [updateState]);
 
   useEffect(() => {
     void workspaceKey;
@@ -694,11 +796,21 @@ export function useRepositoryController(
       localError: contextPath ? (current?.localError ?? null) : null,
       busyAction: current?.busyAction ?? null,
       lastRemoteError: current?.lastRemoteError ?? null,
+      remoteOperation: current?.remoteOperation ?? null,
+      cancelRemoteAction,
       revision: current?.revision ?? 0,
       graphRevision: repo ? (current?.graphRevision ?? null) : null,
       diffStats: repo ? (current?.diffStats ?? null) : null,
       refresh,
       runRemoteAction,
     };
-  }, [state, enabled, contextPath, workspaceKey, refresh, runRemoteAction]);
+  }, [
+    state,
+    enabled,
+    contextPath,
+    workspaceKey,
+    refresh,
+    runRemoteAction,
+    cancelRemoteAction,
+  ]);
 }

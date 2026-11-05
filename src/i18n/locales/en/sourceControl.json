@@ -1,4 +1,17 @@
 {
+  "remote": {
+    "fetchRunning": "Fetching…",
+    "pullRunning": "Pulling…",
+    "pushRunning": "Pushing…",
+    "fetchSuccess": "Fetch completed",
+    "pullSuccess": "Pull completed",
+    "pushSuccess": "Push completed",
+    "cancel": "Cancel Git operation",
+    "cancelling": "Cancelling…",
+    "cancelled": "Operation cancelled",
+    "notReady": "Git is still starting or has already finished. Try cancelling again if it keeps running.",
+    "cancelFailed": "Could not confirm termination. You can retry: {{error}}"
+  },
   "remoteActionBusy": "Another Git remote operation is already running for this repository.",
   "largeChanges": "{{count}} changed files. Automatic refresh and line counts are paused. Refresh manually to update.",
   "pagination": {

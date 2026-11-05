@@ -847,9 +847,16 @@ pub fn push(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     workspace: &WorkspaceEnv,
+    operation_id: Option<&str>,
 ) -> Result<GitPushResult> {
-    let upstream = crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Push)?
-        .ok_or(GitError::NoUpstream)?;
+    let upstream = crate::network::execute(
+        registry,
+        repo_root,
+        workspace,
+        GitRemoteAction::Push,
+        operation_id,
+    )?
+    .ok_or(GitError::NoUpstream)?;
     let (remote, branch) = split_upstream(&upstream);
     Ok(GitPushResult {
         remote,
@@ -1422,16 +1429,32 @@ pub fn fetch(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     workspace: &WorkspaceEnv,
+    operation_id: Option<&str>,
 ) -> Result<()> {
-    crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Fetch).map(|_| ())
+    crate::network::execute(
+        registry,
+        repo_root,
+        workspace,
+        GitRemoteAction::Fetch,
+        operation_id,
+    )
+    .map(|_| ())
 }
 
 pub fn pull_ff_only(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     workspace: &WorkspaceEnv,
+    operation_id: Option<&str>,
 ) -> Result<()> {
-    crate::network::execute(registry, repo_root, workspace, GitRemoteAction::Pull).map(|_| ())
+    crate::network::execute(
+        registry,
+        repo_root,
+        workspace,
+        GitRemoteAction::Pull,
+        operation_id,
+    )
+    .map(|_| ())
 }
 
 fn nothing_to_commit(output: &GitOutput) -> bool {
