@@ -1087,7 +1087,7 @@ function SourceControlViewContainerComponent({
 
                     {scm.panelState === "ready" && scm.status ? (
                       <>
-                        <div className="relative shrink-0 space-y-2 border-b border-border/40 bg-gradient-to-b from-card/65 to-card/30 px-2.5 pb-2.5 pt-2.5">
+                        <div className="relative flex shrink-0 flex-col gap-2 border-b border-border/40 bg-gradient-to-b from-card/65 to-card/30 px-2.5 pb-2.5 pt-2.5">
                           <div
                             className={cn(
                               "relative rounded-lg border bg-background/95 shadow-sm transition-colors",
