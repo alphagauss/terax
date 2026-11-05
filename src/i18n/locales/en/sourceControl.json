@@ -10,7 +10,17 @@
     "cancelling": "Cancelling…",
     "cancelled": "Operation cancelled",
     "notReady": "Git is still starting or has already finished. Try cancelling again if it keeps running.",
-    "cancelFailed": "Could not confirm termination. You can retry: {{error}}"
+    "cancelFailed": "Could not confirm termination. You can retry: {{error}}",
+    "progress": "{{stage}} {{percent}}%",
+    "stages": {
+      "counting": "Counting objects",
+      "compressing": "Compressing objects",
+      "receiving": "Receiving objects",
+      "unpacking": "Unpacking objects",
+      "resolving": "Resolving deltas",
+      "writing": "Writing objects",
+      "updating": "Updating files"
+    }
   },
   "remoteActionBusy": "Another Git remote operation is already running for this repository.",
   "largeChanges": "{{count}} changed files. Automatic refresh and line counts are paused. Refresh manually to update.",

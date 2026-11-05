@@ -208,12 +208,21 @@ pub async fn git_undo_commit(
 pub async fn git_fetch(
     repo_root: String,
     operation_id: Option<String>,
+    on_progress: Option<tauri::ipc::JavaScriptChannelId>,
+    webview: tauri::Webview,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::fetch(r, &repo_root, &workspace, operation_id.as_deref()).map_err(Into::into)
+        operations::fetch(
+            r,
+            &repo_root,
+            &workspace,
+            operation_id.as_deref(),
+            on_progress.map(|id| crate::adapters::tauri::host::output(id.channel_on(webview))),
+        )
+        .map_err(Into::into)
     })
     .await
 }
@@ -222,13 +231,21 @@ pub async fn git_fetch(
 pub async fn git_pull_ff_only(
     repo_root: String,
     operation_id: Option<String>,
+    on_progress: Option<tauri::ipc::JavaScriptChannelId>,
+    webview: tauri::Webview,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::pull_ff_only(r, &repo_root, &workspace, operation_id.as_deref())
-            .map_err(Into::into)
+        operations::pull_ff_only(
+            r,
+            &repo_root,
+            &workspace,
+            operation_id.as_deref(),
+            on_progress.map(|id| crate::adapters::tauri::host::output(id.channel_on(webview))),
+        )
+        .map_err(Into::into)
     })
     .await
 }
@@ -237,12 +254,21 @@ pub async fn git_pull_ff_only(
 pub async fn git_push(
     repo_root: String,
     operation_id: Option<String>,
+    on_progress: Option<tauri::ipc::JavaScriptChannelId>,
+    webview: tauri::Webview,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitPushResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::push(r, &repo_root, &workspace, operation_id.as_deref()).map_err(Into::into)
+        operations::push(
+            r,
+            &repo_root,
+            &workspace,
+            operation_id.as_deref(),
+            on_progress.map(|id| crate::adapters::tauri::host::output(id.channel_on(webview))),
+        )
+        .map_err(Into::into)
     })
     .await
 }

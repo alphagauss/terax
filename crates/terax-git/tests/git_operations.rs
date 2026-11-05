@@ -73,15 +73,15 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     std::thread::scope(|scope| {
-        let first =
-            scope.spawn(|| operations::push(&fx.registry, &fx.repo_str(), &fx.workspace, None));
+        let first = scope
+            .spawn(|| operations::push(&fx.registry, &fx.repo_str(), &fx.workspace, None, None));
         let started = Instant::now();
         let marker = fx.repo_path.join(".git/push-started");
         while !marker.exists() && started.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(10));
         }
         let entered_hook = marker.exists();
-        let duplicate = operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None);
+        let duplicate = operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None, None);
         std::fs::write(fx.repo_path.join(".git/push-release"), "release").unwrap();
         assert!(first.join().unwrap().is_err());
         assert!(entered_hook, "push never reached the test hook");
@@ -102,6 +102,7 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
                 &fx.repo_str(),
                 &fx.workspace,
                 Some(&operation_id),
+                None,
             )
         });
         let started = Instant::now();
@@ -128,7 +129,7 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
         "Git descendant escaped cancellation"
     );
     // 失败后释放原生防重入，后续显式获取可以正常执行。
-    operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None).unwrap();
+    operations::fetch(&fx.registry, &fx.repo_str(), &fx.workspace, None, None).unwrap();
     fx.run_git(&[
         "remote",
         "set-url",
@@ -146,6 +147,113 @@ fn remote_actions_reject_concurrent_calls_do_not_retry_and_leave_reads_offline()
         2
     );
     panel_diff_stats(&fx).unwrap();
+}
+
+#[test]
+fn local_network_progress_uses_real_git_stages_without_changing_results() {
+    use std::sync::{Arc, Mutex};
+    use terax_core::events::OutputSink;
+    use terax_git::types::{GitProgress, GitProgressStage};
+
+    if skip_if_no_git() {
+        return;
+    }
+    let source = GitRepoFixture::new();
+    let target = GitRepoFixture::new();
+    let origin = TempDir::new().unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--bare", "-q"])
+        .arg(origin.path())
+        .status()
+        .unwrap()
+        .success());
+    source.write_file("file.txt", "seed\n");
+    source.run_git(&["add", "."]);
+    source.run_git(&["commit", "-qm", "seed"]);
+    source.run_git(&["remote", "add", "origin", &to_canon(origin.path())]);
+    source.run_git(&["push", "-qu", "origin", "main"]);
+    target.run_git(&["remote", "add", "origin", &to_canon(origin.path())]);
+
+    let events = Arc::new(Mutex::new(Vec::<Option<GitProgress>>::new()));
+    let output = events.clone();
+    let sink = OutputSink::new(move |event| {
+        output.lock().unwrap().push(event);
+        // 模拟面板接收失败，Git 仍应完成并返回真实结果。
+        Err("view closed".into())
+    });
+    operations::fetch(
+        &target.registry,
+        &target.repo_str(),
+        &target.workspace,
+        None,
+        Some(sink.clone()),
+    )
+    .unwrap();
+    // 小包可能省略接收与解包输出，按实际报告的计数阶段验证。
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .any(|event| event.stage == GitProgressStage::Counting && event.percent == 100));
+    assert_eq!(events.lock().unwrap().last(), Some(&None));
+    target.run_git(&["checkout", "-q", "-B", "main", "--track", "origin/main"]);
+
+    events.lock().unwrap().clear();
+    source.write_file("file.txt", "next\n");
+    source.run_git(&["commit", "-qam", "next"]);
+    operations::push(
+        &source.registry,
+        &source.repo_str(),
+        &source.workspace,
+        None,
+        Some(sink.clone()),
+    )
+    .unwrap();
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .any(|event| event.stage == GitProgressStage::Writing && event.percent == 100));
+    events.lock().unwrap().clear();
+    target.run_git(&["config", "fetch.unpackLimit", "1"]);
+    operations::pull_ff_only(
+        &target.registry,
+        &target.repo_str(),
+        &target.workspace,
+        None,
+        Some(sink.clone()),
+    )
+    .unwrap();
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .any(|event| event.stage == GitProgressStage::Receiving));
+    assert_eq!(
+        std::fs::read_to_string(target.repo_path.join("file.txt")).unwrap(),
+        "next\n"
+    );
+
+    target.run_git(&[
+        "remote",
+        "set-url",
+        "origin",
+        &to_canon(origin.path().join("missing")),
+    ]);
+    let error = operations::fetch(
+        &target.registry,
+        &target.repo_str(),
+        &target.workspace,
+        None,
+        Some(sink),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, GitError::CommandFailed { detail, .. } if detail.contains("does not appear to be a git repository"))
+    );
 }
 
 #[test]

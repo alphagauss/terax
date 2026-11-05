@@ -4,7 +4,11 @@
  */
 
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
-import { invokeNative, invokeWorkspace as invoke } from "@/lib/nativeHost";
+import {
+  getNativeHost,
+  invokeNative,
+  invokeWorkspace as invoke,
+} from "@/lib/nativeHost";
 
 export type ReadResult =
   | {
@@ -223,6 +227,47 @@ export type GitCommitResult = {
   commitSha: string;
   summary: string;
 };
+
+/** 本地 Git 当前阶段的进度；null 表示暂时没有可识别的百分比。 */
+export type GitProgress = {
+  stage:
+    | "counting"
+    | "compressing"
+    | "receiving"
+    | "unpacking"
+    | "resolving"
+    | "writing"
+    | "updating";
+  percent: number;
+};
+
+type GitProgressHandler = (progress: GitProgress | null) => void;
+
+/** 每次操作独占通道，远端继续使用原有批次而不订阅持续输出。 */
+async function gitNetwork<T>(
+  command: string,
+  repoRoot: string,
+  operationId?: string,
+  onProgress?: GitProgressHandler,
+): Promise<T> {
+  const host = await getNativeHost();
+  const workspace = host.workspace();
+  const channel =
+    workspace.kind === "local" && onProgress
+      ? host.channel<GitProgress | null>()
+      : undefined;
+  if (channel && onProgress) channel.onmessage = onProgress;
+  try {
+    return await host.invoke<T>(command, {
+      repoRoot,
+      operationId,
+      workspace,
+      onProgress: channel,
+    });
+  } finally {
+    if (channel) channel.onmessage = () => {};
+  }
+}
 
 export type GitPushResult = {
   remote: string | null;
@@ -534,21 +579,21 @@ export const native = {
       repoRoot,
       expectedHead,
     }),
-  gitFetch: (repoRoot: string, operationId?: string) =>
-    invoke<void>("git_fetch", {
-      repoRoot,
-      operationId,
-    }),
-  gitPullFfOnly: (repoRoot: string, operationId?: string) =>
-    invoke<void>("git_pull_ff_only", {
-      repoRoot,
-      operationId,
-    }),
-  gitPush: (repoRoot: string, operationId?: string) =>
-    invoke<GitPushResult>("git_push", {
-      repoRoot,
-      operationId,
-    }),
+  gitFetch: (
+    repoRoot: string,
+    operationId?: string,
+    onProgress?: GitProgressHandler,
+  ) => gitNetwork<void>("git_fetch", repoRoot, operationId, onProgress),
+  gitPullFfOnly: (
+    repoRoot: string,
+    operationId?: string,
+    onProgress?: GitProgressHandler,
+  ) => gitNetwork<void>("git_pull_ff_only", repoRoot, operationId, onProgress),
+  gitPush: (
+    repoRoot: string,
+    operationId?: string,
+    onProgress?: GitProgressHandler,
+  ) => gitNetwork<GitPushResult>("git_push", repoRoot, operationId, onProgress),
   gitCancelRemoteOperation: (operationId: string) =>
     invoke<boolean>("git_cancel_remote_operation", { operationId }),
   gitLog: (repoRoot: string, options?: { limit?: number; skip?: number }) =>

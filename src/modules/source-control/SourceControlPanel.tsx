@@ -676,11 +676,14 @@ function SourceControlViewContainerComponent({
         tone: remoteOperation.cancelError ? "error" : "progress",
         message:
           remoteOperation.cancelError ??
-          t(
-            remoteOperation.phase === "cancelling"
-              ? "remote.cancelling"
-              : `remote.${remoteOperation.action}Running`,
-          ),
+          (remoteOperation.phase === "cancelling"
+            ? t("remote.cancelling")
+            : remoteOperation.progress
+              ? t("remote.progress", {
+                  stage: t(`remote.stages.${remoteOperation.progress.stage}`),
+                  percent: remoteOperation.progress.percent,
+                })
+              : t(`remote.${remoteOperation.action}Running`)),
         persistent: true,
       } as const;
     if (scm.actionError)

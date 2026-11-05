@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use terax_core::events::OutputSink;
 use terax_core::modules::proc::cancellation::ProcessCancellation;
 
 use crate::errors::{GitError, Result};
 use crate::process::{ensure_git_available, ensure_success, git_stdout_line_opt, run_git_network};
+use crate::types::GitProgress;
 use crate::utils::batch_repo_root;
 use terax_core::modules::remote::git_service::GitRemoteAction;
 use terax_core::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
@@ -72,6 +74,7 @@ pub(crate) fn execute(
     workspace: &WorkspaceEnv,
     action: GitRemoteAction,
     operation_id: Option<&str>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<Option<String>> {
     let root = batch_repo_root(registry, path, workspace)?;
     let id = operation_id
@@ -95,14 +98,14 @@ pub(crate) fn execute(
         None
     };
     let (args, context): (&[&str], _) = match action {
-        GitRemoteAction::Fetch => (&["fetch", "--prune"], "git fetch failed"),
+        GitRemoteAction::Fetch => (&["fetch", "--prune", "--progress"], "git fetch failed"),
         GitRemoteAction::Pull => (
-            &["pull", "--ff-only", "--prune"],
+            &["pull", "--ff-only", "--prune", "--progress"],
             "git pull --ff-only failed",
         ),
-        GitRemoteAction::Push => (&["push"], "git push failed"),
+        GitRemoteAction::Push => (&["push", "--progress"], "git push failed"),
     };
-    let output = run_git_network(workspace, &root.git_path, args, &guard.1)?;
+    let output = run_git_network(workspace, &root.git_path, args, &guard.1, progress)?;
     ensure_success(&output, context)?;
     Ok(upstream)
 }

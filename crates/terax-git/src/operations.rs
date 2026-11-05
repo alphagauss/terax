@@ -8,6 +8,8 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+use terax_core::events::OutputSink;
+
 use crate::errors::{GitError, Result};
 use crate::parser::parse_porcelain_v2;
 use crate::process::{
@@ -18,8 +20,8 @@ use crate::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
     GitDiffContentResult, GitDiffResult, GitDiffSide, GitFileHistoryEntry, GitFileLineStats,
     GitLineStats, GitLogEntry, GitLogRef, GitLogRefKind, GitOutput, GitPanelDiffStats,
-    GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot,
-    TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES,
+    GitPanelSnapshot, GitProgress, GitPushResult, GitQuickDiffBaseline, GitRepoInfo,
+    GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES,
 };
 use crate::utils::{
     authorized_repo_root, batch_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo,
@@ -848,6 +850,7 @@ pub fn push(
     repo_root: &str,
     workspace: &WorkspaceEnv,
     operation_id: Option<&str>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<GitPushResult> {
     let upstream = crate::network::execute(
         registry,
@@ -855,6 +858,7 @@ pub fn push(
         workspace,
         GitRemoteAction::Push,
         operation_id,
+        progress,
     )?
     .ok_or(GitError::NoUpstream)?;
     let (remote, branch) = split_upstream(&upstream);
@@ -1430,6 +1434,7 @@ pub fn fetch(
     repo_root: &str,
     workspace: &WorkspaceEnv,
     operation_id: Option<&str>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<()> {
     crate::network::execute(
         registry,
@@ -1437,6 +1442,7 @@ pub fn fetch(
         workspace,
         GitRemoteAction::Fetch,
         operation_id,
+        progress,
     )
     .map(|_| ())
 }
@@ -1446,6 +1452,7 @@ pub fn pull_ff_only(
     repo_root: &str,
     workspace: &WorkspaceEnv,
     operation_id: Option<&str>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<()> {
     crate::network::execute(
         registry,
@@ -1453,6 +1460,7 @@ pub fn pull_ff_only(
         workspace,
         GitRemoteAction::Pull,
         operation_id,
+        progress,
     )
     .map(|_| ())
 }

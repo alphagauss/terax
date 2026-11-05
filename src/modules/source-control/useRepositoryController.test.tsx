@@ -187,24 +187,44 @@ describe("useRepositoryController", () => {
       action = controller?.runRemoteAction("fetch");
     });
     const operationId = controller?.remoteOperation?.id;
+    const onProgress = mocks.gitFetch.mock.calls[0][2];
+    await act(async () => onProgress({ stage: "receiving", percent: 65 }));
+    expect(controller?.remoteOperation?.progress?.percent).toBe(65);
     await act(async () => root?.render(<Probe contextPath="C:/b" />));
     await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.remoteOperation).toBeNull();
+    await act(async () => onProgress({ stage: "receiving", percent: 80 }));
     expect(controller?.remoteOperation).toBeNull();
     await act(async () => root?.render(<Probe contextPath="C:/a" />));
     await act(async () => vi.advanceTimersByTimeAsync(600));
     expect(controller?.remoteOperation?.id).toBe(operationId);
     expect(controller?.busyAction).toBe("fetch");
+    expect(controller?.remoteOperation?.progress?.percent).toBe(80);
+    // 隐藏时只缓存进度，恢复后随现有刷新发布，避免隐藏面板持续渲染。
+    await act(async () =>
+      root?.render(<Probe contextPath="C:/a" enabled={false} />),
+    );
+    await act(async () => onProgress({ stage: "receiving", percent: 90 }));
+    expect(controller?.remoteOperation?.progress?.percent).toBe(80);
+    await act(async () => root?.render(<Probe contextPath="C:/a" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(controller?.remoteOperation?.progress?.percent).toBe(90);
     mocks.gitCancelRemoteOperation.mockResolvedValueOnce(true);
     await act(async () => {
       await controller?.cancelRemoteAction();
     });
     expect(mocks.gitCancelRemoteOperation).toHaveBeenCalledWith(operationId);
+    await act(async () => onProgress({ stage: "resolving", percent: 100 }));
+    expect(controller?.remoteOperation?.phase).toBe("cancelling");
+    expect(controller?.remoteOperation?.progress?.percent).toBe(90);
     await act(async () => {
       reject("git_operation_cancelled");
       await action;
     });
     expect(controller?.busyAction).toBeNull();
+    await act(async () => onProgress({ stage: "resolving", percent: 100 }));
     expect(controller?.remoteOperation?.phase).toBe("cancelled");
+    expect(controller?.remoteOperation?.progress).toBeUndefined();
     expect(mocks.gitFetch).toHaveBeenCalledOnce();
   });
 
@@ -227,7 +247,11 @@ describe("useRepositoryController", () => {
       action = controller?.runRemoteAction("fetch");
     });
     const operationId = controller?.remoteOperation?.id;
-    expect(mocks.gitFetch).toHaveBeenCalledWith("C:/repo", operationId);
+    expect(mocks.gitFetch).toHaveBeenCalledWith(
+      "C:/repo",
+      operationId,
+      expect.any(Function),
+    );
     mocks.gitCancelRemoteOperation.mockRejectedValueOnce(
       new Error("unreachable"),
     );

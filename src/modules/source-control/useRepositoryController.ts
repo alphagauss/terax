@@ -11,6 +11,7 @@ import {
 } from "@/modules/view-state";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import {
+  type GitProgress,
   type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
@@ -55,6 +56,7 @@ type RemoteOperation = {
   startedAt: number;
   phase: "running" | "cancelling" | "success" | "cancelled" | "error";
   cancelError?: string;
+  progress?: GitProgress | null;
 };
 
 /** 当前工作区仓库的唯一可观察快照与操作入口。 */
@@ -539,14 +541,28 @@ export function useRepositoryController(
           }));
       };
 
+      const onProgress = (progress: GitProgress | null) => {
+        const active = remoteActionsRef.current.get(operationKey);
+        // 完成、取消中或其他运行的迟到消息不能覆盖当前状态。
+        if (active?.id !== operationId || active.phase !== "running") return;
+        const next = { ...active, progress };
+        remoteActionsRef.current.set(operationKey, next);
+        if (
+          isCurrentAction() &&
+          enabledRef.current &&
+          foregroundRef.current &&
+          isWindowVisible()
+        )
+          updateState((current) => ({ ...current, remoteOperation: next }));
+      };
       let result: RepositoryRemoteActionResult;
       try {
         if (action === "fetch") {
-          await native.gitFetch(repo.repoRoot, operationId);
+          await native.gitFetch(repo.repoRoot, operationId, onProgress);
         } else if (action === "pull") {
-          await native.gitPullFfOnly(repo.repoRoot, operationId);
+          await native.gitPullFfOnly(repo.repoRoot, operationId, onProgress);
         } else {
-          await native.gitPush(repo.repoRoot, operationId);
+          await native.gitPush(repo.repoRoot, operationId, onProgress);
         }
         finishOperation("success", null);
         result = { ok: true, action };

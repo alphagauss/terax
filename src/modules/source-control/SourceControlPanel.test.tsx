@@ -42,7 +42,11 @@ vi.mock("@/modules/filesystem", async (original) => ({
 
 vi.mock("react-i18next", async (original) => ({
   ...(await original<typeof import("react-i18next")>()),
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      key === "remote.progress" ? `${values?.stage} ${values?.percent}%` : key,
+    i18n: { language: "en" },
+  }),
 }));
 vi.mock("@/modules/source-control/GraphSection", () => ({
   GraphSection: ({ repoRoot }: { repoRoot: string | null }) =>
@@ -1010,6 +1014,8 @@ it.each(["fetch", "pull", "push"] as const)(
       refresh: vi.fn(),
       runRemoteAction: vi.fn(),
     };
+    const runningOperation = controller.remoteOperation;
+    if (!runningOperation) throw new Error("Missing test operation");
     const render = () =>
       act(async () =>
         root.render(
@@ -1041,11 +1047,34 @@ it.each(["fetch", "pull", "push"] as const)(
         vi.advanceTimersByTime(10_000);
       });
       expect(feedback()?.className).toContain("opacity-100");
+      controller.remoteOperation = {
+        ...runningOperation,
+        progress: { stage: "receiving", percent: 65 },
+      };
+      await render();
+      expect(feedback()?.textContent).toBe("remote.stages.receiving 65%");
+      expect(container.querySelectorAll('[role="status"][title]')).toHaveLength(
+        1,
+      );
+      controller.remoteOperation = {
+        ...runningOperation,
+        progress: null,
+      };
+      await render();
+      expect(feedback()?.textContent).toBe(`remote.${action}Running`);
+      controller.remoteOperation = {
+        ...runningOperation,
+        progress: { stage: "resolving", percent: 100 },
+      };
+      await render();
+      expect(feedback()?.textContent).toBe("remote.stages.resolving 100%");
+      expect(cancel()).not.toBeNull();
       await act(async () => cancel()?.click());
       expect(controller.cancelRemoteAction).toHaveBeenCalledOnce();
       controller.remoteOperation = {
-        ...controller.remoteOperation!,
+        ...runningOperation,
         phase: "cancelling",
+        progress: { stage: "receiving", percent: 100 },
       };
       await render();
       expect(
@@ -1056,7 +1085,7 @@ it.each(["fetch", "pull", "push"] as const)(
       expect(feedback()?.textContent).toBe("remote.cancelling");
       controller.busyAction = null;
       controller.remoteOperation = {
-        ...controller.remoteOperation!,
+        ...runningOperation,
         phase: "cancelled",
       };
       await render();

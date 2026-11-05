@@ -10,7 +10,17 @@
     "cancelling": "正在取消…",
     "cancelled": "操作已取消",
     "notReady": "Git 仍在启动或已经结束。如仍在执行，可再次尝试终止。",
-    "cancelFailed": "无法确认操作已终止，可重试：{{error}}"
+    "cancelFailed": "无法确认操作已终止，可重试：{{error}}",
+    "progress": "{{stage}} {{percent}}%",
+    "stages": {
+      "counting": "统计对象",
+      "compressing": "压缩对象",
+      "receiving": "接收对象",
+      "unpacking": "解包对象",
+      "resolving": "解析增量",
+      "writing": "写入对象",
+      "updating": "更新文件"
+    }
   },
   "remoteActionBusy": "此仓库已有 Git 远程操作正在执行，请等待完成。",
   "largeChanges": "共 {{count}} 个改动文件，已暂停自动刷新和行数统计。请手动刷新以更新。",

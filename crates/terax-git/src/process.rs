@@ -15,9 +15,11 @@ use terax_core::modules::proc::group;
 
 use shared_child::SharedChild;
 
+use terax_core::events::OutputSink;
+
 use crate::errors::{GitError, Result};
 use crate::types::{
-    GitOutput, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
+    GitOutput, GitProgress, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_SECS, MIN_GIT_VERSION,
 };
 #[cfg(windows)]
@@ -352,6 +354,7 @@ pub(super) fn run_git_network(
     path: &str,
     args: &[&str],
     control: &Arc<ProcessCancellation>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<GitOutput> {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut cmd = build_git_command(workspace, Some(path), &args)?;
@@ -366,7 +369,15 @@ pub(super) fn run_git_network(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     terax_core::modules::proc::hide_console(&mut cmd);
-    run_child_inner(cmd, None, MAX_OUTPUT_BYTES, None, Some(control), None)
+    run_child_inner(
+        cmd,
+        None,
+        MAX_OUTPUT_BYTES,
+        None,
+        Some(control),
+        None,
+        progress,
+    )
 }
 
 /// WSL 每个固定批次只启动一次入口，批次内各 Git 命令沿用 SSH 的字节协议。
@@ -408,6 +419,7 @@ pub(super) fn execute_wsl_batch(
         Some(script.into_bytes()),
         control,
         wsl,
+        None,
     )?;
     ensure_success(&output, "WSL Git batch failed")?;
     if output.truncated {
@@ -422,7 +434,7 @@ pub(super) fn run_child(
     max_output: usize,
     input: Option<Vec<u8>>,
 ) -> Result<GitOutput> {
-    run_child_inner(cmd, Some(dur), max_output, input, None, None)
+    run_child_inner(cmd, Some(dur), max_output, input, None, None, None)
 }
 
 fn run_child_inner(
@@ -432,6 +444,7 @@ fn run_child_inner(
     input: Option<Vec<u8>>,
     control: Option<&Arc<ProcessCancellation>>,
     wsl: Option<(String, String)>,
+    progress: Option<OutputSink<Option<GitProgress>>>,
 ) -> Result<GitOutput> {
     #[cfg(unix)]
     if control.is_some() {
@@ -470,12 +483,13 @@ fn run_child_inner(
             } else {
                 return (ready, false);
             }
-            drain(&mut reader, 64 * 1024, max_output)
+            drain(&mut reader, 64 * 1024, max_output, None)
         } else {
-            drain(&mut stdout_pipe, 64 * 1024, max_output)
+            drain(&mut stdout_pipe, 64 * 1024, max_output, None)
         }
     });
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024, max_output));
+    let stderr_handle =
+        thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024, max_output, progress));
 
     // 输入和输出并行传输，避免批次超过管道容量时互相等待；超时仍由统一等待器控制。
     let input_handle = input.map(|input| {
@@ -626,7 +640,13 @@ fn decode_text(bytes: Vec<u8>) -> TextSource {
     }
 }
 
-fn drain<R: Read>(reader: &mut R, prealloc: usize, max_output: usize) -> (Vec<u8>, bool) {
+fn drain<R: Read>(
+    reader: &mut R,
+    prealloc: usize,
+    max_output: usize,
+    progress: Option<OutputSink<Option<GitProgress>>>,
+) -> (Vec<u8>, bool) {
+    let mut progress = progress.map(crate::progress::ProgressReader::new);
     let mut out: Vec<u8> = Vec::with_capacity(prealloc.min(max_output));
     let mut buf = [0u8; 16 * 1024];
     let mut truncated = false;
@@ -634,6 +654,9 @@ fn drain<R: Read>(reader: &mut R, prealloc: usize, max_output: usize) -> (Vec<u8
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
+                if let Some(progress) = &mut progress {
+                    progress.feed(&buf[..n]);
+                }
                 if out.len() >= max_output {
                     truncated = true;
                     continue;
@@ -646,6 +669,9 @@ fn drain<R: Read>(reader: &mut R, prealloc: usize, max_output: usize) -> (Vec<u8
             }
             Err(_) => break,
         }
+    }
+    if let Some(progress) = &mut progress {
+        progress.finish();
     }
     (out, truncated)
 }

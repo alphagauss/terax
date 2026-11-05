@@ -10,6 +10,26 @@ pub(crate) const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub(crate) const MIN_GIT_VERSION: &str = "2.23";
 
+/// Git 单个阶段的百分比，不代表整次联网操作的完成度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitProgress {
+    pub stage: GitProgressStage,
+    pub percent: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitProgressStage {
+    Counting,
+    Compressing,
+    Receiving,
+    Unpacking,
+    Resolving,
+    Writing,
+    Updating,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitRepoInfo {

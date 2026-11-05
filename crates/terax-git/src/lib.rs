@@ -6,5 +6,6 @@ pub mod network;
 pub mod operations;
 mod parser;
 mod process;
+mod progress;
 pub mod types;
 mod utils;
