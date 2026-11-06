@@ -37,6 +37,7 @@ import {
   wrapCompartment,
 } from "./lib/extensions";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
+import { GIT_DIFF_CONFIG } from "./lib/gitDiffConfig";
 import { renderGitChangeOverview } from "./lib/gitGutter";
 import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
 import { rangesFromChunks } from "./lib/quickDiff";
@@ -202,6 +203,7 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
           extensions: sideExtensions,
         },
         parent,
+        diffConfig: GIT_DIFF_CONFIG,
         gutter: false,
         highlightChanges: true,
       });

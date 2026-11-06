@@ -6,10 +6,12 @@
 // @vitest-environment happy-dom
 
 import { RepositoryProvider } from "@/modules/source-control/RepositoryContext";
+import type { GitDiffResource } from "@/modules/source-control/gitTypes";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
+import { getChunks, getOriginalDoc } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
 import type { ReactCodeMirrorProps } from "@uiw/react-codemirror";
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -74,25 +76,24 @@ vi.mock("@uiw/react-codemirror", async (importOriginal) => {
       ),
   };
 });
-vi.mock("./SplitDiffView", () => ({
-  SplitDiffView: ({
-    original,
-    modified,
-    wordWrap,
-  }: {
-    original: string;
-    modified: string;
-    wordWrap: boolean;
-  }) => (
-    <div
-      data-testid="split-diff"
-      data-original={original}
-      data-word-wrap={wordWrap}
-    >
-      {modified}
-    </div>
-  ),
-}));
+vi.mock("./SplitDiffView", async (importOriginal) => {
+  const { SplitDiffView } =
+    await importOriginal<typeof import("./SplitDiffView")>();
+  return {
+    SplitDiffView: (props: ComponentProps<typeof SplitDiffView>) =>
+      mocks.realEditor ? (
+        <SplitDiffView {...props} />
+      ) : (
+        <div
+          data-testid="split-diff"
+          data-original={props.original}
+          data-word-wrap={props.wordWrap}
+        >
+          {props.modified}
+        </div>
+      ),
+  };
+});
 
 import { CommitGitDiffPane, WorkingGitDiffPane } from "./GitDiffPane";
 import { ReadonlyDiff } from "./ReadonlyDiff";
@@ -152,10 +153,14 @@ function deferred<T>() {
 
 let root: Root | null = null;
 
-function renderPane(revision: number, active: boolean) {
+function renderPane(
+  revision: number,
+  active: boolean,
+  diffSource: GitDiffResource = source,
+) {
   root?.render(
     <RepositoryProvider controller={repositoryController(revision)}>
-      <WorkingGitDiffPane source={source} active={active} />
+      <WorkingGitDiffPane source={diffSource} active={active} />
     </RepositoryProvider>,
   );
 }
@@ -386,6 +391,93 @@ describe("WorkingGitDiffPane", () => {
     },
   );
 });
+
+it.each(["split", "inline"] as const)(
+  "%s Git diff 在提交、暂存和工作区刷新后只标记分散的修改行",
+  async (mode) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    mocks.realEditor = true;
+    mocks.diffViewMode = mode;
+    const base = Array.from(
+      { length: 600 },
+      (_, index) =>
+        `const option${index} = "keep the existing configuration ${index}";`,
+    );
+    const stagedLines = [5, 105, 205, 305, 405, 505, 595];
+    const worktreeLines = [12, 112, 212, 312, 412, 512, 592];
+    const staged = base.map((line, index) =>
+      stagedLines.includes(index + 1) ? line.replace("keep", "stage") : line,
+    );
+    const worktree = staged.map((line, index) =>
+      worktreeLines.includes(index + 1) ? line.replace("keep", "edit") : line,
+    );
+    const committed = {
+      ...diffResult("history"),
+      originalContent: base.join("\n"),
+      modifiedContent: staged.join("\n"),
+    };
+    const worktreeDiff = () => ({
+      ...committed,
+      originalContent: staged.join("\n"),
+      modifiedContent: worktree.join("\n"),
+    });
+    const container = document.body.appendChild(document.createElement("div"));
+    root = createRoot(container);
+
+    const checkChanges = async (
+      result: typeof committed,
+      changedLines: number[],
+    ) => {
+      const editor = container.querySelector<HTMLElement>(".cm-merge-b");
+      const view = editor && EditorView.findFromDOM(editor);
+      if (!view) throw new Error("missing Git diff editor");
+      await vi.waitFor(() => {
+        const { state } = view;
+        const left = container.querySelector<HTMLElement>(".cm-merge-a");
+        const originalDoc = left
+          ? EditorView.findFromDOM(left)?.state.doc
+          : getOriginalDoc(state);
+        expect(originalDoc?.toString()).toBe(result.originalContent);
+        expect(state.doc.toString()).toBe(result.modifiedContent);
+        expect(
+          getChunks(state)?.chunks.map((chunk) => [
+            state.doc.lineAt(chunk.fromB).number,
+            state.doc.lineAt(chunk.endB).number,
+          ]),
+        ).toEqual(changedLines.map((line) => [line, line]));
+      });
+      return editor;
+    };
+
+    mocks.gitCommitFileDiff.mockResolvedValueOnce(committed);
+    await act(async () => {
+      root?.render(<CommitGitDiffPane source={{ ...source, sha: "sparse" }} />);
+    });
+    await checkChanges(committed, stagedLines);
+
+    mocks.gitDiffContent.mockResolvedValueOnce(committed);
+    await act(async () => renderPane(1, true, { ...source, side: "index" }));
+    await checkChanges(committed, stagedLines);
+
+    const initial = worktreeDiff();
+    mocks.gitDiffContent.mockResolvedValueOnce(initial);
+    await act(async () => renderPane(1, true));
+    const editor = await checkChanges(initial, worktreeLines);
+
+    staged[11] = worktree[11];
+    const afterStaging = worktreeDiff();
+    mocks.gitDiffContent.mockResolvedValueOnce(afterStaging);
+    await act(async () => renderPane(2, true));
+    const remaining = worktreeLines.slice(1);
+    expect(await checkChanges(afterStaging, remaining)).toBe(editor);
+
+    worktree[19] = worktree[19].replace("keep", "edit");
+    const afterEditing = worktreeDiff();
+    mocks.gitDiffContent.mockResolvedValueOnce(afterEditing);
+    await act(async () => renderPane(3, true));
+    expect(await checkChanges(afterEditing, [20, ...remaining])).toBe(editor);
+  },
+);
 
 it.each(["commit", "readonly"] as const)(
   "%s 统一 Diff 的删除内容显示原始行号",

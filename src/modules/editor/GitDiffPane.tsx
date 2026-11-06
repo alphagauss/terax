@@ -37,6 +37,7 @@ import {
   wrapCompartment,
 } from "./lib/extensions";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
+import { GIT_DIFF_CONFIG } from "./lib/gitDiffConfig";
 import { gitChangeOverview } from "./lib/gitGutter";
 import { resolveLanguage } from "./lib/languageResolver";
 import {
@@ -259,6 +260,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
                 : [
                     unifiedMergeView({
                       original: originalContent,
+                      diffConfig: GIT_DIFF_CONFIG,
                       mergeControls: false,
                       highlightChanges: true,
                       gutter: false,

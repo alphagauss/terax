@@ -215,6 +215,9 @@ importers:
       codemirror-languageserver:
         specifier: ^1.22.1
         version: 1.22.1(@codemirror/autocomplete@6.20.3)(@codemirror/lint@6.9.7)(@codemirror/state@6.7.1)(@codemirror/view@6.43.9)
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       i18next:
         specifier: ^26.3.4
         version: 26.3.6(typescript@6.0.3)
@@ -309,9 +312,6 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
-      diff:
-        specifier: ^9.0.0
-        version: 9.0.0
       happy-dom:
         specifier: ^20.10.6
         version: 20.10.6
