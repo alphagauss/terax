@@ -36,52 +36,30 @@ export function useSpacePersistence({ state, enabled }: Params) {
     const operations: Promise<void>[] = [];
     for (const spaceId of Object.keys(snapshot.spaces)) {
       const workbench = serializeSpaceWorkbench(snapshot, spaceId);
-      const persist = (fingerprint: string, operation: Promise<void>) => {
-        const tracked = operation
-          .then(() => {
-            last.current.set(spaceId, fingerprint);
-          })
-          .catch((error) => {
-            console.error(`[spaces] failed to persist ${spaceId}`, error);
-            throw error;
-          })
-          .finally(() => {
-            if (pending.current.get(spaceId)?.operation === tracked) {
-              pending.current.delete(spaceId);
-            }
-          });
-        pending.current.set(spaceId, { fingerprint, operation: tracked });
-        operations.push(tracked);
-      };
-      if (!workbench) {
-        const pendingWrite = pending.current.get(spaceId);
-        if (
-          last.current.get(spaceId) === EMPTY_STATE ||
-          pendingWrite?.fingerprint === EMPTY_STATE
-        ) {
-          if (pendingWrite?.fingerprint === EMPTY_STATE) {
-            operations.push(pendingWrite.operation);
-          }
-          continue;
-        }
-        persist(
-          EMPTY_STATE,
-          saveState(spaceId, { version: 2, workbench: null }),
-        );
-        continue;
-      }
-      const json = JSON.stringify(workbench);
+      const fingerprint = workbench ? JSON.stringify(workbench) : EMPTY_STATE;
       const pendingWrite = pending.current.get(spaceId);
-      if (
-        last.current.get(spaceId) === json ||
-        pendingWrite?.fingerprint === json
-      ) {
-        if (pendingWrite?.fingerprint === json) {
-          operations.push(pendingWrite.operation);
-        }
+      if (pendingWrite?.fingerprint === fingerprint) {
+        operations.push(pendingWrite.operation);
         continue;
       }
-      persist(json, saveState(spaceId, { version: 2, workbench }));
+      // 在途写入会覆盖已落盘布局，回到旧布局也必须排在它之后写入。
+      if (!pendingWrite && last.current.get(spaceId) === fingerprint) continue;
+
+      const tracked = saveState(spaceId, { version: 2, workbench })
+        .then(() => {
+          last.current.set(spaceId, fingerprint);
+        })
+        .catch((error) => {
+          console.error(`[spaces] failed to persist ${spaceId}`, error);
+          throw error;
+        })
+        .finally(() => {
+          if (pending.current.get(spaceId)?.operation === tracked) {
+            pending.current.delete(spaceId);
+          }
+        });
+      pending.current.set(spaceId, { fingerprint, operation: tracked });
+      operations.push(tracked);
     }
     await Promise.all(operations);
   }, []);

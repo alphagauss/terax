@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 import {
   adjacentTabId,
   activateTab,
+  addTabToGroup,
   assertWorkbenchState,
   closeTab,
+  closeTabs,
   createEmptySpaceWorkbench,
   createSpaceWorkbench,
   groupIds,
@@ -128,6 +130,54 @@ describe("workbench model", () => {
 
     expect(closed.spaces.default.groups[1].activeTabId).toBe(2);
     expect(closed.tabs[2].cold).toBe(false);
+  });
+
+  it("collapses empty split groups and warms only the surviving fallback", () => {
+    let state = splitWithTab(
+      initial(),
+      terminal(4),
+      1,
+      4,
+      5,
+      6,
+      "right",
+      false,
+    );
+    state = addTabToGroup(state, { ...terminal(7), cold: true }, 4, 0, false);
+    state = addTabToGroup(state, { ...terminal(8), cold: true }, 4, 2, false);
+
+    const closed = closeTabs(state, [4, 2]);
+
+    expect(groupIds(closed.spaces.default.root)).toEqual([4]);
+    expect(closed.spaces.default.groups[4]).toEqual({
+      id: 4,
+      tabIds: [7, 8],
+      activeTabId: 7,
+    });
+    expect(closed.tabs[7].cold).toBe(false);
+    expect(closed.tabs[8]).toBe(state.tabs[8]);
+    assertWorkbenchState(closed);
+  });
+
+  it("warms the active page when closing the focused split group", () => {
+    let state = splitWithTab(
+      initial(),
+      terminal(4),
+      1,
+      4,
+      5,
+      6,
+      "right",
+      false,
+    );
+    state = addTabToGroup(state, terminal(7), 4);
+    state.tabs[2] = { ...state.tabs[2], cold: true };
+
+    const closed = closeTabs(state, [4, 7]);
+
+    expect(closed.spaces.default.activeGroupId).toBe(1);
+    expect(closed.tabs[2].cold).toBe(false);
+    assertWorkbenchState(closed);
   });
 
   it("allows a cross-Space move to leave the source Space empty", () => {

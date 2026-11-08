@@ -47,6 +47,10 @@ describe("CloseDialogs", () => {
           pendingDeleteTabs={null}
           onCancelDeleteClose={vi.fn()}
           onConfirmDeleteClose={vi.fn()}
+          pendingCloseAllTabs={null}
+          onCancelCloseAllTabs={vi.fn()}
+          onConfirmCloseAllTabs={vi.fn()}
+          onRestoreCloseAllTabsFocus={vi.fn()}
           pendingAppClose={{
             kind: "blocker",
             dirtyEditors: 1,

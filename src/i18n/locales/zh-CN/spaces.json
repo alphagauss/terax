@@ -16,6 +16,8 @@
   "dropToMoveHere": "拖放到此处以移动",
   "noTabs": "暂无标签页",
   "closeTab": "关闭标签页",
+  "closeAllTabs_other": "关闭所有 Space 的标签页（{{count}} 个）",
+  "checkingAllTabs": "正在检查待关闭的标签页",
   "defaultSpace": "默认",
   "untitledSpace": "Space {{number}}",
   "newFromDirectory": "从文件夹新建 Space",

@@ -5,6 +5,7 @@
  */
 
 import type { AppCloseDialogState } from "@/app/hooks/useAppCloseGuard";
+import type { CloseAllTabsConfirmation } from "@/app/hooks/useTabCloseGuards";
 import { Button } from "@/components/controls/button";
 import {
   AlertDialog,
@@ -30,6 +31,10 @@ type Props = {
   pendingDeleteTabs: number[] | null;
   onCancelDeleteClose: () => void;
   onConfirmDeleteClose: () => void;
+  pendingCloseAllTabs: CloseAllTabsConfirmation | null;
+  onCancelCloseAllTabs: () => void;
+  onConfirmCloseAllTabs: () => void;
+  onRestoreCloseAllTabsFocus: () => void;
   pendingAppClose: AppCloseDialogState | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
@@ -53,6 +58,10 @@ export function CloseDialogs({
   pendingDeleteTabs,
   onCancelDeleteClose,
   onConfirmDeleteClose,
+  pendingCloseAllTabs,
+  onCancelCloseAllTabs,
+  onConfirmCloseAllTabs,
+  onRestoreCloseAllTabsFocus,
   pendingAppClose,
   onCancelAppClose,
   onConfirmAppClose,
@@ -140,6 +149,58 @@ export function CloseDialogs({
             <AlertDialogAction onClick={onConfirmDeleteClose}>
               {t("close.closeAnyway")}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingCloseAllTabs !== null}
+        onOpenChange={(open) => !open && onCancelCloseAllTabs()}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onRestoreCloseAllTabsFocus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("close.closeAllTabsTitle")}</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-1">
+                {pendingCloseAllTabs && (
+                  <>
+                    <p>
+                      {t("close.closeAllTabsScope", {
+                        count: pendingCloseAllTabs.tabIds.length,
+                        spaces: t("close.closeAllTabsSpaces", {
+                          count: pendingCloseAllTabs.spaces,
+                        }),
+                      })}
+                    </p>
+                    {pendingCloseAllTabs.dirtyDocuments > 0 && (
+                      <p>
+                        {t("close.closeAllTabsDirty", {
+                          count: pendingCloseAllTabs.dirtyDocuments,
+                        })}
+                      </p>
+                    )}
+                    {pendingCloseAllTabs.terminalsToConfirm > 0 && (
+                      <p>
+                        {t("close.closeAllTabsBusy", {
+                          count: pendingCloseAllTabs.terminalsToConfirm,
+                        })}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+            <Button variant="destructive" onClick={onConfirmCloseAllTabs}>
+              {t("close.closeAnyway")}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

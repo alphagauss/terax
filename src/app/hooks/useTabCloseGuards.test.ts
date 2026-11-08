@@ -1,6 +1,6 @@
 /**
  * 本文件测试标签关闭确认 Hook。
- * 重点锁定最后一个普通标签可以关闭，同时保留文档和终端确认边界。
+ * 重点锁定批量取消、异步检查期间的新标签，以及文档和终端确认边界。
  */
 
 // @vitest-environment happy-dom
@@ -20,19 +20,54 @@ vi.mock("@/modules/terminal", () => ({
 }));
 
 type HarnessProps = {
-  tabs: Tab[];
-  disposeTab: (id: number) => void;
-  onReady: (close: (id: number) => Promise<void>) => void;
+  getTabs: () => Tab[];
+  disposeTabs: (ids: readonly number[]) => void;
+  onReady: (guards: ReturnType<typeof useTabCloseGuards>) => void;
 };
 
 /** 暴露关闭入口，供测试驱动 Hook。 */
-function Harness({ tabs, disposeTab, onReady }: HarnessProps) {
-  onReady(useTabCloseGuards({ tabs, disposeTab }).handleClose);
+function Harness({ getTabs, disposeTabs, onReady }: HarnessProps) {
+  onReady(useTabCloseGuards({ getTabs, disposeTabs }));
   return null;
 }
 
+const terminalTab: Tab = {
+  id: 1,
+  kind: "terminal",
+  spaceId: "default",
+  title: "Shell",
+};
+const documentTab = {
+  id: 2,
+  kind: "editor",
+  spaceId: "project",
+  title: "main.ts",
+  path: "/work/main.ts",
+  dirty: true,
+  preview: false,
+} satisfies Tab;
+
 describe("useTabCloseGuards", () => {
   const roots: ReturnType<typeof createRoot>[] = [];
+
+  function setup(getTabs: () => Tab[]) {
+    const root = createRoot(document.createElement("div"));
+    roots.push(root);
+    const disposeTabs = vi.fn();
+    let guards!: ReturnType<typeof useTabCloseGuards>;
+    act(() =>
+      root.render(
+        createElement(Harness, {
+          getTabs,
+          disposeTabs,
+          onReady: (next) => {
+            guards = next;
+          },
+        }),
+      ),
+    );
+    return { disposeTabs, guards: () => guards };
+  }
 
   afterEach(() => {
     for (const root of roots) act(() => root.unmount());
@@ -41,11 +76,6 @@ describe("useTabCloseGuards", () => {
   });
 
   it("closes the last ordinary tab in a Space", async () => {
-    const container = document.createElement("div");
-    const root = createRoot(container);
-    roots.push(root);
-    const disposeTab = vi.fn();
-    let close: ((id: number) => Promise<void>) | undefined;
     const tab = {
       id: 1,
       kind: "web-preview",
@@ -53,21 +83,73 @@ describe("useTabCloseGuards", () => {
       title: "Preview",
       url: "",
     } satisfies Tab;
+    const { disposeTabs, guards } = setup(() => [tab]);
+    await act(async () => guards().handleClose(tab.id));
+    expect(disposeTabs).toHaveBeenCalledExactlyOnceWith([tab.id]);
+  });
 
-    await act(async () => {
-      root.render(
-        createElement(Harness, {
-          tabs: [tab],
-          disposeTab,
-          onReady: (handleClose) => {
-            close = handleClose;
-          },
-        }),
-      );
+  it("cancels the whole batch and counts shared dirty documents only once", async () => {
+    const tabs: Tab[] = [
+      terminalTab,
+      documentTab,
+      { ...documentTab, id: 3, spaceId: "default" },
+      { ...terminalTab, id: 4, spaceId: "project" },
+    ];
+    const { disposeTabs, guards } = setup(() => tabs);
+    terminal.needsCloseConfirmation
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await act(async () => guards().handleCloseAllTabs());
+
+    expect(guards().pendingCloseAllTabs).toEqual({
+      tabIds: [1, 2, 3, 4],
+      spaces: 2,
+      dirtyDocuments: 1,
+      terminalsToConfirm: 1,
     });
-    await act(async () => close?.(tab.id));
+    expect(disposeTabs).not.toHaveBeenCalled();
+    act(() => guards().cancelCloseAllTabs());
+    expect(guards().pendingCloseAllTabs).toBeNull();
+    expect(disposeTabs).not.toHaveBeenCalled();
+  });
 
-    expect(disposeTab).toHaveBeenCalledOnce();
-    expect(disposeTab).toHaveBeenCalledWith(tab.id);
+  it("keeps a newly opened view and does not discard its shared dirty document", async () => {
+    const tabs: Tab[] = [terminalTab, documentTab];
+    const { disposeTabs, guards } = setup(() => tabs);
+    let finishCheck!: (busy: boolean) => void;
+    terminal.needsCloseConfirmation.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+    );
+    let close!: Promise<void>;
+    act(() => {
+      close = guards().handleCloseAllTabs();
+    });
+    expect(guards().checkingAllTabs).toBe(true);
+    tabs.push({ ...documentTab, id: 3, spaceId: "default" });
+    await act(async () => {
+      finishCheck(false);
+      await close;
+    });
+
+    expect(guards().pendingCloseAllTabs).toBeNull();
+    expect(disposeTabs).toHaveBeenCalledExactlyOnceWith([1, 2]);
+  });
+
+  it("requires confirmation when terminal status cannot be checked", async () => {
+    const tabs = [terminalTab];
+    const { disposeTabs, guards } = setup(() => tabs);
+    terminal.needsCloseConfirmation.mockRejectedValueOnce(new Error("offline"));
+
+    await act(async () => guards().handleCloseAllTabs());
+    expect(guards().pendingCloseAllTabs?.terminalsToConfirm).toBe(1);
+    expect(disposeTabs).not.toHaveBeenCalled();
+
+    tabs.push({ ...terminalTab, id: 2 });
+    act(() => guards().confirmCloseAllTabs());
+    expect(disposeTabs).toHaveBeenCalledExactlyOnceWith([1]);
   });
 });

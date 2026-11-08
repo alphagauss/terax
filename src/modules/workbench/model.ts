@@ -276,13 +276,20 @@ export function removeGroupNode(
   node: WorkbenchLayoutNode,
   groupId: number,
 ): WorkbenchLayoutNode | null {
-  if (node.kind === "group") return node.groupId === groupId ? null : node;
+  return pruneGroupNodes(node, (id) => id === groupId);
+}
+
+function pruneGroupNodes(
+  node: WorkbenchLayoutNode,
+  shouldRemove: (id: number) => boolean,
+): WorkbenchLayoutNode | null {
+  if (node.kind === "group") return shouldRemove(node.groupId) ? null : node;
   let changed = false;
   const children: WorkbenchLayoutNode[] = [];
   const retainedSizes: number[] = [];
   const sourceSizes = sizesForChildren(node);
   for (const [index, child] of node.children.entries()) {
-    const next = removeGroupNode(child, groupId);
+    const next = pruneGroupNodes(child, shouldRemove);
     if (next !== child) changed = true;
     if (next) {
       children.push(next);
@@ -525,6 +532,77 @@ function removeTabFromOwner(
 
 export function closeTab(state: WorkbenchState, tabId: number): WorkbenchState {
   return removeTabFromOwner(state, tabId, false);
+}
+
+/** 每个受影响的 Space 只更新一次，空 Space 保留原活动分组作为基础页。 */
+export function closeTabs(
+  state: WorkbenchState,
+  ids: readonly number[],
+): WorkbenchState {
+  if (ids.length === 0) return state;
+  if (ids.length === 1) return closeTab(state, ids[0]);
+
+  const closing = new Set(ids.filter((id) => state.tabs[id]));
+  if (closing.size === 0) return state;
+  const tabs = { ...state.tabs };
+  const spaces = { ...state.spaces };
+  const affectedSpaces = new Set<string>();
+  for (const id of closing) {
+    affectedSpaces.add(tabs[id].spaceId);
+    delete tabs[id];
+  }
+
+  for (const spaceId of affectedSpaces) {
+    const space = state.spaces[spaceId];
+    const order = groupIds(space.root);
+    const groups = { ...space.groups };
+    for (const id of order) {
+      const group = groups[id];
+      const tabIds = group.tabIds.filter((tabId) => !closing.has(tabId));
+      if (tabIds.length === group.tabIds.length) continue;
+      if (tabIds.length === 0) {
+        delete groups[id];
+        continue;
+      }
+
+      let active = group.activeTabId;
+      if (active !== null && closing.has(active)) {
+        // 复用单页关闭的选择规则，优先选左侧最近的保留页。
+        let index = group.tabIds.indexOf(active) - 1;
+        while (index >= 0 && closing.has(group.tabIds[index])) index -= 1;
+        active = group.tabIds[index] ?? tabIds[0];
+        if (tabs[active].cold) tabs[active] = { ...tabs[active], cold: false };
+      }
+      groups[id] = { ...group, tabIds, activeTabId: active };
+    }
+
+    const previousActive = space.activeGroupId;
+    const remaining = order.filter((id) => groups[id]);
+    if (remaining.length === 0) {
+      groups[previousActive] = {
+        id: previousActive,
+        tabIds: [],
+        activeTabId: null,
+      };
+    }
+    const activeGroupId = groups[previousActive]
+      ? previousActive
+      : (order
+          .slice(order.indexOf(previousActive) + 1)
+          .find((id) => groups[id]) ?? remaining[remaining.length - 1]);
+    if (activeGroupId !== previousActive) {
+      const activeTabId = groups[activeGroupId].activeTabId;
+      const active = activeTabId === null ? undefined : tabs[activeTabId];
+      if (active?.cold) tabs[active.id] = { ...active, cold: false };
+    }
+    const root =
+      remaining.length === order.length
+        ? space.root
+        : pruneGroupNodes(space.root, (id) => !groups[id]);
+    if (!root) return state;
+    spaces[spaceId] = { root, groups, activeGroupId };
+  }
+  return { tabs, spaces };
 }
 
 export function moveTabToGroup(

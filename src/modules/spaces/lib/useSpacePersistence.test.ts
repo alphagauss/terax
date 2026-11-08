@@ -127,4 +127,53 @@ describe("useSpacePersistence", () => {
       workbench: null,
     });
   });
+
+  it("回到空态时排在仍在写入的非空布局之后保存", async () => {
+    let releaseWrite!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    persistence.saveState
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(writing)
+      .mockReturnValueOnce(writing.then(() => undefined));
+
+    let flush!: () => Promise<void>;
+    function renderLayout(serialized: unknown) {
+      const state = {
+        spaces: { "space-a": {} },
+        serialized,
+      } as unknown as WorkbenchState;
+      act(() =>
+        root.render(
+          createElement(Harness, {
+            state,
+            onFlushReady: (ready) => {
+              flush = ready;
+            },
+          }),
+        ),
+      );
+    }
+
+    const nonempty = {
+      kind: "group",
+      tabs: [{ kind: "terminal" }],
+      activeTabIndex: 0,
+    };
+    renderLayout(null);
+    await flush();
+    renderLayout(nonempty);
+    const pending = flush();
+    renderLayout(null);
+    const clearing = flush();
+
+    expect(persistence.saveState.mock.calls).toEqual([
+      ["space-a", { version: 2, workbench: null }],
+      ["space-a", { version: 2, workbench: nonempty }],
+      ["space-a", { version: 2, workbench: null }],
+    ]);
+    releaseWrite();
+    await Promise.all([pending, clearing]);
+  });
 });

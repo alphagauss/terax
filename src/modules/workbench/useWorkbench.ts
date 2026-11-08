@@ -14,7 +14,7 @@ import {
   activeTabId,
   addTabToGroup,
   allTabs,
-  closeTab as closeTabInState,
+  closeTabs as closeTabsInState,
   createEmptySpaceWorkbench,
   findGroupForTab,
   groupIds,
@@ -198,6 +198,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   }, [activeSpaceId, booted, commit]);
 
   const tabs = useMemo(() => allTabs(state), [state]);
+  const getTabs = useCallback(() => allTabs(stateRef.current), []);
   const activeId = activeTabId(state, activeSpaceId) ?? 0;
   const revealTab = useCallback(
     (id: number, patch?: TabPatch) => {
@@ -592,8 +593,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [commit],
   );
 
-  const closeTab = useCallback(
-    (id: number) => commit((current) => closeTabInState(current, id)),
+  // 整批提交，关闭过程中不展示或保存中间布局。
+  const closeTabs = useCallback(
+    (ids: readonly number[]) =>
+      commit((current) => closeTabsInState(current, ids)),
     [commit],
   );
 
@@ -856,9 +859,9 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const tab = current.tabs[tabId];
       const owner = findGroupForTab(current, tabId);
       if (tab?.kind !== "terminal" || !owner) return;
-      closeTab(tabId);
+      closeTabs([tabId]);
     },
-    [closeTab],
+    [closeTabs],
   );
 
   const moveTabToSpace = useCallback(
@@ -936,7 +939,8 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openGitDiffTab,
     openCommitFileDiffTab,
     setAiDiffStatus,
-    closeTab,
+    closeTabs,
+    getTabs,
     updateTab,
     setDocumentDirty,
     setTerminalCwd,

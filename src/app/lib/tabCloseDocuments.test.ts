@@ -1,13 +1,13 @@
 /**
- * 本文件测试 Space 删除时共享文档的生命周期处理。
+ * 本文件测试批量关页时共享文档的生命周期处理。
  * 重点锁定仍有视图的文档不会被丢弃，失去最后视图的脏文档会被正确识别。
  */
 
 import type { Tab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
-import { spaceDeleteDocuments } from "./spaceDelete";
+import { tabCloseDocuments } from "./tabCloseDocuments";
 
-describe("Space deletion document lifecycle", () => {
+describe("tab close document lifecycle", () => {
   it("guards and discards only documents losing their final view", () => {
     const tabs: Tab[] = [
       {
@@ -39,7 +39,11 @@ describe("Space deletion document lifecycle", () => {
       },
     ];
 
-    expect(spaceDeleteDocuments(tabs, "deleted", { kind: "local" })).toEqual({
+    expect(
+      tabCloseDocuments(tabs, (tab) => tab.spaceId === "deleted", {
+        kind: "local",
+      }),
+    ).toEqual({
       dirtyDocuments: 1,
       discardPaths: ["C:\\work\\orphan.md"],
     });

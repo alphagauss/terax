@@ -47,8 +47,6 @@ import {
   type EditorPaneHandle,
   type EditorSourceSelection,
   discardSharedDocumentModel,
-  hasOtherDocumentView,
-  isDocumentTab,
   NewEditorDialog,
   saveAutoSaveDocumentsBeforeClose,
 } from "@/modules/editor";
@@ -151,7 +149,7 @@ import i18n from "@/i18n";
 import { reportError } from "@/lib/errors";
 import { CloseDialogs } from "./components/CloseDialogs";
 import { WorkspaceConnectionPlaceholder } from "./components/WorkspaceConnectionPlaceholder";
-import { spaceDeleteDocuments } from "./lib/spaceDelete";
+import { tabCloseDocuments } from "./lib/tabCloseDocuments";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
@@ -209,7 +207,8 @@ export default function App() {
     setAiDiffStatus,
     openGitDiffTab,
     openCommitFileDiffTab,
-    closeTab,
+    closeTabs,
+    getTabs,
     updateTab,
     setDocumentDirty,
     selectByIndex,
@@ -539,30 +538,33 @@ export default function App() {
     setActiveEditorHandle(editorRefs.current.get(activeId) ?? null);
   }, [activeId]);
 
-  const disposeTab = useCallback(
-    (id: number) => {
-      const closing = tabsRef.current.find((tab) => tab.id === id);
-      const next = closeTab(id);
-      if (next.tabs[id]) return;
-      if (
-        closing &&
-        isDocumentTab(closing) &&
-        !hasOtherDocumentView(Object.values(next.tabs), closing)
-      ) {
-        // 最后一个视图确认关闭即释放缓冲区，避免重新打开时恢复已放弃的编辑。
-        discardSharedDocumentModel(currentWorkspaceEnv(), closing.path);
+  const disposeTabs = useCallback(
+    (ids: readonly number[]) => {
+      const before = getTabs();
+      const next = closeTabs(ids);
+      const workspace = currentWorkspaceEnv();
+      const { discardPaths } = tabCloseDocuments(
+        before,
+        (tab) => !next.tabs[tab.id],
+        workspace,
+      );
+      // 最后一个视图确认关闭即释放缓冲区，避免重新打开时恢复已放弃的编辑。
+      for (const path of discardPaths) {
+        discardSharedDocumentModel(workspace, path);
       }
-      // Terminal-id maps are pruned by the effect below; tab-id handles need
-      // explicit cleanup here.
-      editorRefs.current.delete(id);
-      markdownNavigationRefs.current.delete(id);
-      findRefs.current.delete(id);
-      pendingContentNavigation.current.delete(id);
-      webPreviewRefs.current.delete(id);
+      // 终端会话由标签存活集合统一回收，其余页面句柄在这里释放。
+      for (const id of ids) {
+        if (next.tabs[id]) continue;
+        editorRefs.current.delete(id);
+        markdownNavigationRefs.current.delete(id);
+        findRefs.current.delete(id);
+        pendingContentNavigation.current.delete(id);
+        webPreviewRefs.current.delete(id);
+      }
     },
-    [closeTab],
+    [closeTabs, getTabs],
   );
-
+  const spaceSwitcherHeadingRef = useRef<HTMLSpanElement>(null);
   const {
     pendingCloseTab,
     pendingTerminalCloseTab,
@@ -574,8 +576,13 @@ export default function App() {
     cancelTerminalClose,
     confirmDeleteClose,
     cancelDeleteClose,
+    checkingAllTabs,
+    pendingCloseAllTabs,
+    handleCloseAllTabs,
+    cancelCloseAllTabs,
+    confirmCloseAllTabs,
     handlePathDeleted,
-  } = useTabCloseGuards({ tabs, disposeTab });
+  } = useTabCloseGuards({ getTabs, disposeTabs });
   const handleCloseRef = useRef(handleClose);
   handleCloseRef.current = handleClose;
   const requestEditorClose = useCallback((id: number) => {
@@ -1174,6 +1181,8 @@ export default function App() {
 
   const shortcutsDisabled = useCallback(
     (id: ShortcutId, e: KeyboardEvent) => {
+      // 批量确认期间，工作区快捷键不能在对话框后面改动目标页。
+      if (pendingCloseAllTabs) return true;
       if (
         zenMode &&
         (id === "view.sourceControl" ||
@@ -1238,6 +1247,7 @@ export default function App() {
       activeTab,
       captureActiveSelection,
       isEditorTab,
+      pendingCloseAllTabs,
       workspaceEnv.kind,
       zenMode,
     ],
@@ -1362,31 +1372,25 @@ export default function App() {
     (id: string) => {
       if (id === DEFAULT_SPACE_ID) return;
       const workspace = currentWorkspaceEnv();
-      const { discardPaths } = spaceDeleteDocuments(
-        tabsRef.current,
-        id,
+      const { discardPaths } = tabCloseDocuments(
+        getTabs(),
+        (tab) => tab.spaceId === id,
         workspace,
       );
       const nextSpaceId = useSpaces.getState().remove(id);
       if (!nextSpaceId) return;
       removeSpace(id, nextSpaceId);
-      if (discardPaths.length > 0) {
-        void import("@/modules/editor/lib/documentModel").then(
-          ({ discardSharedDocumentModel }) => {
-            for (const path of discardPaths) {
-              discardSharedDocumentModel(workspace, path);
-            }
-          },
-        );
+      for (const path of discardPaths) {
+        discardSharedDocumentModel(workspace, path);
       }
     },
-    [removeSpace],
+    [getTabs, removeSpace],
   );
 
   const handleDeleteSpace = useCallback(
     async (id: string) => {
       if (id === DEFAULT_SPACE_ID) return;
-      const terminalTabs = tabsRef.current.filter(
+      const terminalTabs = getTabs().filter(
         (tab): tab is TerminalTab =>
           tab.spaceId === id && tab.kind === "terminal",
       );
@@ -1395,9 +1399,9 @@ export default function App() {
           terminalTabs.map((tab) => terminalNeedsCloseConfirmation(tab.id)),
         )
       ).some(Boolean);
-      const { dirtyDocuments } = spaceDeleteDocuments(
-        tabsRef.current,
-        id,
+      const { dirtyDocuments } = tabCloseDocuments(
+        getTabs(),
+        (tab) => tab.spaceId === id,
         currentWorkspaceEnv(),
       );
       if (dirtyDocuments > 0 || busyTerminal) {
@@ -1406,7 +1410,7 @@ export default function App() {
       }
       deleteSpace(id);
     },
-    [deleteSpace],
+    [deleteSpace, getTabs],
   );
 
   const confirmSpaceDelete = useCallback(() => {
@@ -1464,6 +1468,10 @@ export default function App() {
       open={switcherOpen}
       onOpenChange={setSwitcherOpen}
       tabs={tabs}
+      headingRef={spaceSwitcherHeadingRef}
+      checkingAllTabs={checkingAllTabs}
+      confirmingCloseAllTabs={pendingCloseAllTabs !== null}
+      onCloseAllTabs={handleCloseAllTabs}
       onNewSpace={() => void handleNewSpace()}
       onNewSpaceFromDirectory={() => {
         setSwitcherOpen(false);
@@ -2324,6 +2332,12 @@ export default function App() {
             pendingDeleteTabs={pendingDeleteTabs}
             onCancelDeleteClose={cancelDeleteClose}
             onConfirmDeleteClose={confirmDeleteClose}
+            pendingCloseAllTabs={pendingCloseAllTabs}
+            onCancelCloseAllTabs={cancelCloseAllTabs}
+            onConfirmCloseAllTabs={confirmCloseAllTabs}
+            onRestoreCloseAllTabsFocus={() =>
+              spaceSwitcherHeadingRef.current?.focus()
+            }
             pendingAppClose={pendingAppClose}
             onCancelAppClose={cancelAppClose}
             onConfirmAppClose={confirmAppClose}

@@ -18,6 +18,7 @@ import { labelFor, TabIcon } from "@/modules/tabs";
 import type { Tab } from "@/modules/workbench";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import CopyXIcon from "@hugeicons/core-free-icons/CopyXIcon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
 import SquareLock01Icon from "@hugeicons/core-free-icons/SquareLock01Icon";
@@ -25,7 +26,14 @@ import SquareUnlock01Icon from "@hugeicons/core-free-icons/SquareUnlock01Icon";
 import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { InlineRename } from "./components/InlineRename";
@@ -38,6 +46,10 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tabs: Tab[];
+  headingRef: RefObject<HTMLSpanElement | null>;
+  checkingAllTabs: boolean;
+  confirmingCloseAllTabs: boolean;
+  onCloseAllTabs: () => void;
   onNewSpace: () => void;
   onNewSpaceFromDirectory: () => void;
   onToggleRootLock: (id: string) => void;
@@ -92,6 +104,10 @@ export function SpaceSwitcher({
   open,
   onOpenChange,
   tabs,
+  headingRef,
+  checkingAllTabs,
+  confirmingCloseAllTabs,
+  onCloseAllTabs,
   onNewSpace,
   onNewSpaceFromDirectory,
   onToggleRootLock,
@@ -280,6 +296,10 @@ export function SpaceSwitcher({
 
   if (!current) return null;
 
+  const closeAllLabel = t(
+    checkingAllTabs ? "checkingAllTabs" : "closeAllTabs",
+    { count: tabs.length },
+  );
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -311,6 +331,14 @@ export function SpaceSwitcher({
       <PopoverContent
         align="start"
         sideOffset={6}
+        onOpenAutoFocus={(event) => {
+          // 打开浮窗时先聚焦标题，避免默认落在首个批量关闭按钮上。
+          event.preventDefault();
+          headingRef.current?.focus();
+        }}
+        onInteractOutside={(event) => {
+          if (confirmingCloseAllTabs) event.preventDefault();
+        }}
         className="w-[20rem] gap-0 bg-transparent p-0 shadow-none ring-0 dark:ring-0"
       >
         <SpaceSwitcherMotion
@@ -322,12 +350,43 @@ export function SpaceSwitcher({
           {(present) => (
             <>
               <div className="relative flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
-                <span className="text-xs font-semibold text-foreground">
+                <span
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-xs font-semibold text-foreground"
+                >
                   {t("heading")}
                 </span>
-                {shortcut && (
-                  <Kbd className="h-5 bg-muted/70 text-[10px]">{shortcut}</Kbd>
-                )}
+                <div className="flex items-center gap-1">
+                  {shortcut && (
+                    <Kbd className="h-5 bg-muted/70 text-[10px]">
+                      {shortcut}
+                    </Kbd>
+                  )}
+                  <Hint content={closeAllLabel}>
+                    <Button
+                      type="button"
+                      variant="ghost-destructive-hover"
+                      size="icon-xs"
+                      aria-label={closeAllLabel}
+                      disabled={
+                        tabs.length === 0 ||
+                        checkingAllTabs ||
+                        confirmingCloseAllTabs
+                      }
+                      onClick={() => {
+                        headingRef.current?.focus();
+                        onCloseAllTabs();
+                      }}
+                    >
+                      <HugeiconsIcon
+                        icon={CopyXIcon}
+                        size={14}
+                        strokeWidth={1.75}
+                      />
+                    </Button>
+                  </Hint>
+                </div>
               </div>
               <div data-space-reveal className="relative -mx-0.5 min-w-0">
                 <div>

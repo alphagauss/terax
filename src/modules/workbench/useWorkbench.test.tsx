@@ -1,6 +1,5 @@
 /**
- * 本文件测试 Workbench 打开页面时的标签复用语义。
- * 重点锁定工作区 Git 差异默认使用临时预览槽，并可显式固定。
+ * 本文件测试 Workbench 的标签复用与批量关闭行为。
  */
 
 // @vitest-environment happy-dom
@@ -8,6 +7,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import { assertWorkbenchState, groupIds } from "./model";
 import { useWorkbench } from "./useWorkbench";
 
 let root: Root | null = null;
@@ -23,6 +23,35 @@ afterEach(() => {
   root = null;
   workbench = null;
   document.body.replaceChildren();
+});
+
+it("closes tabs across split groups and Spaces while keeping the active Space", () => {
+  root = createRoot(document.createElement("div"));
+  act(() => root?.render(createElement(Harness)));
+  act(() => {
+    const current = workbench;
+    if (!current) return;
+    current.createSpace("project");
+    const first = current.newTabInSpace("project");
+    current.splitTab(first, "right");
+    current.newTabInSpace("default");
+  });
+
+  expect(workbench?.tabs).toHaveLength(3);
+  expect(
+    workbench && groupIds(workbench.state.spaces.project.root),
+  ).toHaveLength(2);
+  act(() => workbench?.closeTabs(workbench.getTabs().map((tab) => tab.id)));
+
+  expect(workbench?.tabs).toEqual([]);
+  expect(workbench?.activeId).toBe(0);
+  expect(Object.keys(workbench?.state.spaces ?? {})).toEqual([
+    "default",
+    "project",
+  ]);
+  if (workbench) assertWorkbenchState(workbench.state);
+  act(() => workbench?.newTab());
+  expect(workbench?.tabs[0].spaceId).toBe("project");
 });
 
 describe("useWorkbench Git diff previews", () => {
