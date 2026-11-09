@@ -1,6 +1,6 @@
 /**
  * 本文件实现应用底部状态栏。
- * 负责组合工作区、诊断、Python、隐私、后台传输、SSH RTT、能力与流量、隧道和 Agent 状态，不持有各子系统业务状态。
+ * 负责组合工作区、诊断、Python、隐私、后台传输、Workspace 能力、SSH RTT 与流量、隧道和 Agent 状态。
  */
 
 import {
@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { ActivePath } from "./ActivePath";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
+import { WslCapabilityControl } from "./WslCapabilityControl";
 import "./status-bar.css";
 
 type Props = {
@@ -70,6 +71,7 @@ export function StatusBar({
         />
         <SshRttIndicator />
         <SshCapabilityControl />
+        <WslCapabilityControl />
         <ActivePath path={filePath ?? cwd} file={Boolean(filePath)} />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />

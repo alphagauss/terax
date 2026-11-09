@@ -3,6 +3,8 @@
  * 持久化隧道使用稳定配置 ID，运行时隧道 ID 只用于当前进程的资源控制。
  */
 
+import type { CapabilityReport } from "@/modules/workspace/capabilities";
+
 export type SshAuthMethod = "password" | "private_key" | "agent";
 
 export type SshGroup = {
@@ -89,34 +91,7 @@ export type SshHealthSnapshot = {
   taskFallbacks?: Array<{ task: string; reason: string }>;
 };
 
-export type SshCapabilityState =
-  | "unknown"
-  | "checking"
-  | "ready"
-  | "fallback"
-  | "unavailable";
-
-export type SshCommandCapability = {
-  id: string;
-  command: string;
-  state: "ready" | "missing" | "unsupported";
-  detail: string | null;
-};
-
-export type SshFeatureCapability = {
-  id: string;
-  state: SshCapabilityState;
-  backend: string | null;
-  commands: string[];
-};
-
-export type SshCapabilitySnapshot = {
-  epoch: number | null;
-  state: SshCapabilityState;
-  checkedAt: number | null;
-  commands: SshCommandCapability[];
-  features: SshFeatureCapability[];
-};
+export type SshCapabilitySnapshot = CapabilityReport & { epoch: number | null };
 
 export type HostKeyPrompt = {
   requestId: string;

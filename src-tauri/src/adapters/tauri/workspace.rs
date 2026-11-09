@@ -50,6 +50,23 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     service::wsl_default_distro().await
 }
 
+/// 检测当前进程启动时绑定的 WSL 发行版。
+#[tauri::command]
+pub async fn wsl_capabilities_probe(
+    process: tauri::State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
+) -> Result<terax_core::modules::workspace_capabilities::CapabilityReport, String> {
+    let WorkspaceEnv::Wsl { distro } = &process.bootstrap().env else {
+        return Err("capability probe requires a WSL Workspace".into());
+    };
+    #[cfg(windows)]
+    return terax_core::modules::workspace_capabilities::probe_wsl(distro).await;
+    #[cfg(not(windows))]
+    {
+        let _ = distro;
+        Err("WSL is only available on Windows".into())
+    }
+}
+
 /// 将桌面参数交给共享服务。
 #[tauri::command]
 pub fn wsl_home(distro: String) -> Result<String, String> {

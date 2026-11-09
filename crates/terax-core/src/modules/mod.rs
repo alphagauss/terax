@@ -13,4 +13,6 @@ pub mod shell;
 pub mod storage;
 pub mod workspace;
 #[cfg(feature = "workspace-runtime")]
+pub mod workspace_capabilities;
+#[cfg(feature = "workspace-runtime")]
 pub mod workspace_identity;

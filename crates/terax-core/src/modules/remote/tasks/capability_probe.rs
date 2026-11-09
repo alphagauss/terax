@@ -3,9 +3,9 @@
 //! 每个连接 epoch 只在前台资源就绪后执行一次固定脚本；探测失败保留 lazy probe，
 //! 完整报告才允许替换任务 capability。用户手动重检可以在同一 epoch 重新启用依赖。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::modules::remote::models::{
     SshCapabilitySnapshot, SshCapabilityState, SshCommandCapability, SshCommandCapabilityState,
@@ -13,24 +13,45 @@ use crate::modules::remote::models::{
 };
 use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
 
+use crate::modules::workspace_capabilities::{
+    checked_at, feature, parse_command_report, report_state, ARCHIVE_COMMANDS, GIT_COMMANDS,
+    PASTE_COMMANDS, SYNC_COMMANDS,
+};
+
 use super::{TaskKind, TASK_OUTPUT_LIMIT};
 
-const SOURCE: &str = include_str!("scripts/capability_probe.sh");
-const MARKER: &[u8] = b"TERAX_CAPABILITIES_V1";
+const SOURCE: &str = concat!(
+    include_str!("../../workspace_capabilities_common.sh"),
+    include_str!("scripts/capability_probe.sh")
+);
 const TIMEOUT: Duration = Duration::from_secs(20);
 const COMMANDS: &[(&str, &str)] = &[
     ("bash", "bash"),
+    ("sh", "sh"),
     ("setsid", "setsid --wait"),
+    ("git", "git"),
+    ("head", "head -c"),
+    ("cat", "cat"),
+    ("wc", "wc -c"),
     ("find", "find -printf"),
+    ("find_delete", "find -P -xdev -delete"),
     ("readlink", "readlink -f"),
-    ("stat", "stat -c"),
+    ("stat", "stat -c / --printf"),
     ("awk", "awk"),
     ("rm", "rm -rf --"),
     ("mktemp", "mktemp -d"),
+    ("cp_archive", "cp -a"),
+    ("chmod_recursive", "chmod -R u+rwX"),
+    ("python3_renameat2", "python3 / ctypes / renameat2"),
+    ("tar_gzip", "tar -czf / -xzf"),
+    ("tar_sync", "tar --null --no-recursion"),
+    ("gzip", "gzip"),
     ("mkdir", "mkdir -p --"),
     ("chmod", "chmod --"),
     ("dd", "dd conv=fsync"),
     ("mv", "mv -T"),
+    ("mv_commit", "mv -T -n / -n -t"),
+    ("touch_time", "touch -a / -m -d"),
     ("ln", "ln -T"),
     ("sha256", "SHA-256"),
     ("rg_content", "rg --json"),
@@ -110,65 +131,8 @@ fn reset_probe(workspace: &RemoteWorkspace) {
     workspace.emit_capability_snapshot();
 }
 
-fn checked_at() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 fn parse(bytes: &[u8]) -> Result<Vec<SshCommandCapability>, String> {
-    let mut fields = bytes.split(|byte| *byte == 0);
-    if fields.next() != Some(MARKER) {
-        return Err("capability probe marker is invalid".into());
-    }
-    let expected: HashMap<_, _> = COMMANDS.iter().copied().collect();
-    let mut seen = HashSet::new();
-    let mut commands = Vec::with_capacity(COMMANDS.len());
-    loop {
-        let id = decode(fields.next(), "command id")?;
-        if id == "END" {
-            break;
-        }
-        let command = expected
-            .get(id.as_str())
-            .ok_or_else(|| "capability probe returned an unknown command".to_string())?;
-        if !seen.insert(id.clone()) {
-            return Err("capability probe returned a duplicate command".into());
-        }
-        let state = match decode(fields.next(), "command state")?.as_str() {
-            "ready" => SshCommandCapabilityState::Ready,
-            "missing" => SshCommandCapabilityState::Missing,
-            "unsupported" => SshCommandCapabilityState::Unsupported,
-            _ => return Err("capability probe command state is invalid".into()),
-        };
-        let detail = decode(fields.next(), "command detail")?;
-        commands.push(SshCommandCapability {
-            id,
-            command: (*command).to_string(),
-            state,
-            detail: (!detail.is_empty()).then_some(detail),
-        });
-    }
-    if seen.len() != COMMANDS.len() {
-        return Err("capability probe omitted a required command".into());
-    }
-    if fields.any(|field| !field.is_empty()) {
-        return Err("capability probe returned trailing fields".into());
-    }
-    commands.sort_by_key(|command| {
-        COMMANDS
-            .iter()
-            .position(|(id, _)| *id == command.id)
-            .unwrap_or(usize::MAX)
-    });
-    Ok(commands)
-}
-
-fn decode(field: Option<&[u8]>, name: &str) -> Result<String, String> {
-    std::str::from_utf8(field.unwrap_or_default())
-        .map(str::to_string)
-        .map_err(|_| format!("capability probe {name} is not UTF-8"))
+    parse_command_report(bytes, COMMANDS)
 }
 
 fn build_snapshot(commands: Vec<SshCommandCapability>) -> SshCapabilitySnapshot {
@@ -178,6 +142,18 @@ fn build_snapshot(commands: Vec<SshCommandCapability>) -> SshCapabilitySnapshot 
             .any(|command| command.id == id && command.state == SshCommandCapabilityState::Ready)
     };
     let all = |ids: &[&str]| ids.iter().all(|id| ready(id));
+    // SSH 归档与同步还会执行远端提交和清理，WSL 的对应步骤由宿主完成。
+    let commit = [
+        "sh",
+        "find_delete",
+        "stat",
+        "chmod",
+        "mkdir",
+        "mv_commit",
+        "touch_time",
+    ];
+    let archive: Vec<_> = ARCHIVE_COMMANDS.iter().chain(&commit).copied().collect();
+    let sync: Vec<_> = SYNC_COMMANDS.iter().chain(&commit).copied().collect();
     let mut features = Vec::new();
     let mut push =
         |id: &str, state: SshCapabilityState, backend: Option<&str>, command_ids: &[&str]| {
@@ -310,22 +286,15 @@ fn build_snapshot(commands: Vec<SshCommandCapability>) -> SshCapabilitySnapshot 
         &["rg_files", "find", "readlink"],
     );
 
-    let state = if features
-        .iter()
-        .any(|feature| feature.state == SshCapabilityState::Unavailable)
-    {
-        SshCapabilityState::Unavailable
-    } else if features
-        .iter()
-        .any(|feature| feature.state == SshCapabilityState::Fallback)
-    {
-        SshCapabilityState::Fallback
-    } else {
-        SshCapabilityState::Ready
-    };
+    features.extend([
+        feature(&commands, "explorer_paste", PASTE_COMMANDS, "bash", None),
+        feature(&commands, "git", GIT_COMMANDS, "git", None),
+        feature(&commands, "archive_transfer", &archive, "tar", None),
+        feature(&commands, "folder_sync", &sync, "tar", None),
+    ]);
     SshCapabilitySnapshot {
         epoch: None,
-        state,
+        state: report_state(&features),
         checked_at: Some(checked_at()),
         commands,
         features,
@@ -479,21 +448,7 @@ pub(crate) fn overlay_runtime_fallbacks(
             feature.backend = None;
         }
     }
-    snapshot.state = if snapshot
-        .features
-        .iter()
-        .any(|feature| feature.state == SshCapabilityState::Unavailable)
-    {
-        SshCapabilityState::Unavailable
-    } else if snapshot
-        .features
-        .iter()
-        .any(|feature| feature.state == SshCapabilityState::Fallback)
-    {
-        SshCapabilityState::Fallback
-    } else {
-        SshCapabilityState::Ready
-    };
+    snapshot.state = report_state(&snapshot.features);
 }
 
 #[cfg(test)]
@@ -542,6 +497,46 @@ mod tests {
         assert_eq!(search.state, SshCapabilityState::Fallback);
         assert_eq!(search.backend.as_deref(), Some("grep"));
         assert_eq!(snapshot.state, SshCapabilityState::Fallback);
+    }
+
+    #[test]
+    fn missing_python_rename_disables_only_the_paste_feature() {
+        for python_state in [
+            SshCommandCapabilityState::Ready,
+            SshCommandCapabilityState::Missing,
+            SshCommandCapabilityState::Unsupported,
+        ] {
+            let commands = COMMANDS
+                .iter()
+                .map(|(id, command)| SshCommandCapability {
+                    id: (*id).into(),
+                    command: (*command).into(),
+                    state: if *id == "python3_renameat2" {
+                        python_state
+                    } else {
+                        SshCommandCapabilityState::Ready
+                    },
+                    detail: None,
+                })
+                .collect();
+            let snapshot = build_snapshot(commands);
+            let expected = if python_state == SshCommandCapabilityState::Ready {
+                SshCapabilityState::Ready
+            } else {
+                SshCapabilityState::Unavailable
+            };
+            assert_eq!(snapshot.state, expected);
+            for feature in snapshot.features {
+                assert_eq!(
+                    feature.state,
+                    if feature.id == "explorer_paste" {
+                        expected
+                    } else {
+                        SshCapabilityState::Ready
+                    }
+                );
+            }
+        }
     }
 
     #[test]

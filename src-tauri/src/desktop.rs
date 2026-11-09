@@ -307,6 +307,7 @@ pub fn run() {
             external_agent::external_agent_cancel,
             commands::workspace::wsl_list_distros,
             commands::workspace::wsl_default_distro,
+            commands::workspace::wsl_capabilities_probe,
             commands::workspace::wsl_home,
             commands::workspace::workspace_authorize,
             commands::workspace::workspace_prepare_default_root,

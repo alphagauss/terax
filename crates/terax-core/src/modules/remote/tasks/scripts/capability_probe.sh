@@ -6,69 +6,23 @@
 set -u
 LC_ALL=C
 
-terax_emit() {
-  printf '%s\000%s\000%s\000' "$1" "$2" "$3"
-}
-
-terax_simple_probe() {
-  local id=$1 tool=$2
-  shift 2
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    terax_emit "$id" missing ''
-  elif "$@" >/dev/null 2>&1; then
-    terax_emit "$id" ready ''
-  else
-    terax_emit "$id" unsupported ''
-  fi
-}
-
 printf 'TERAX_CAPABILITIES_V1\000'
 terax_emit bash ready ''
+terax_simple_probe sh sh sh -c 'exit 0'
 terax_simple_probe setsid setsid setsid --wait /bin/sh -c 'exit 0'
 
 terax_simple_probe find find find /dev/null -maxdepth 0 -printf ''
+terax_simple_probe find_delete find find -P /dev/null -xdev -depth -type d -empty -delete
 terax_simple_probe readlink readlink readlink -f -- /dev/null
-terax_simple_probe stat stat stat -c '%d:%i:%s:%y:%z' -- /dev/null
+terax_simple_probe stat stat terax_check_stat
 terax_simple_probe awk awk awk 'BEGIN { exit 0 }'
-if ! command -v rm >/dev/null 2>&1; then
-  rm_state=missing
-elif rm -rf -- /tmp/terax-capability-probe-does-not-exist >/dev/null 2>&1; then
-  rm_state=ready
-else
-  rm_state=unsupported
-fi
-terax_emit rm "$rm_state" ''
-
-probe_dir=
-if ! command -v mktemp >/dev/null 2>&1; then
-  terax_emit mktemp missing ''
-elif [ "$rm_state" != ready ]; then
-  terax_emit mktemp unsupported ''
-else
-  probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/terax-capability-XXXXXXXX" 2>/dev/null) || probe_dir=
-  if [ -n "$probe_dir" ]; then
-    terax_emit mktemp ready ''
-  else
-    terax_emit mktemp unsupported ''
-  fi
-fi
-
-terax_probe_in_temp() {
-  local id=$1 tool=$2
-  shift 2
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    terax_emit "$id" missing ''
-  elif [ -z "$probe_dir" ]; then
-    terax_emit "$id" unsupported ''
-  elif "$@" >/dev/null 2>&1; then
-    terax_emit "$id" ready ''
-  else
-    terax_emit "$id" unsupported ''
-  fi
-}
+terax_begin_probe
 
 terax_probe_in_temp mkdir mkdir mkdir -p -- "$probe_dir/a/b"
-terax_probe_in_temp chmod chmod chmod 700 -- "$probe_dir"
+terax_probe_paste
+terax_probe_git
+terax_probe_archive
+terax_probe_in_temp chmod chmod chmod 00700 -- "$probe_dir"
 terax_probe_in_temp dd dd dd if=/dev/null of="$probe_dir/synced" bs=1 count=0 conv=fsync
 
 if [ -n "$probe_dir" ]; then
@@ -77,20 +31,22 @@ if [ -n "$probe_dir" ]; then
 fi
 terax_probe_in_temp mv mv mv -T -- "$probe_dir/mv-source" "$probe_dir/mv-target"
 
+terax_check_mv_commit() {
+  mv -T -n -- "$probe_dir/mv-target" "$probe_dir/mv-pending" &&
+    mv -n -t "$probe_dir/a" -- "$probe_dir/mv-pending"
+}
+terax_probe_in_temp mv_commit mv terax_check_mv_commit
+terax_check_touch_time() {
+  touch -a -d @0 -- "$probe_dir/time-target" && touch -m -d @0 -- "$probe_dir/time-target"
+}
+terax_probe_in_temp touch_time touch terax_check_touch_time
+
 if [ -n "$probe_dir" ]; then
   : >"$probe_dir/ln-target"
 fi
 terax_probe_in_temp ln ln ln -T -- "$probe_dir/ln-target" "$probe_dir/ln-link"
 
-if command -v sha256sum >/dev/null 2>&1 && sha256sum -- /dev/null >/dev/null 2>&1; then
-  terax_emit sha256 ready sha256sum
-elif command -v shasum >/dev/null 2>&1 && shasum -a 256 -- /dev/null >/dev/null 2>&1; then
-  terax_emit sha256 ready shasum
-elif command -v openssl >/dev/null 2>&1 && openssl dgst -sha256 -r /dev/null >/dev/null 2>&1; then
-  terax_emit sha256 ready openssl
-else
-  terax_emit sha256 missing ''
-fi
+terax_probe_sha256
 
 if ! command -v rg >/dev/null 2>&1; then
   terax_emit rg_content missing ''
@@ -126,7 +82,4 @@ else
   fi
 fi
 
-if [ -n "$probe_dir" ]; then
-  rm -rf -- "$probe_dir" >/dev/null 2>&1 || true
-fi
 printf 'END\000'

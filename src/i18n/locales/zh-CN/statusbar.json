@@ -194,19 +194,31 @@
     "commandStates": {
       "ready": "就绪",
       "missing": "缺失",
-      "unsupported": "参数不兼容"
+      "unsupported": "不兼容"
     },
     "features": {
       "file_version": "文件版本",
+      "file_properties": "文件属性",
       "tree_listing": "递归树枚举",
       "directory_summary": "目录汇总",
       "file_write": "条件文件写入",
       "create_directory": "目录创建",
+      "explorer_paste": "文件树粘贴",
+      "git": "Git",
+      "archive_transfer": "归档传输",
+      "folder_sync": "目录同步",
       "agent_processes": "可交互 Agent 进程",
       "recursive_delete": "递归删除",
       "content_search": "内容搜索",
       "file_listing": "快速文件枚举"
     }
+  },
+  "wslCapabilities": {
+    "title": "WSL 发行版能力",
+    "aria": "WSL 发行版能力：{{state}}",
+    "nativePaste": "WSL 原生目录粘贴",
+    "probeFailed": "无法检测当前 WSL 发行版，可重新检测。",
+    "hostMounts": "粘贴到 Windows 挂载盘由宿主执行，无需在 WSL 中安装 Python。"
   },
   "tunnels": {
     "label": "隧道",
