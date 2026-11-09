@@ -21,19 +21,13 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import CopyXIcon from "@hugeicons/core-free-icons/CopyXIcon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
+import ListChevronsDownUpIcon from "@hugeicons/core-free-icons/ListChevronsDownUpIcon";
 import SquareLock01Icon from "@hugeicons/core-free-icons/SquareLock01Icon";
 import SquareUnlock01Icon from "@hugeicons/core-free-icons/SquareUnlock01Icon";
 import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  type RefObject,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type RefObject, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { InlineRename } from "./components/InlineRename";
@@ -126,9 +120,13 @@ export function SpaceSwitcher({
   const rename = useSpaces((s) => s.rename);
   const shortcut = useShortcutLabel("space.overview");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(() =>
-    activeId ? new Set([activeId]) : new Set(),
+  // 用户调整过展开状态后，重新打开浮窗时保留该状态。
+  const [expansion, setExpansion] = useState<Set<string> | null>(null);
+  const defaultExpanded = useMemo(
+    () => new Set(activeId ? [activeId] : []),
+    [activeId],
   );
+  const expanded = expansion ?? defaultExpanded;
 
   const drag = useRef<DragState | null>(null);
   const dropRef = useRef<DropTarget | null>(null);
@@ -169,16 +167,9 @@ export function SpaceSwitcher({
       ? (spaces.find((s) => s.id === dragging.id) ?? null)
       : null;
 
-  useEffect(() => {
-    if (!open || !activeId) return;
-    setExpanded((prev) =>
-      prev.has(activeId) ? prev : new Set(prev).add(activeId),
-    );
-  }, [open, activeId]);
-
   const toggleExpand = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
+    setExpansion((prev) => {
+      const next = new Set(prev ?? defaultExpanded);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
@@ -276,11 +267,12 @@ export function SpaceSwitcher({
           : dt.spaceId;
       motion.current?.prepareMove(`tab:${st.id}`);
       if (targetSpace)
-        setExpanded((previous) =>
-          previous.has(targetSpace)
+        setExpansion((previous) => {
+          const current = previous ?? defaultExpanded;
+          return current.has(targetSpace)
             ? previous
-            : new Set(previous).add(targetSpace),
-        );
+            : new Set(current).add(targetSpace);
+        });
       if (dt.kind === "tab") onReorderTab(st.id as number, dt.tabId, dt.edge);
       else if (dt.kind === "into-space")
         onMoveTabToSpace(st.id as number, dt.spaceId);
@@ -332,7 +324,7 @@ export function SpaceSwitcher({
         align="start"
         sideOffset={6}
         onOpenAutoFocus={(event) => {
-          // 打开浮窗时先聚焦标题，避免默认落在首个批量关闭按钮上。
+          // 打开浮窗时先聚焦标题，避免默认落在批量操作按钮上。
           event.preventDefault();
           headingRef.current?.focus();
         }}
@@ -363,6 +355,25 @@ export function SpaceSwitcher({
                       {shortcut}
                     </Kbd>
                   )}
+                  <Hint content={t("collapseAll")}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t("collapseAll")}
+                      onClick={() =>
+                        setExpansion((prev) =>
+                          prev?.size === 0 ? prev : new Set(),
+                        )
+                      }
+                    >
+                      <HugeiconsIcon
+                        icon={ListChevronsDownUpIcon}
+                        size={14}
+                        strokeWidth={1.75}
+                      />
+                    </Button>
+                  </Hint>
                   <Hint content={closeAllLabel}>
                     <Button
                       type="button"
