@@ -20,6 +20,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -37,6 +38,7 @@ import {
 } from "@/components/controls/alert-dialog";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
+import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
 import { FileTimeline } from "@/modules/git-history/FileTimeline";
@@ -95,6 +97,11 @@ import {
 } from "@/modules/explorer/lib/contextActions";
 import type { GitStatusCode } from "@/modules/explorer/lib/gitStatusUtils";
 import { folderIconUrl } from "@/modules/explorer/lib/iconResolver";
+import {
+  explorerClipboardCommand,
+  explorerPasteError,
+  useExplorerClipboard,
+} from "@/modules/explorer/lib/useExplorerClipboard";
 import { useExplorerDnd } from "@/modules/explorer/lib/useExplorerDnd";
 import { useExplorerFileDrop } from "@/modules/explorer/lib/useExplorerFileDrop";
 import {
@@ -628,6 +635,13 @@ export const FileExplorer = memo(
       isDir: isDirAt,
       onCopied: tree.refresh,
     });
+    const clipboard = useExplorerClipboard(workspaceEnv, fileDrop.pasteFiles);
+    const pasteView = useRef({ rootPath, expanded: tree.expanded });
+    pasteView.current = { rootPath, expanded: tree.expanded };
+    const [pasteSelection, setPasteSelection] = useState<{
+      root: string;
+      path: string;
+    } | null>(null);
 
     const dropTargetDir = dnd.dropTargetDir ?? fileDrop.externalTargetDir;
     const rootIsDropTarget =
@@ -655,6 +669,17 @@ export const FileExplorer = memo(
         `file-tree-item-${encodeURIComponent(path)}`,
       );
     }, []);
+
+    useEffect(() => {
+      if (!pasteSelection) return;
+      if (pasteSelection.root !== rootPath) {
+        setPasteSelection(null);
+      } else if (entryIndexByPath.has(pasteSelection.path)) {
+        setPasteSelection(null);
+        setSelectedPath(pasteSelection.path);
+        requestAnimationFrame(() => scrollEntryIntoView(pasteSelection.path));
+      }
+    }, [entryIndexByPath, pasteSelection, rootPath, scrollEntryIntoView]);
 
     const [lastSyncedActivePath, setLastSyncedActivePath] = useViewState<
       string | null
@@ -880,6 +905,62 @@ export const FileExplorer = memo(
       selectedPath ? isDirAt(selectedPath) : undefined,
     );
 
+    /** 右键以菜单落点为准，键盘以文件树当前选中项为准。 */
+    const pasteInto = async (destination: string, system = false) => {
+      let result: Awaited<ReturnType<typeof clipboard.paste>>;
+      try {
+        result = await clipboard.paste(
+          destination,
+          (path) => (path === rootPath ? path : parentOf(path, rootPath)),
+          system,
+        );
+      } catch (error) {
+        reportError(explorerPasteError(t, error), { error });
+        return;
+      }
+      if (!result) return;
+      const { source, targetDir, name } = result;
+      const path = tree.joinPath(targetDir, name);
+      const moved = source.mode === "cut" && path !== source.path;
+      if (moved) onPathRenamed?.(source.path, path);
+      if (pasteView.current.rootPath !== rootPath) return;
+      const sourceParent = parentOf(source.path, rootPath);
+      if (
+        moved &&
+        sourceParent !== targetDir &&
+        (sourceParent === rootPath ||
+          pasteView.current.expanded.has(sourceParent))
+      ) {
+        tree.refresh(sourceParent);
+      }
+      if (targetDir === rootPath || pasteView.current.expanded.has(targetDir)) {
+        tree.refresh(targetDir);
+      }
+      for (const directory of ancestorDirs(rootPath, path))
+        tree.expand(directory);
+      setPasteSelection({ root: rootPath, path });
+    };
+
+    const renderPasteActions = (destination: string) => (
+      <>
+        <ContextMenuItem
+          disabled={clipboard.pasting}
+          onSelect={() => void pasteInto(destination)}
+        >
+          {t("menu.paste")}
+          <ContextMenuShortcut>{fmtShortcut(MOD_KEY, "V")}</ContextMenuShortcut>
+        </ContextMenuItem>
+        {clipboard.entry && (
+          <ContextMenuItem
+            disabled={clipboard.pasting}
+            onSelect={() => void pasteInto(destination, true)}
+          >
+            {t("menu.pasteSystemFiles")}
+          </ContextMenuItem>
+        )}
+      </>
+    );
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (tree.renaming || tree.pendingCreate || isSearchOpen) return;
       const target = e.target as HTMLElement;
@@ -889,14 +970,21 @@ export const FileExplorer = memo(
         target.isContentEditable
       )
         return;
-      const isPaste =
-        !e.altKey &&
-        (((e.ctrlKey || e.metaKey) &&
-          (e.code === "KeyV" || e.key.toLowerCase() === "v")) ||
-          (e.shiftKey && e.key === "Insert"));
-      if (isPaste) {
-        e.preventDefault();
-        void fileDrop.pasteFiles(toolbarCreateParent);
+      const command = explorerClipboardCommand(e);
+      if (command) {
+        if (command === "cancelCut") {
+          if (clipboard.cancelCut()) e.preventDefault();
+        } else {
+          e.preventDefault();
+          if (command === "paste" || command === "pasteSystem") {
+            if (!e.repeat)
+              void pasteInto(toolbarCreateParent, command === "pasteSystem");
+          } else if (selectedPath) {
+            const isDir = isDirAt(selectedPath);
+            if (isDir !== undefined)
+              clipboard.remember(command, selectedPath, isDir);
+          }
+        }
         return;
       }
       if (entryPaths.length === 0) return;
@@ -1006,6 +1094,10 @@ export const FileExplorer = memo(
               renameInProgress={renameInProgress}
               isSelected={selectedPath === row.path}
               isContextTarget={contextMenuPath === row.path}
+              isCut={
+                clipboard.entry?.mode === "cut" &&
+                clipboard.entry.path === row.path
+              }
               isRenaming={row.kind === "rename"}
               isDropTarget={dropTargetDir === row.path}
               onOpenFile={onOpenFile}
@@ -1369,7 +1461,37 @@ export const FileExplorer = memo(
                   onOpenTerminal={onRevealInTerminal}
                   onOpen={(path) => onOpenFile(path, false)}
                 />
-                {menuTarget.isDir && <ContextMenuSeparator />}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() =>
+                    clipboard.remember("cut", menuTarget.path, menuTarget.isDir)
+                  }
+                >
+                  {t("menu.cut")}
+                  <ContextMenuShortcut>
+                    {fmtShortcut(MOD_KEY, "X")}
+                  </ContextMenuShortcut>
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() =>
+                    clipboard.remember(
+                      "copy",
+                      menuTarget.path,
+                      menuTarget.isDir,
+                    )
+                  }
+                >
+                  {t("menu.copy")}
+                  <ContextMenuShortcut>
+                    {fmtShortcut(MOD_KEY, "C")}
+                  </ContextMenuShortcut>
+                </ContextMenuItem>
+                {renderPasteActions(
+                  menuTarget.isDir
+                    ? menuTarget.path
+                    : parentOf(menuTarget.path, rootPath),
+                )}
+                <ContextMenuSeparator />
                 <ContextMenuItem
                   onSelect={() => tree.beginRename(menuTarget.path)}
                 >
@@ -1398,11 +1520,6 @@ export const FileExplorer = memo(
                   }
                 >
                   {t("menu.newFolder")}
-                </ContextMenuItem>
-                <ContextMenuItem
-                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
-                >
-                  {t("menu.paste")}
                 </ContextMenuItem>
                 {!menuTarget.isDir && <ContextMenuSeparator />}
                 {!menuTarget.isDir &&
@@ -1499,11 +1616,7 @@ export const FileExplorer = memo(
                 >
                   {t("menu.newFolder")}
                 </ContextMenuItem>
-                <ContextMenuItem
-                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
-                >
-                  {t("menu.paste")}
-                </ContextMenuItem>
+                {renderPasteActions(rootPath)}
                 {workspaceEnv.kind !== "local" && <ContextMenuSeparator />}
                 {workspaceEnv.kind !== "local"
                   ? (["files", "folders"] as const).map((kind) => (

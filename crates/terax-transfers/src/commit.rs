@@ -11,6 +11,11 @@ use std::time::Duration;
 use futures_util::stream::{self, StreamExt};
 use russh_sftp::client::SftpSession;
 
+use terax_core::modules::fs::cleanup::{
+    make_directory_writable as make_local_directory_writable,
+    remove_owned_path as remove_local_path_blocking,
+};
+use terax_core::modules::fs::no_replace::rename_no_replace;
 use terax_core::modules::remote::session::{join_remote, shell_quote, RemoteWorkspace};
 
 use super::cleanup_ticket::{CleanupTicket, CleanupTicketTarget};
@@ -943,216 +948,6 @@ fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(source, target)
 }
 
-/// 删除经过任务所有权校验的本地临时树。
-///
-/// 遍历使用显式目录列表，避免超深目录耗尽线程栈；只修复任务私有
-/// 目录和普通文件的所需权限，符号链接始终作为链接本身删除。
-fn remove_local_path_blocking(path: &Path) -> std::io::Result<()> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() {
-        return remove_local_symlink(path, &metadata.file_type());
-    }
-    if !metadata.is_dir() {
-        return remove_local_non_directory(path);
-    }
-
-    let cleanup_device = local_cleanup_device(path, &metadata)?;
-    make_local_directory_writable(path, &metadata.permissions())?;
-    let mut directories = vec![path.to_path_buf()];
-    let mut index = 0;
-    while index < directories.len() {
-        let directory = directories[index].clone();
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
-            let child = entry.path();
-            let file_type = entry.file_type()?;
-            if file_type.is_symlink() {
-                remove_local_symlink(&child, &file_type)?;
-            } else if file_type.is_dir() {
-                // chmod 前重新读取不跟随链接的元数据，避免使用过期的 DirEntry 类型。
-                let metadata = match std::fs::symlink_metadata(&child) {
-                    Ok(metadata) => metadata,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(error) => return Err(error),
-                };
-                if metadata.file_type().is_symlink() {
-                    remove_local_symlink(&child, &metadata.file_type())?;
-                } else if metadata.is_dir() {
-                    if !local_cleanup_device_matches(&cleanup_device, &metadata) {
-                        continue;
-                    }
-                    make_local_directory_writable(&child, &metadata.permissions())?;
-                    directories.push(child);
-                } else {
-                    remove_local_non_directory(&child)?;
-                }
-            } else {
-                remove_local_non_directory(&child)?;
-            }
-        }
-        index += 1;
-    }
-    for directory in directories.into_iter().rev() {
-        match std::fs::remove_dir(&directory) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-struct LocalCleanupDevice(u64);
-
-#[cfg(not(unix))]
-struct LocalCleanupDevice;
-
-#[cfg(unix)]
-/// 记录清理根所在设备，并拒绝把挂载点本身当成任务私有目录删除。
-fn local_cleanup_device(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-) -> std::io::Result<LocalCleanupDevice> {
-    use std::os::unix::fs::MetadataExt;
-
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "transfer cleanup root has no parent",
-        )
-    })?;
-    let device = metadata.dev();
-    if std::fs::symlink_metadata(parent)?.dev() != device {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "refused to clean a transfer path mounted on another filesystem",
-        ));
-    }
-    Ok(LocalCleanupDevice(device))
-}
-
-#[cfg(not(unix))]
-/// 非 Unix 平台没有可移植的设备号，仍依赖不跟随符号链接的遍历边界。
-fn local_cleanup_device(
-    _path: &Path,
-    _metadata: &std::fs::Metadata,
-) -> std::io::Result<LocalCleanupDevice> {
-    Ok(LocalCleanupDevice)
-}
-
-#[cfg(unix)]
-/// 判断子目录是否仍位于清理根的同一文件系统。
-fn local_cleanup_device_matches(device: &LocalCleanupDevice, metadata: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    metadata.dev() == device.0
-}
-
-#[cfg(not(unix))]
-/// 非 Unix 平台不执行设备号比较。
-fn local_cleanup_device_matches(
-    _device: &LocalCleanupDevice,
-    _metadata: &std::fs::Metadata,
-) -> bool {
-    true
-}
-
-#[cfg(not(windows))]
-fn remove_local_symlink(path: &Path, _file_type: &std::fs::FileType) -> std::io::Result<()> {
-    remove_local_file(path)
-}
-
-#[cfg(windows)]
-fn remove_local_symlink(path: &Path, file_type: &std::fs::FileType) -> std::io::Result<()> {
-    use std::os::windows::fs::FileTypeExt;
-
-    let result = if file_type.is_symlink_dir() {
-        std::fs::remove_dir(path)
-    } else {
-        std::fs::remove_file(path)
-    };
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn remove_local_file(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(windows)]
-#[allow(clippy::permissions_set_readonly_false)]
-fn remove_local_non_directory(path: &Path) -> std::io::Result<()> {
-    match remove_local_file(path) {
-        Ok(()) => return Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
-        Err(error) => return Err(error),
-    }
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        return remove_local_symlink(path, &metadata.file_type());
-    }
-    if metadata.is_dir() {
-        return Err(std::io::Error::other(
-            "transfer cleanup entry changed to a directory",
-        ));
-    }
-    let mut permissions = metadata.permissions();
-    if !permissions.readonly() {
-        return remove_local_file(path);
-    }
-    permissions.set_readonly(false);
-    std::fs::set_permissions(path, permissions)?;
-    remove_local_file(path)
-}
-
-#[cfg(not(windows))]
-fn remove_local_non_directory(path: &Path) -> std::io::Result<()> {
-    remove_local_file(path)
-}
-
-#[cfg(unix)]
-fn make_local_directory_writable(
-    path: &Path,
-    original: &std::fs::Permissions,
-) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mode = original.mode();
-    if mode & 0o700 == 0o700 {
-        return Ok(());
-    }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o700))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-#[allow(clippy::permissions_set_readonly_false)]
-fn make_local_directory_writable(
-    path: &Path,
-    original: &std::fs::Permissions,
-) -> std::io::Result<()> {
-    if !original.readonly() {
-        return Ok(());
-    }
-    let mut writable = original.clone();
-    // Windows 只暴露 readonly 属性，不存在 Unix mode；清除此属性不会扩大 ACL 权限。
-    writable.set_readonly(false);
-    std::fs::set_permissions(path, writable)?;
-    Ok(())
-}
-
 /// 将已捕获的目录时间和权限应用到保持身份的目标。
 fn apply_local_metadata(destination: &Path, metadata: &std::fs::Metadata) -> std::io::Result<()> {
     if let (Ok(accessed), Ok(modified)) = (metadata.accessed(), metadata.modified()) {
@@ -1298,78 +1093,6 @@ pub(crate) fn schedule_local_cleanup(task_id: &str, paths: Vec<PathBuf>) {
             log::warn!("local transfer cleanup expired for task {task_id}");
         }
     });
-}
-
-#[cfg(windows)]
-fn rename_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
-
-    let source: Vec<u16> = source
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let target: Vec<u16> = target
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let result = unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH) };
-    if result == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn rename_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    let source = CString::new(source.as_os_str().as_bytes())?;
-    let target = CString::new(target.as_os_str().as_bytes())?;
-    let result = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            source.as_ptr(),
-            libc::AT_FDCWD,
-            target.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(target_vendor = "apple")]
-fn rename_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    let source = CString::new(source.as_os_str().as_bytes())?;
-    let target = CString::new(target.as_os_str().as_bytes())?;
-    let result = unsafe { libc::renamex_np(source.as_ptr(), target.as_ptr(), libc::RENAME_EXCL) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(all(
-    unix,
-    not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
-))]
-fn rename_no_replace(_source: &Path, _target: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "atomic no-replace rename is not supported on this platform",
-    ))
 }
 
 type RunResult<T> = Result<T, TransferRunError>;
@@ -1800,14 +1523,6 @@ mod tests {
 
         assert!(!root.exists());
         assert_eq!(std::fs::read(external.join("keep")).unwrap(), b"data");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn local_cleanup_refuses_a_mounted_root() {
-        let metadata = std::fs::symlink_metadata("/proc").unwrap();
-
-        assert!(local_cleanup_device(Path::new("/proc"), &metadata).is_err());
     }
 
     #[test]

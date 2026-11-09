@@ -3,9 +3,12 @@
 //! 各子模块分别负责正文、目录、变更、搜索、属性和监听，规范路径统一使用正斜杠。
 
 pub mod agent;
+pub mod cleanup;
 pub mod file;
 pub mod grep;
 pub mod mutate;
+pub mod no_replace;
+pub mod paste;
 #[cfg(feature = "workspace-runtime")]
 pub mod properties;
 #[cfg(feature = "workspace-runtime")]

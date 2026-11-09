@@ -245,6 +245,7 @@ pub fn run() {
             commands::mutate::fs_delete,
             commands::mutate::fs_trash,
             commands::mutate::fs_copy,
+            commands::mutate::fs_paste,
             fs::watch::fs_watch_add,
             fs::watch::fs_watch_remove,
             lsp::lsp_detect,

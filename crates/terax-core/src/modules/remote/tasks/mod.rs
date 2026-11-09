@@ -17,6 +17,7 @@ use super::session::{ExecOutput, RemoteWorkspace};
 pub(crate) mod capability_probe;
 pub(crate) mod create_directory;
 pub(crate) mod delete;
+pub(crate) mod explorer_paste;
 pub(crate) mod file_sync;
 pub(crate) mod file_version;
 pub(crate) mod file_write;
@@ -56,6 +57,8 @@ pub(crate) enum TaskKind {
     FileSync,
     /// 递归创建目录。
     CreateDirectory,
+    /// 同一文件系统环境中的 Explorer 粘贴。
+    ExplorerPaste,
     /// 递归删除目录。
     RecursiveDelete,
     /// SFTP 写入回退的摘要计算。
@@ -85,6 +88,7 @@ impl TaskKind {
             Self::FileVersion => "file_version",
             Self::FileSync => "file_sync",
             Self::CreateDirectory => "create_directory",
+            Self::ExplorerPaste => "explorer_paste",
             Self::RecursiveDelete => "recursive_delete",
             Self::SftpHash => "sftp_hash",
             Self::SftpReplace => "sftp_replace",

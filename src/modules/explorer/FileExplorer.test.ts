@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   environmentKind: "local",
   empty: false,
   pasteFiles: vi.fn(),
+  invoke: vi.fn(),
+  reportError: vi.fn(),
   rootStatus: "loaded",
   remoteReady: true,
   runtimePhase: "idle",
@@ -28,6 +30,8 @@ afterEach(() => {
   mocks.environmentKind = "local";
   mocks.empty = false;
   mocks.pasteFiles.mockClear();
+  mocks.invoke.mockReset();
+  mocks.reportError.mockClear();
   mocks.rootStatus = "loaded";
   mocks.remoteReady = true;
   mocks.runtimePhase = "idle";
@@ -69,14 +73,31 @@ vi.mock("@/components/menu/context-menu", () => {
   return {
     ContextMenu: Pass,
     ContextMenuContent: Pass,
-    ContextMenuItem: Pass,
+    ContextMenuItem: ({
+      children,
+      onSelect,
+      disabled,
+    }: {
+      children?: React.ReactNode;
+      onSelect?: () => void;
+      disabled?: boolean;
+    }) =>
+      createElement(
+        "button",
+        { type: "button", disabled, onClick: onSelect },
+        children,
+      ),
     ContextMenuSeparator: Pass,
+    ContextMenuShortcut: () => null,
     ContextMenuSub: Pass,
     ContextMenuSubContent: Pass,
     ContextMenuSubTrigger: Pass,
     ContextMenuTrigger: Pass,
   };
 });
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@/lib/errors", () => ({ reportError: mocks.reportError }));
 
 vi.mock("@/modules/transfers/dialogs", () => ({
   pickDownloadDirectory: vi.fn(),
@@ -126,7 +147,6 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
-vi.mock("@/lib/errors", () => ({ reportError: vi.fn() }));
 vi.mock("@/modules/source-control/RepositoryContext", () => ({
   useRepositorySnapshot: () => ({
     repo: { repoRoot: "/home/remote" },
@@ -179,11 +199,22 @@ vi.mock("./TreeRow", () => ({
     path,
     name,
     domId,
+    isCut,
   }: {
     path: string;
     name: string;
     domId: string;
-  }) => createElement("div", { "data-fs-path": path, id: domId }, name),
+    isCut?: boolean;
+  }) =>
+    createElement(
+      "div",
+      {
+        "data-fs-path": path,
+        "data-fs-cut": isCut ? "" : undefined,
+        id: domId,
+      },
+      name,
+    ),
   PendingRow: () => null,
   StatusRow: () => null,
 }));
@@ -737,7 +768,7 @@ describe("file opening render path", () => {
   });
 });
 
-it("空目录也能粘贴，目标与顶部新建按钮一致", () => {
+it("空目录也能粘贴，目标与顶部新建按钮一致", async () => {
   mocks.empty = true;
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -758,12 +789,103 @@ it("空目录也能粘贴，目标与顶部新建按钮一致", () => {
       bubbles: true,
       cancelable: true,
     });
-    act(() => tree?.dispatchEvent(event));
+    await act(async () => tree?.dispatchEvent(event));
     expect(event.defaultPrevented).toBe(true);
     expect(mocks.pasteFiles).toHaveBeenCalledWith(
       resolveToolbarCreateParent("/home/remote", null, undefined),
     );
   } finally {
+    act(() => root.unmount());
+  }
+});
+
+it("右键粘贴使用点击的目录，移动失败后保留剪切并允许重试", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const directory = "/home/remote/target";
+  const sourcePath = "/home/remote/file.txt";
+  const landedPath = `${directory}/file copy.txt`;
+  mocks.names = ["file.txt", "target"];
+  mocks.childNodes = {
+    [directory]: {
+      status: "loaded",
+      entries: [{ name: "file copy.txt", kind: "file" }],
+    },
+  };
+  const paste = vi
+    .fn()
+    .mockRejectedValueOnce({ kind: "io", detail: "busy" })
+    .mockResolvedValueOnce("file copy.txt");
+  mocks.invoke.mockImplementation((command, args) =>
+    command === "fs_paste" ? paste(args) : Promise.resolve(undefined),
+  );
+  const onPathRenamed = vi.fn();
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const row = (path: string) =>
+    container.querySelector(`[data-fs-path="${path}"]`);
+  const context = (path: string) =>
+    act(() =>
+      row(path)?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true }),
+      ),
+    );
+  const menu = (label: string) =>
+    [...container.querySelectorAll("button")].find(
+      (item) => item.textContent === label,
+    );
+  const key = (key: string, ctrlKey = false) =>
+    container.querySelector('[role="tree"]')?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        ctrlKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  try {
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+          onPathRenamed,
+        }),
+      ),
+    );
+    context(sourcePath);
+    act(() => key("x", true));
+    expect(row(sourcePath)?.hasAttribute("data-fs-cut")).toBe(true);
+
+    context(directory);
+    act(() => key("ArrowUp"));
+    await act(async () => menu("menu.paste")?.click());
+    expect(paste).toHaveBeenCalledWith({
+      source: sourcePath,
+      destination: directory,
+      mode: "cut",
+      workspace: expect.objectContaining({ kind: "local" }),
+    });
+    expect(mocks.reportError).toHaveBeenCalledOnce();
+    expect(row(sourcePath)?.hasAttribute("data-fs-cut")).toBe(true);
+    expect(onPathRenamed).not.toHaveBeenCalled();
+
+    await act(async () => menu("menu.paste")?.click());
+    expect(paste).toHaveBeenCalledTimes(2);
+    expect(row(sourcePath)?.hasAttribute("data-fs-cut")).toBe(false);
+    expect(onPathRenamed).toHaveBeenCalledWith(sourcePath, landedPath);
+    expect(
+      container
+        .querySelector('[role="tree"]')
+        ?.getAttribute("aria-activedescendant"),
+    ).toBe(`file-tree-item-${encodeURIComponent(landedPath)}`);
+
+    context(sourcePath);
+    act(() => key("x", true));
+    expect(row(sourcePath)?.hasAttribute("data-fs-cut")).toBe(true);
+    act(() => key("Escape"));
+    expect(row(sourcePath)?.hasAttribute("data-fs-cut")).toBe(false);
+  } finally {
+    act(() => key("Escape"));
     act(() => root.unmount());
   }
 });

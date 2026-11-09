@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { reportError } from "@/lib/errors";
 import { parentDirectory } from "@/modules/filesystem";
+import { explorerPasteError } from "./useExplorerClipboard";
 
 type Options = {
   rootPath: string | null;
@@ -58,11 +59,9 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
   const optsRef = useRef({ rootPath, isDir, onCopied });
   optsRef.current = { rootPath, isDir, onCopied };
 
-  const pasting = useRef(false);
-
   /** 系统拖放和粘贴共用导入规则；目的目录由触发操作时的选区或落点冻结。 */
   const importFiles = useCallback(
-    async (paths: string[], destination: string) => {
+    async (paths: string[], destination: string, paste = false) => {
       if (!paths.length) return;
       const sources = [...new Set(paths)];
       const workspace = currentWorkspaceEnv();
@@ -86,9 +85,23 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
         return;
       }
       try {
-        await invoke("fs_copy", { sources, destDir: destination, workspace });
+        if (paste) {
+          for (const source of sources) {
+            await invoke("fs_paste", {
+              source,
+              destination,
+              mode: "copy",
+              workspace,
+            });
+          }
+        } else {
+          await invoke("fs_copy", { sources, destDir: destination, workspace });
+        }
       } catch (error) {
-        reportError(t("menu.copyFailed", { error: String(error) }), { error });
+        const message = paste
+          ? explorerPasteError(t, error)
+          : t("menu.copyFailed", { error: String(error) });
+        reportError(message, { error });
       } finally {
         // 多文件复制可能部分成功，失败后也刷新实际目录。
         onCopied(destination);
@@ -98,19 +111,15 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
   );
 
   const pasteFiles = async (destination: string) => {
-    if (pasting.current) return;
-    pasting.current = true;
     try {
       const paths = await readClipboardFiles();
       if (!paths.length) {
         toast.info(t("menu.noClipboardFiles"));
         return;
       }
-      await importFiles(paths, destination);
+      await importFiles(paths, destination, true);
     } catch (error) {
       reportError(t("menu.pasteFailed", { error: String(error) }), { error });
-    } finally {
-      pasting.current = false;
     }
   };
 

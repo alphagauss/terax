@@ -1,6 +1,6 @@
 /**
  * 本文件渲染资源管理器的普通条目、创建输入和加载状态行。
- * 条目行负责展示选择、重命名、Git 装饰和删除中的不可交互状态。
+ * 条目行负责展示选择、重命名、剪切、Git 装饰和删除中的不可交互状态。
  */
 
 import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
@@ -36,6 +36,7 @@ export type EntryRowProps = {
   renameInProgress: boolean;
   isSelected: boolean;
   isContextTarget?: boolean;
+  isCut?: boolean;
   isRenaming: boolean;
   isDropTarget?: boolean;
   onOpenFile: (path: string, pin?: boolean) => void;
@@ -58,6 +59,7 @@ function EntryRowImpl(props: EntryRowProps) {
     renameInProgress,
     isSelected,
     isContextTarget = false,
+    isCut = false,
     isRenaming,
     isDropTarget = false,
     onOpenFile,
@@ -133,6 +135,7 @@ function EntryRowImpl(props: EntryRowProps) {
       tabIndex={-1}
       data-fs-path={path}
       data-fs-deleting={isDeleting ? "" : undefined}
+      data-fs-cut={isCut ? "" : undefined}
       disabled={isDeleting}
       onClick={handleClick}
       onDoubleClick={() => !isDir && onOpenFile(path, true)}
@@ -141,6 +144,7 @@ function EntryRowImpl(props: EntryRowProps) {
         isDeleting &&
           "cursor-wait text-muted-foreground hover:bg-transparent disabled:opacity-80",
         gitignored && "text-muted-foreground",
+        isCut && "opacity-50",
         isContextTarget
           ? "bg-interactive-active hover:bg-interactive-active"
           : isSelected

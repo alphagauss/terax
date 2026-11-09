@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import { useExplorerFileDrop } from "@/modules/explorer/lib/useExplorerFileDrop";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { useExplorerFileDrop } from "@/modules/explorer/lib/useExplorerFileDrop";
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -90,11 +91,14 @@ it.each(["local", "wsl", "ssh"])(
         await pending;
       });
       if (kind === "local") {
-        expect(mocks.invoke).toHaveBeenCalledWith("fs_copy", {
-          sources: ["/host/image.png", "/host/code.ts"],
-          destDir: "/first/selected",
-          workspace: { kind },
-        });
+        for (const source of ["/host/image.png", "/host/code.ts"]) {
+          expect(mocks.invoke).toHaveBeenCalledWith("fs_paste", {
+            source,
+            destination: "/first/selected",
+            mode: "copy",
+            workspace: { kind },
+          });
+        }
         expect(refreshed).toHaveBeenCalledWith("/first/selected");
         expect(mocks.enqueue).not.toHaveBeenCalled();
       } else {
@@ -118,7 +122,7 @@ it.each(["local", "wsl", "ssh"])(
         }),
       );
       const calls = kind === "local" ? mocks.invoke : mocks.enqueue;
-      expect(calls).toHaveBeenCalledTimes(2);
+      expect(calls).toHaveBeenCalledTimes(kind === "local" ? 3 : 2);
       const rootFile = document.createElement("div");
       rootFile.dataset.fsPath = "/file.txt";
       point.mockReturnValue(rootFile);
@@ -147,7 +151,7 @@ it.each(["local", "wsl", "ssh"])(
       }
       mocks.read.mockResolvedValue([]);
       await act(async () => controller.pasteFiles("/second"));
-      expect(calls).toHaveBeenCalledTimes(3);
+      expect(calls).toHaveBeenCalledTimes(kind === "local" ? 4 : 3);
     } finally {
       act(() => root.unmount());
       vi.restoreAllMocks();
