@@ -829,7 +829,7 @@ it("keeps partial staging actions, diffs and tooltips scoped to each group and r
         expect.objectContaining({ path: "a.ts", side }),
       );
       await click(fileRow.querySelector('[aria-label="menu.openFile"]'));
-      expect(onOpenFile).toHaveBeenLastCalledWith("/repo/a.ts");
+      expect(onOpenFile).toHaveBeenLastCalledWith("/repo/a.ts", "/repo");
       expect(onOpenDiff).toHaveBeenCalledTimes(opened + 2);
       vi.useFakeTimers();
       await act(async () => {
@@ -1031,7 +1031,8 @@ it.each(["fetch", "pull", "push"] as const)(
       container.querySelector<HTMLButtonElement>(
         '[aria-label="remote.cancel"]',
       );
-    const feedback = () => container.querySelector('[role="status"][title]');
+    const feedbackSelector = '[role="status"][data-scm-feedback]';
+    const feedback = () => container.querySelector(feedbackSelector);
     try {
       await render();
       expect(feedback()?.textContent).toBe(`remote.${action}Running`);
@@ -1053,9 +1054,7 @@ it.each(["fetch", "pull", "push"] as const)(
       };
       await render();
       expect(feedback()?.textContent).toBe("remote.stages.receiving 65%");
-      expect(container.querySelectorAll('[role="status"][title]')).toHaveLength(
-        1,
-      );
+      expect(container.querySelectorAll(feedbackSelector)).toHaveLength(1);
       controller.remoteOperation = {
         ...runningOperation,
         progress: null,
@@ -1093,9 +1092,7 @@ it.each(["fetch", "pull", "push"] as const)(
       expect(
         container.querySelector('[aria-label="remote.cancelling"]'),
       ).toBeNull();
-      expect(container.querySelectorAll('[role="status"][title]')).toHaveLength(
-        1,
-      );
+      expect(container.querySelectorAll(feedbackSelector)).toHaveLength(1);
       expect(feedback()?.textContent).toBe("remote.cancelled");
       await act(async () => {
         vi.advanceTimersByTime(4000);

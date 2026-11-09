@@ -864,13 +864,13 @@ export default function App() {
   );
 
   const handleOpenFile = useCallback(
-    (path: string, pin?: boolean) => {
+    (path: string, pin?: boolean, copyPathRoot?: string) => {
       // 文件默认使用临时标签；双击等显式固定操作仍通过 pin 保留标签。
-      if (isMarkdownPath(path))
-        newMarkdownTab(path, pin ?? false, explorerRoot ?? undefined);
-      else openFileTab(path, pin ?? false, explorerRoot ?? undefined);
+      const open = isMarkdownPath(path) ? newMarkdownTab : openFileTab;
+      const id = open(path, pin ?? false, explorerRoot ?? undefined);
+      if (id !== null && copyPathRoot) updateTab(id, { copyPathRoot });
     },
-    [explorerRoot, openFileTab, newMarkdownTab],
+    [explorerRoot, openFileTab, newMarkdownTab, updateTab],
   );
 
   const handleDropFileToWorkbench = useCallback(
@@ -1899,9 +1899,9 @@ export default function App() {
               openCommitFileDiffTab(...args),
             )
           }
-          onOpenFile={(path) =>
+          onOpenFile={(path, repoRoot) =>
             openWorkspaceFromSidebar("source-control", () =>
-              handleOpenFile(path),
+              handleOpenFile(path, false, repoRoot),
             )
           }
           onNavigateToPath={(path) =>

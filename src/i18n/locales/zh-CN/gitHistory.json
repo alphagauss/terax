@@ -12,6 +12,7 @@
   "copySha": "复制 SHA",
   "loadingFiles": "正在加载文件…",
   "noFileChanges": "没有文件变更。",
+  "openWorkingFileFailed": "无法打开工作区文件 {{path}}",
   "binary": "二进制",
   "commitDetails": "提交详情",
   "copied": "已复制",

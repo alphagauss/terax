@@ -19,9 +19,13 @@ export type SerializedTab =
       blocks?: boolean;
       customTitle?: string;
     }
-  | { kind: "editor"; path: string; explorerRoot?: string }
-  | { kind: "web-preview"; url: string }
-  | { kind: "markdown"; path: string; explorerRoot?: string };
+  | {
+      kind: "editor" | "markdown";
+      path: string;
+      explorerRoot?: string;
+      copyPathRoot?: string;
+    }
+  | { kind: "web-preview"; url: string };
 
 export type SerializedWorkbenchNode =
   | {
@@ -65,23 +69,19 @@ function serializeTab(tab: Tab): SerializedTab | null {
         ...(tab.customTitle !== undefined && { customTitle: tab.customTitle }),
       };
     case "editor":
+    case "markdown":
       return {
-        kind: "editor",
+        kind: tab.kind,
         path: tab.path,
         ...(tab.explorerRoot !== undefined && {
           explorerRoot: tab.explorerRoot,
+        }),
+        ...(tab.copyPathRoot !== undefined && {
+          copyPathRoot: tab.copyPathRoot,
         }),
       };
     case "web-preview":
       return { kind: "web-preview", url: tab.url };
-    case "markdown":
-      return {
-        kind: "markdown",
-        path: tab.path,
-        ...(tab.explorerRoot !== undefined && {
-          explorerRoot: tab.explorerRoot,
-        }),
-      };
     default:
       return null;
   }
@@ -172,9 +172,10 @@ function hydrateTab(
       } satisfies TerminalTab;
     }
     case "editor":
+    case "markdown":
       return {
         id: allocId(),
-        kind: "editor",
+        kind: serialized.kind,
         spaceId,
         cold: true,
         title: pathBasename(serialized.path),
@@ -184,7 +185,10 @@ function hydrateTab(
         ...(serialized.explorerRoot !== undefined && {
           explorerRoot: serialized.explorerRoot,
         }),
-      } satisfies EditorTab;
+        ...(serialized.copyPathRoot !== undefined && {
+          copyPathRoot: serialized.copyPathRoot,
+        }),
+      } satisfies EditorTab | MarkdownTab;
     case "web-preview":
       return {
         id: allocId(),
@@ -194,20 +198,6 @@ function hydrateTab(
         title: titleFromUrl(serialized.url, i18n.t("tabs:webPreview")),
         url: serialized.url,
       } satisfies WebPreviewTab;
-    case "markdown":
-      return {
-        id: allocId(),
-        kind: "markdown",
-        spaceId,
-        cold: true,
-        title: pathBasename(serialized.path),
-        path: serialized.path,
-        dirty: false,
-        preview: false,
-        ...(serialized.explorerRoot !== undefined && {
-          explorerRoot: serialized.explorerRoot,
-        }),
-      } satisfies MarkdownTab;
   }
 }
 
@@ -349,7 +339,9 @@ function isSerializedTab(value: unknown): value is SerializedTab {
   if (tab.kind === "editor" || tab.kind === "markdown") {
     return (
       typeof tab.path === "string" &&
-      (tab.explorerRoot === undefined || typeof tab.explorerRoot === "string")
+      (tab.explorerRoot === undefined ||
+        typeof tab.explorerRoot === "string") &&
+      (tab.copyPathRoot === undefined || typeof tab.copyPathRoot === "string")
     );
   }
   return false;

@@ -12,6 +12,7 @@
   "copySha": "Copy SHA",
   "loadingFiles": "Loading files…",
   "noFileChanges": "No file changes.",
+  "openWorkingFileFailed": "Could not open {{path}} in the working tree",
   "binary": "binary",
   "commitDetails": "Commit details",
   "copied": "Copied",

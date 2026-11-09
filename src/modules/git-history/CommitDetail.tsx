@@ -16,7 +16,7 @@ import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
 import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import Undo02Icon from "@hugeicons/core-free-icons/Undo02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export type CommitDetailFilesEntry =
@@ -28,6 +28,7 @@ type Props = {
   commit: GitLogEntry;
   filesEntry: CommitDetailFilesEntry | null;
   onOpenFile: (file: GitCommitFileChange) => void;
+  renderFileAction?: (path: string) => ReactNode;
   onRetry: () => void;
   onUndo?: () => void;
   remoteAction?: { label: string; onClick: () => void };
@@ -64,6 +65,7 @@ export function CommitDetail({
   commit,
   filesEntry,
   onOpenFile,
+  renderFileAction,
   onRetry,
   onUndo,
   remoteAction,
@@ -217,6 +219,7 @@ export function CommitDetail({
               key={`${file.status}:${file.path}`}
               file={file}
               onOpen={() => onOpenFile(file)}
+              action={renderFileAction?.(file.path)}
             />
           ))
         )}
@@ -228,11 +231,13 @@ export function CommitDetail({
 export function CommitFileRow({
   file,
   onOpen,
+  action,
   showStats = true,
   selected = false,
 }: {
   file: GitCommitFileChange;
   onOpen: () => void;
+  action?: ReactNode;
   showStats?: boolean;
   selected?: boolean;
 }) {
@@ -245,69 +250,81 @@ export function CommitFileRow({
   const statusCode = file.status.toUpperCase();
   const isDeleted = statusCode === "D";
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-current={selected ? "true" : undefined}
+    <div
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left",
+        "group/commit-file isolate grid w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center rounded px-1.5",
         selected
           ? "bg-interactive-active hover:bg-interactive-active"
           : "hover:bg-interactive-hover",
         showStats ? "h-7" : "h-6",
       )}
     >
-      {iconUrl ? (
-        <img
-          src={iconUrl}
-          alt=""
-          className="file-type-icon size-3.5 shrink-0"
-        />
-      ) : (
-        <span className="size-3.5 shrink-0" />
-      )}
-      <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
-        <span
-          className={cn(
-            "truncate text-[11.5px] font-medium",
-            isDeleted && "line-through",
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-current={selected ? "true" : undefined}
+        className="col-span-full row-start-1 grid h-full min-w-0 cursor-pointer grid-cols-subgrid items-center text-left"
+      >
+        <div className="col-start-1 flex min-w-0 items-center gap-2">
+          {iconUrl ? (
+            <img
+              src={iconUrl}
+              alt=""
+              className="file-type-icon size-3.5 shrink-0"
+            />
+          ) : (
+            <span className="size-3.5 shrink-0" />
           )}
-        >
-          {name}
-        </span>
-        {pathLabel ? (
+          <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
+            <span
+              className={cn(
+                "truncate text-[11.5px] font-medium",
+                isDeleted && "line-through",
+              )}
+            >
+              {name}
+            </span>
+            {pathLabel ? (
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-[10px] text-muted-foreground",
+                  isDeleted && "line-through",
+                )}
+              >
+                {pathLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <Hint content={file.statusLabel}>
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-[10px] text-muted-foreground",
-              isDeleted && "line-through",
+              "col-start-3 ml-2 w-3 text-right font-mono text-[12px] font-bold",
+              explorerGitTextClass(statusCode),
             )}
           >
-            {pathLabel}
+            {statusCode}
           </span>
+        </Hint>
+        {showStats ? (
+          file.isBinary ? (
+            <span className="col-start-4 ml-2 w-16 text-right text-[10px] text-muted-foreground">
+              {t("binary")}
+            </span>
+          ) : (
+            <span className="col-start-4 ml-2 flex w-16 justify-end gap-1.5 text-[10px] tabular-nums">
+              <span className="text-success">+{file.added}</span>
+              <span className="text-destructive">−{file.removed}</span>
+            </span>
+          )
         ) : null}
-      </div>
-      <Hint content={file.statusLabel}>
-        <span
-          className={cn(
-            "w-3 shrink-0 text-right font-mono text-[12px] font-bold",
-            explorerGitTextClass(statusCode),
-          )}
-        >
-          {statusCode}
-        </span>
-      </Hint>
-      {showStats ? (
-        file.isBinary ? (
-          <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
-            {t("binary")}
-          </span>
-        ) : (
-          <span className="flex w-16 shrink-0 justify-end gap-1.5 text-[10px] tabular-nums">
-            <span className="text-success">+{file.added}</span>
-            <span className="text-destructive">−{file.removed}</span>
-          </span>
-        )
+      </button>
+      {/* 打开按钮与差异按钮共享列布局，右侧状态和统计保持原位。 */}
+      {action ? (
+        <div className="z-10 col-start-2 row-start-1 ml-2 hidden group-focus-within/commit-file:flex group-hover/commit-file:flex">
+          {action}
+        </div>
       ) : null}
-    </button>
+    </div>
   );
 }

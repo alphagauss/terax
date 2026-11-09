@@ -15,6 +15,22 @@ describe("relativePath", () => {
     expect(relativePath("/a/b", "/a/b/c/d")).toBe("c/d");
   });
 
+  it("支持带分隔符结尾的根目录", () => {
+    expect(relativePath("/", "/src/App.tsx")).toBe("src/App.tsx");
+    expect(relativePath("D:/", "D:/src/App.tsx")).toBe("src/App.tsx");
+  });
+
+  it("忽略 Windows 根目录的大小写差异并保留文件名大小写", () => {
+    expect(relativePath("D:/Repo", "d:/repo/src/App.tsx", true)).toBe(
+      "src/App.tsx",
+    );
+  });
+
+  it("大小写转换改变字符长度时不会误截取路径", () => {
+    const path = "d:/i\u0307/src/App.tsx";
+    expect(relativePath("D:/İ", path, true)).toBe(path);
+  });
+
   it("保留仅共享字符串前缀的兄弟路径", () => {
     expect(relativePath("/a/b", "/a/bc/d")).toBe("/a/bc/d");
   });

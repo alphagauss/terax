@@ -25,26 +25,23 @@ export type TerminalTab = TabBase & {
   customTitle?: string;
 };
 
-export type EditorTab = TabBase & {
-  kind: "editor";
+type FileTabBase = TabBase & {
   path: string;
   dirty: boolean;
   preview: boolean;
   explorerRoot?: string;
+  /** 只用于复制相对路径，不参与目录跟随或工作区授权。 */
+  copyPathRoot?: string;
 };
+
+export type EditorTab = FileTabBase & { kind: "editor" };
 
 export type WebPreviewTab = TabBase & {
   kind: "web-preview";
   url: string;
 };
 
-export type MarkdownTab = TabBase & {
-  kind: "markdown";
-  path: string;
-  dirty: boolean;
-  preview: boolean;
-  explorerRoot?: string;
-};
+export type MarkdownTab = FileTabBase & { kind: "markdown" };
 
 export type AiDiffStatus = "pending" | "approved" | "rejected";
 
@@ -103,6 +100,7 @@ export type TabPatch = Partial<{
   url: string;
   customTitle: string;
   explorerRoot: string;
+  copyPathRoot: string;
   originalPath: string | null;
   shortSha: string;
   subject: string;

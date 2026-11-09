@@ -364,10 +364,12 @@ describe("workbench model", () => {
     const next = patchTab(state, 2, {
       preview: false,
       explorerRoot: "/new",
+      copyPathRoot: "/repo",
     });
     expect(next.tabs[2]).toMatchObject({
       preview: false,
       explorerRoot: "/new",
+      copyPathRoot: "/repo",
     });
     expect(patchTab(next, 2, { preview: false, explorerRoot: "/new" })).toBe(
       next,

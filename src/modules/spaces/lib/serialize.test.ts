@@ -37,7 +37,8 @@ function state(): WorkbenchState {
     spaceId: "default",
     title: "guide.md",
     path: "/work/docs/guide.md",
-    explorerRoot: "/work",
+    explorerRoot: "/work/docs",
+    copyPathRoot: "/work",
     dirty: false,
     preview: false,
   };
@@ -154,7 +155,8 @@ describe("Workbench Space serialization", () => {
     ).toMatchObject({
       kind: "markdown",
       path: "/work/docs/guide.md",
-      explorerRoot: "/work",
+      explorerRoot: "/work/docs",
+      copyPathRoot: "/work",
     });
     expect(restored?.tabs).toEqual(
       expect.arrayContaining([

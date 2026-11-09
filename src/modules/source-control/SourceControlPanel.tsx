@@ -62,6 +62,7 @@ import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
 import { GraphSection } from "@/modules/source-control/GraphSection";
+import { OpenWorkingFileButton } from "@/modules/source-control/OpenWorkingFileButton";
 import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { relativeTime } from "@/modules/source-control/relativeTime";
@@ -82,7 +83,6 @@ import ArrowTurnBackwardIcon from "@hugeicons/core-free-icons/ArrowTurnBackwardI
 import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
 import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
 import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
-import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import FolderCloudIcon from "@hugeicons/core-free-icons/FolderCloudIcon";
 import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
@@ -118,7 +118,7 @@ type Props = {
     originalPath: string | null;
     title?: string;
   }) => void;
-  onOpenFile?: (absolutePath: string) => void;
+  onOpenFile?: (absolutePath: string, repoRoot: string) => void;
   onNavigateToPath?: (path: string) => void;
 };
 
@@ -780,6 +780,7 @@ function SourceControlViewContainerComponent({
     if (requestedPage !== page) setPage(page);
   }, [requestedPage, page]);
   const repoRoot = scm.repo?.repoRoot;
+  const fileRepoRoot = repoRoot?.replace(/\\/g, "/") ?? null;
   useEffect(() => {
     void repoRoot;
     setPage(0);
@@ -1343,9 +1344,7 @@ function SourceControlViewContainerComponent({
                                                 hoveredRowKey === entry.key
                                               }
                                               actionBusy={scm.actionBusy}
-                                              repoRoot={
-                                                scm.repo?.repoRoot ?? null
-                                              }
+                                              repoRoot={fileRepoRoot}
                                               onFocusRow={setFocusedRowKey}
                                               onOpenFileDiff={scm.openFileDiff}
                                               onToggleStageFile={
@@ -1365,7 +1364,7 @@ function SourceControlViewContainerComponent({
                               {contextEntry && (
                                 <EntryContextMenu
                                   entry={contextEntry}
-                                  repoRoot={scm.repo?.repoRoot ?? null}
+                                  repoRoot={fileRepoRoot}
                                   disabled={scm.actionBusy !== null}
                                   onOpenFileDiff={scm.openFileDiff}
                                   onToggleStageFile={scm.toggleStageFile}
@@ -1441,6 +1440,7 @@ function SourceControlViewContainerComponent({
                     }
                     onDidUndo={handleRefresh}
                     onOpenCommitFile={onOpenCommitFile}
+                    onOpenFile={onOpenFile}
                   />
                 ),
             },
@@ -1538,7 +1538,7 @@ type EntryRowProps = {
   onOpenFileDiff: (entry: SourceControlFileEntry) => void;
   onToggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
   onDiscardFile: (entry: SourceControlFileEntry) => void;
-  onOpenFile?: (absolutePath: string) => void;
+  onOpenFile?: Props["onOpenFile"];
 };
 
 function DivergedBanner() {
@@ -1662,9 +1662,6 @@ const EntryRow = memo(function EntryRow({
   const isDiscardBusy = actionBusy === `discard:${entry.path}`;
   const disabled = actionBusy !== null;
 
-  const absolutePath = repoRoot
-    ? joinPath(repoRoot.replace(/\\/g, "/"), entry.path.replace(/\\/g, "/"))
-    : null;
   return (
     <div
       id={`scm-row-${entry.key}`}
@@ -1727,16 +1724,16 @@ const EntryRow = memo(function EntryRow({
 
       {interactive && (
         <div className="flex shrink-0 items-center">
-          {entry.canOpenFile && onOpenFile && absolutePath && (
-            <IconActionButton
-              label={t("menu.openFile")}
+          {entry.canOpenFile && onOpenFile && repoRoot && (
+            <OpenWorkingFileButton
               disabled={disabled}
-              side="top"
-              className="size-5"
-              onClick={() => onOpenFile(absolutePath)}
-            >
-              <HugeiconsIcon icon={FileEditIcon} size={13} />
-            </IconActionButton>
+              onClick={() =>
+                onOpenFile(
+                  joinPath(repoRoot, entry.path.replace(/\\/g, "/")),
+                  repoRoot,
+                )
+              }
+            />
           )}
           {showDiscard && (
             <IconActionButton
@@ -1803,7 +1800,7 @@ function EntryContextMenu({
 > & { disabled: boolean }) {
   const { t } = useTranslation("sourceControl");
   const absolutePath = repoRoot
-    ? joinPath(repoRoot.replace(/\\/g, "/"), entry.path.replace(/\\/g, "/"))
+    ? joinPath(repoRoot, entry.path.replace(/\\/g, "/"))
     : null;
   const revealLabel = IS_MAC
     ? t("menu.revealInFinder")
@@ -1818,8 +1815,8 @@ function EntryContextMenu({
       >
         {t("menu.openDiff")}
       </ContextMenuItem>
-      {entry.canOpenFile && onOpenFile && absolutePath ? (
-        <ContextMenuItem onSelect={() => onOpenFile(absolutePath)}>
+      {entry.canOpenFile && onOpenFile && repoRoot && absolutePath ? (
+        <ContextMenuItem onSelect={() => onOpenFile(absolutePath, repoRoot)}>
           {t("menu.openFile")}
         </ContextMenuItem>
       ) : null}
@@ -1944,7 +1941,7 @@ function CommitFeedback({
   return (
     <div
       role="status"
-      title={visibleFeedback.message}
+      data-scm-feedback
       className={cn(
         "pointer-events-none absolute inset-x-3 top-[calc(100%-0.25rem)] z-20 flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] leading-snug shadow-lg shadow-black/15 backdrop-blur transition-[color,background-color,border-color,opacity,transform] duration-surface",
         isVisible ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",

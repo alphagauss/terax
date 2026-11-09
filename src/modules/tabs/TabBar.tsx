@@ -22,6 +22,7 @@ import {
 } from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/controls/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
   copyToClipboard,
@@ -332,10 +333,20 @@ export function TabBar({
               }
 
               const filePath = filePathFor(t);
-              const fileRelativePath =
-                (t.kind === "editor" || t.kind === "markdown") && t.explorerRoot
-                  ? relativePath(t.explorerRoot, t.path)
+              const copyPathRoot =
+                t.kind === "editor" || t.kind === "markdown"
+                  ? (t.copyPathRoot ?? t.explorerRoot)
                   : undefined;
+              const fileRelativePath =
+                copyPathRoot && filePath
+                  ? relativePath(
+                      copyPathRoot,
+                      filePath,
+                      workspace.kind === "local" && IS_WINDOWS,
+                    )
+                  : undefined;
+              const canCopyRelativePath =
+                fileRelativePath !== undefined && fileRelativePath !== filePath;
               const trigger = (
                 <TabsTrigger
                   value={String(t.id)}
@@ -541,10 +552,10 @@ export function TabBar({
                           {tr("explorer:menu.copyPath")}
                         </ContextMenuItem>
                         <ContextMenuItem
-                          disabled={!fileRelativePath}
+                          disabled={!canCopyRelativePath}
                           className="rounded-xl px-2.5 py-1.5 text-[13px]"
                           onSelect={() => {
-                            if (fileRelativePath) {
+                            if (canCopyRelativePath) {
                               void copyToClipboard(fileRelativePath);
                             }
                           }}

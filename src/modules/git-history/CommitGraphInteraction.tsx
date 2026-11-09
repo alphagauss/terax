@@ -122,6 +122,7 @@ export function ExpandedCommitRow({
   railSpace,
   rowHeight,
   onOpen,
+  renderFileAction,
   onRetry,
   selected = false,
 }: {
@@ -131,6 +132,7 @@ export function ExpandedCommitRow({
   railSpace?: number;
   rowHeight: number;
   onOpen: () => void;
+  renderFileAction?: (path: string) => ReactNode;
   onRetry: () => void;
   selected?: boolean;
 }) {
@@ -154,6 +156,7 @@ export function ExpandedCommitRow({
           <CommitFileRow
             file={item.file}
             onOpen={onOpen}
+            action={renderFileAction?.(item.file.path)}
             showStats={false}
             selected={selected}
           />

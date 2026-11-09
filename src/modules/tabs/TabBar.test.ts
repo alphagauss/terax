@@ -1,12 +1,22 @@
+// @vitest-environment happy-dom
+
 /**
- * 本文件测试标签栏关闭控件和新建入口的结构约束。
- * 重点锁定关闭交互、标签溢出行为，以及已移除的语言选择入口不会回归。
+ * 本文件测试标签栏控件的结构约束和文件路径菜单的复制行为。
  */
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
+import { TabBar } from "./TabBar";
+
+const copy = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/clipboard", () => ({ writeClipboardText: copy }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.join(here, "TabBar.tsx"), "utf8");
@@ -56,4 +66,81 @@ describe("TabBar file actions", () => {
     expect(source).toContain('tr("explorer:menu.attachToAgent")');
     expect(source).toContain("{filePath && (");
   });
+
+  it.each([
+    ["editor", "/repo/other", "/repo", "/repo/src/file.ts", "src/file.ts"],
+    ["markdown", "/repo/docs", "/repo", "/repo/docs/file.md", "docs/file.md"],
+    ["editor", "/repo", undefined, "/repo/src/file.ts", "src/file.ts"],
+    ["editor", "/repo/other", undefined, "/repo/src/file.ts", undefined],
+  ] as const)(
+    "%s 文件标签的文件树根为 %s、复制基准为 %s 时复制相对路径",
+    async (kind, explorerRoot, copyPathRoot, filePath, relativePath) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      copy.mockClear();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      const noop = () => {};
+      try {
+        await act(async () =>
+          root.render(
+            createElement(TabBar, {
+              groupId: 1,
+              tabs: [
+                {
+                  kind,
+                  id: 1,
+                  spaceId: "default",
+                  title: "file",
+                  path: filePath,
+                  explorerRoot,
+                  copyPathRoot,
+                  dirty: false,
+                  preview: true,
+                },
+              ],
+              activeId: 1,
+              activeGroup: true,
+              canClose: true,
+              onSelect: noop,
+              onNew: noop,
+              onNewBlock: noop,
+              onNewPrivate: noop,
+              onNewWebPreview: noop,
+              onNewEditor: noop,
+              onClose: noop,
+              onRunPythonFile: noop,
+              onAttachFileToAgent: noop,
+              onPin: noop,
+              onRename: noop,
+              onDropTab: noop,
+              onSplitTab: noop,
+            }),
+          ),
+        );
+        await act(async () => {
+          container
+            .querySelector('[role="tab"]')
+            ?.dispatchEvent(
+              new MouseEvent("contextmenu", { bubbles: true, button: 2 }),
+            );
+        });
+        const item = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+        ).find((item) => item.textContent === "explorer:menu.copyRelativePath");
+        expect(item).toBeDefined();
+        await act(async () => item?.click());
+        if (relativePath) {
+          expect(copy).toHaveBeenCalledExactlyOnceWith(relativePath);
+        } else {
+          expect(item?.getAttribute("aria-disabled")).toBe("true");
+          expect(copy).not.toHaveBeenCalled();
+        }
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 });

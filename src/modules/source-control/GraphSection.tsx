@@ -3,6 +3,7 @@ import {
   useViewScroll,
   useViewActive,
   useViewCommand,
+  useViewScopeKey,
 } from "@/modules/view-state";
 /**
  * 本文件实现 Source Control 的提交图谱区域。
@@ -34,6 +35,8 @@ import {
   type GitLogEntry,
   native,
 } from "@/modules/ai/lib/native";
+import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import { resolveFileReference } from "@/modules/file-actions/actions";
 import {
   FindControlButton,
   FindPatternField,
@@ -56,6 +59,7 @@ import {
   useCommitGraph,
 } from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
+import { OpenWorkingFileButton } from "@/modules/source-control/OpenWorkingFileButton";
 import { SourceControlLoading } from "@/modules/source-control/SourceControlLoading";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
@@ -69,6 +73,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -119,6 +124,7 @@ type Props = {
   mayHavePushedHead: boolean;
   onDidUndo: () => void;
   onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
+  onOpenFile?: (absolutePath: string, repoRoot: string) => void;
   searchOpen?: boolean;
   onCloseSearch?: () => void;
 };
@@ -140,6 +146,7 @@ export const GraphSection = memo(function GraphSection({
   mayHavePushedHead,
   onDidUndo,
   onOpenCommitFile,
+  onOpenFile,
   searchOpen = false,
   onCloseSearch,
 }: Props) {
@@ -171,6 +178,42 @@ export const GraphSection = memo(function GraphSection({
     close: closePopover,
     retainCommits,
   } = graph;
+  const viewScope = useViewScopeKey();
+  const pendingOpen = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    // 切换 Space 或仓库后，旧文件检查不能在新的工作区打开标签。
+    void viewScope;
+    void repoRoot;
+    return () => pendingOpen.current?.abort();
+  }, [viewScope, repoRoot]);
+
+  const openWorkingFile = async (relativePath: string) => {
+    if (!repoRoot || !onOpenFile) return;
+    pendingOpen.current?.abort();
+    const request = new AbortController();
+    pendingOpen.current = request;
+    const root = repoRoot.replace(/\\/g, "/");
+    const path = joinPath(root, relativePath.replace(/\\/g, "/"));
+    const errorTitle = t("openWorkingFileFailed", { path: relativePath });
+    try {
+      const target = await resolveFileReference({ path, literalPath: path });
+      if (request.signal.aborted) return;
+      if (target.isDir) {
+        reportError(errorTitle);
+        return;
+      }
+      closePopover();
+      onOpenFile(path, root);
+    } catch (error) {
+      if (!request.signal.aborted) reportError(errorTitle, { error });
+    }
+  };
+  const renderFileAction = onOpenFile
+    ? (path: string) => (
+        <OpenWorkingFileButton onClick={() => void openWorkingFile(path)} />
+      )
+    : undefined;
+
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [selectedFile, setSelectedFile] = useViewState<{
@@ -532,6 +575,7 @@ export const GraphSection = memo(function GraphSection({
                       selectedFile.path === item.file.path
                     }
                     onRetry={() => void fetchFiles(commit.sha, true)}
+                    renderFileAction={renderFileAction}
                     onOpen={() => {
                       if (item.kind === "file") {
                         setSelectedFile({
@@ -609,6 +653,7 @@ export const GraphSection = memo(function GraphSection({
         repoRoot={repoRoot}
         commit={selectedCommit}
         graph={graph}
+        renderFileAction={renderFileAction}
         onUndo={
           showUndoCommit &&
           selectedCommit?.sha === headSha &&

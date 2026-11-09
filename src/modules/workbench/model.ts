@@ -54,6 +54,9 @@ export function patchTab(
       ...(patch.explorerRoot !== undefined && {
         explorerRoot: patch.explorerRoot,
       }),
+      ...(patch.copyPathRoot !== undefined && {
+        copyPathRoot: patch.copyPathRoot,
+      }),
     };
   } else if (tab.kind === "git-diff") {
     next = {

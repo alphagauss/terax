@@ -20,7 +20,7 @@ import {
 } from "@/modules/git-history/lib/remoteWebUrl";
 import type { useCommitGraph } from "@/modules/git-history/useCommitGraph";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 /** 展示现有 Git 历史详情；宿主保留选中文件及撤销操作的状态归属。 */
@@ -29,12 +29,14 @@ export function CommitHistoryHoverCard({
   commit,
   graph,
   onOpenFile,
+  renderFileAction,
   onUndo,
 }: {
   repoRoot: string;
   commit: GitLogEntry | null;
   graph: ReturnType<typeof useCommitGraph>;
   onOpenFile: (file: GitCommitFileChange) => void;
+  renderFileAction?: (path: string) => ReactNode;
   onUndo?: () => void;
 }) {
   const { t } = useTranslation("gitHistory");
@@ -78,6 +80,7 @@ export function CommitHistoryHoverCard({
           }
           onUndo={onUndo}
           onRetry={() => void graph.fetchFiles(commit.sha, true)}
+          renderFileAction={renderFileAction}
           onOpenFile={(file) => {
             onOpenFile(file);
             graph.close();

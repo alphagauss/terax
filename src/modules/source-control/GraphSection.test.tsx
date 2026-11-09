@@ -6,7 +6,9 @@ import {
   type GitLogEntry,
   native,
 } from "@/modules/ai/lib/native";
+import { clearErrors, errorStore } from "@/lib/errors";
 import { GraphSection } from "@/modules/source-control/GraphSection";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -21,6 +23,10 @@ vi.mock("@/modules/ai/lib/native", () => ({
     gitCommitMessage: vi.fn(),
     gitRemoteUrl: vi.fn(),
   },
+}));
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...(await original<typeof import("@tauri-apps/api/core")>()),
+  invoke: vi.fn(),
 }));
 vi.mock("@/modules/explorer/lib/iconResolver", () => ({
   fileIconUrl: () => null,
@@ -85,6 +91,7 @@ beforeEach(() => {
   vi.mocked(native.gitCommitFiles).mockReset().mockResolvedValue(files);
   vi.mocked(native.gitCommitMessage).mockResolvedValue("Full message");
   vi.mocked(native.gitRemoteUrl).mockReset().mockResolvedValue("");
+  vi.mocked(invoke).mockReset().mockResolvedValue({ kind: "file" });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -92,6 +99,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  clearErrors();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(HTMLElement.prototype, "animate");
@@ -102,19 +110,7 @@ const wait = async (ms: number) =>
   });
 
 const renderSearch = (
-  props: {
-    expanded?: boolean;
-    repoRoot?: string;
-    headBranch?: string;
-    present?: boolean;
-    graphRevision?: string;
-    refreshToken?: number;
-    searchOpen?: boolean;
-    onCloseSearch?: () => void;
-    onOpenCommitFile?: React.ComponentProps<
-      typeof GraphSection
-    >["onOpenCommitFile"];
-  } = {},
+  props: Partial<React.ComponentProps<typeof GraphSection>> = {},
 ) =>
   root.render(
     <GraphSection
@@ -186,7 +182,8 @@ it("搜索加载较老的多分支提交不会撑宽已有提交或其展开文�
     item.textContent?.includes("new.ts"),
   );
   expect(
-    file?.parentElement?.parentElement
+    file
+      ?.closest("[data-commit-row]")
       ?.querySelector("svg")
       ?.getAttribute("width"),
   ).toBe(width);
@@ -719,8 +716,9 @@ it("侧边栏重复挂载检查仍能完成加载，折叠分组后保留提交�
   expect(native.gitCommitFiles).toHaveBeenCalledTimes(1);
 });
 
-it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async () => {
+it("提交详情与展开文件提供独立的工作区文件和 Diff 入口", async () => {
   const open = vi.fn();
+  const openFile = vi.fn();
   await act(async () =>
     root.render(
       <GraphSection
@@ -734,6 +732,7 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
         mayHavePushedHead={false}
         onDidUndo={() => {}}
         onOpenCommitFile={open}
+        onOpenFile={openFile}
       />,
     ),
   );
@@ -762,6 +761,19 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
     button.textContent?.includes("new.ts"),
   );
   if (!floatingFile) throw new Error("Missing file in details");
+  const floatingOpen = panel.querySelector(
+    'button[aria-label="menu.openFile"]',
+  );
+  const status = floatingFile.querySelector(
+    'span[data-slot="tooltip-trigger"]',
+  );
+  expect(floatingOpen?.parentElement?.classList.contains("col-start-2")).toBe(
+    true,
+  );
+  expect(status?.classList.contains("col-start-3")).toBe(true);
+  expect(status?.nextElementSibling?.classList.contains("col-start-4")).toBe(
+    true,
+  );
   await act(async () => floatingFile.click());
   expect(open).toHaveBeenLastCalledWith({
     repoRoot: "/repo",
@@ -789,10 +801,23 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
   expect(expandedFiles[0].textContent).not.toContain("−3");
   await act(async () => expandedFiles[0].click());
   expect(open.mock.calls[1]).toEqual(open.mock.calls[0]);
+  expect(invoke).not.toHaveBeenCalled();
+  const openWorking = expandedFiles[0]
+    .closest("[data-commit-row]")
+    ?.querySelector<HTMLButtonElement>('button[aria-label="menu.openFile"]');
+  expect(openWorking).toBeDefined();
+  await act(async () => openWorking?.click());
+  expect(invoke).toHaveBeenCalledExactlyOnceWith("fs_stat", {
+    path: "/repo/src/new.ts",
+    workspace: { kind: "local" },
+  });
+  expect(openFile).toHaveBeenCalledExactlyOnceWith("/repo/src/new.ts", "/repo");
+  expect(open).toHaveBeenCalledTimes(2);
   expect(native.gitCommitFiles).toHaveBeenCalledTimes(2);
   // 合并提交展开区域延续两个底部轨道，且不重复绘制节点。
-  const continuation =
-    expandedFiles[0].parentElement?.parentElement?.querySelector("svg");
+  const continuation = expandedFiles[0]
+    .closest("[data-commit-row]")
+    ?.querySelector("svg");
   expect(continuation?.querySelectorAll("line")).toHaveLength(2);
   expect(continuation?.querySelector("circle")).toBeNull();
   await act(async () => rows()[0].click());
@@ -800,6 +825,56 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
     "false",
     "true",
   ]);
+});
+
+it("历史文件在工作区缺失时提示错误且不打开标签", async () => {
+  const openFile = vi.fn();
+  vi.mocked(invoke).mockRejectedValueOnce("missing");
+  await act(async () => renderSearch({ onOpenFile: openFile }));
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="a Commit a"]')
+      ?.click(),
+  );
+  const openWorking = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="menu.openFile"]',
+  );
+  expect(openWorking).not.toBeNull();
+  await act(async () => openWorking?.click());
+  expect(openFile).not.toHaveBeenCalled();
+  expect(errorStore.getState().reports).toEqual([
+    expect.objectContaining({
+      title: "openWorkingFileFailed",
+      details: "missing",
+    }),
+  ]);
+});
+
+it("切换仓库后忽略旧工作区文件检查的结果", async () => {
+  const openFile = vi.fn();
+  let finishStat: (stat: { kind: "file" }) => void = () => {};
+  vi.mocked(invoke).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishStat = resolve;
+    }),
+  );
+  await act(async () => renderSearch({ onOpenFile: openFile }));
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="a Commit a"]')
+      ?.click(),
+  );
+  const openWorking = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="menu.openFile"]',
+  );
+  expect(openWorking).not.toBeNull();
+  await act(async () => openWorking?.click());
+  expect(invoke).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    renderSearch({ repoRoot: "/other", onOpenFile: openFile }),
+  );
+  await act(async () => finishStat({ kind: "file" }));
+  expect(openFile).not.toHaveBeenCalled();
 });
 
 it("点击历史提交文件后保留唯一选中状态", async () => {
