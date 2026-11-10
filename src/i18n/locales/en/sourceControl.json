@@ -127,6 +127,7 @@
   "menu": {
     "openDiff": "Open Diff",
     "openFile": "Open File",
+    "openWorkingFile": "Open Working Tree File",
     "unstage": "Unstage",
     "stage": "Stage",
     "discardChanges": "Discard Changes",

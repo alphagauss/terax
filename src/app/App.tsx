@@ -864,10 +864,22 @@ export default function App() {
   );
 
   const handleOpenFile = useCallback(
-    (path: string, pin?: boolean, copyPathRoot?: string) => {
+    (
+      path: string,
+      pin?: boolean,
+      copyPathRoot?: string,
+      source?: { groupId: number; tabId: number },
+    ) => {
       // 文件默认使用临时标签；双击等显式固定操作仍通过 pin 保留标签。
       const open = isMarkdownPath(path) ? newMarkdownTab : openFileTab;
-      const id = open(path, pin ?? false, explorerRoot ?? undefined);
+      const id = open(
+        path,
+        pin ?? false,
+        explorerRoot ?? undefined,
+        source?.groupId,
+        false,
+        source?.tabId,
+      );
       if (id !== null && copyPathRoot) updateTab(id, { copyPathRoot });
     },
     [explorerRoot, openFileTab, newMarkdownTab, updateTab],
@@ -1690,6 +1702,8 @@ export default function App() {
         void openNewEditor();
       },
       closeTab: (tabId) => void handleClose(tabId),
+      openDiffFile: (path, repoRoot, groupId, tabId) =>
+        handleOpenFile(path, false, repoRoot, { groupId, tabId }),
       runPythonFile: pythonRunner.runTab,
       attachFileToAgent: handleAttachFileToAgent,
       pinTab,
@@ -1704,6 +1718,7 @@ export default function App() {
       handleClose,
       handleDropTab,
       handleAttachFileToAgent,
+      handleOpenFile,
       handleRenameTab,
       groupCwd,
       openNewEditor,

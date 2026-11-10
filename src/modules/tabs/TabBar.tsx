@@ -30,6 +30,8 @@ import {
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import { resolveFileReference } from "@/modules/file-actions/actions";
 import { isPythonFile } from "@/modules/python/path";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import { useShortcutLabel } from "@/modules/shortcuts";
@@ -40,7 +42,12 @@ import {
   useWorkbenchDragSnapshot,
   type WorkbenchDropTarget,
 } from "@/modules/workbench/dragSession";
-import type { Tab, WorkbenchDirection } from "@/modules/workbench/types";
+import type {
+  GitCommitFileDiffTab,
+  GitDiffTab,
+  Tab,
+  WorkbenchDirection,
+} from "@/modules/workbench/types";
 import type { WorkspacePageHandoffMenuActions } from "@/modules/workspace-handoff";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
@@ -75,6 +82,12 @@ type Props = {
   onNewWebPreview: () => void;
   onNewEditor: () => void;
   onClose: (id: number) => void;
+  onOpenDiffFile: (
+    path: string,
+    repoRoot: string,
+    groupId: number,
+    tabId: number,
+  ) => void;
   onRunPythonFile: (id: number, groupId: number) => void;
   onAttachFileToAgent: (path: string) => void;
   /** Pin (promote) a preview tab to persistent on double-click. */
@@ -110,6 +123,7 @@ export function TabBar({
   onNewWebPreview,
   onNewEditor,
   onClose,
+  onOpenDiffFile,
   onRunPythonFile,
   onAttachFileToAgent,
   onPin,
@@ -534,6 +548,16 @@ export function TabBar({
                     className="min-w-48 p-1"
                     onCloseAutoFocus={(e) => e.preventDefault()}
                   >
+                    {(t.kind === "git-diff" ||
+                      t.kind === "git-commit-file") && (
+                      <GitDiffMenuItems
+                        tab={t}
+                        local={workspace.kind === "local"}
+                        onOpenFile={(path) =>
+                          onOpenDiffFile(path, t.repoRoot, groupId, t.id)
+                        }
+                      />
+                    )}
                     {filePath && (
                       <>
                         {workspace.kind === "local" && (
@@ -796,6 +820,70 @@ function DropIndicator() {
       aria-hidden
       className="my-0.5 w-0.5 shrink-0 self-stretch rounded-full bg-primary"
     />
+  );
+}
+
+/** 每次打开菜单时检查工作区文件，历史路径可独立复制。 */
+function GitDiffMenuItems({
+  tab,
+  local,
+  onOpenFile,
+}: {
+  tab: GitDiffTab | GitCommitFileDiffTab;
+  local: boolean;
+  onOpenFile: (path: string) => void;
+}) {
+  const { t } = useTranslation("sourceControl");
+  const repoRoot =
+    local && IS_WINDOWS ? tab.repoRoot.replace(/\\/g, "/") : tab.repoRoot;
+  const path = joinPath(repoRoot, tab.path);
+  const [availablePath, setAvailablePath] = useState<string>();
+  const canOpenFile = availablePath === path;
+  const commitSha = tab.kind === "git-commit-file" ? tab.sha : undefined;
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveFileReference({ path, literalPath: path }).then(
+      (target) => {
+        if (!cancelled && !target.isDir) setAvailablePath(path);
+      },
+      () => {
+        // 历史或已删除文件可能没有对应的工作区文件。
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  return (
+    <>
+      {canOpenFile && (
+        <>
+          <ContextMenuItem onSelect={() => onOpenFile(path)}>
+            {t(commitSha ? "menu.openWorkingFile" : "menu.openFile")}
+          </ContextMenuItem>
+          {local && (
+            <ContextMenuItem onSelect={() => void revealInFinder(path)}>
+              {t("common:fileActions.reveal")}
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+        </>
+      )}
+      <ContextMenuItem onSelect={() => void copyToClipboard(path)}>
+        {t("menu.copyAbsolutePath")}
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => void copyToClipboard(tab.path)}>
+        {t("menu.copyRelativePath")}
+      </ContextMenuItem>
+      {commitSha && (
+        <ContextMenuItem onSelect={() => void copyToClipboard(commitSha)}>
+          {t("gitHistory:copySha")}
+        </ContextMenuItem>
+      )}
+      <ContextMenuSeparator />
+    </>
   );
 }
 

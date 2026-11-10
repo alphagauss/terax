@@ -7,13 +7,18 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Tab } from "@/modules/workbench/types";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TabBar } from "./TabBar";
 
 const copy = vi.hoisted(() => vi.fn());
+const resolveFile = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/clipboard", () => ({ writeClipboardText: copy }));
+vi.mock("@/modules/file-actions/actions", () => ({
+  resolveFileReference: resolveFile,
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -59,6 +64,72 @@ describe("TabBar editor icon", () => {
 });
 
 describe("TabBar file actions", () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  const openDiffFile = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    copy.mockClear();
+    resolveFile.mockReset();
+    openDiffFile.mockClear();
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  async function openMenu() {
+    await act(async () => {
+      container
+        .querySelector('[role="tab"]')
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, button: 2 }),
+        );
+    });
+  }
+
+  async function renderTabMenu(tab: Tab) {
+    const noop = () => {};
+    await act(async () =>
+      root.render(
+        createElement(TabBar, {
+          groupId: 1,
+          tabs: [tab],
+          activeId: 1,
+          activeGroup: true,
+          canClose: true,
+          onSelect: noop,
+          onNew: noop,
+          onNewBlock: noop,
+          onNewPrivate: noop,
+          onNewWebPreview: noop,
+          onNewEditor: noop,
+          onClose: noop,
+          onOpenDiffFile: openDiffFile,
+          onRunPythonFile: noop,
+          onAttachFileToAgent: noop,
+          onPin: noop,
+          onRename: noop,
+          onDropTab: noop,
+          onSplitTab: noop,
+        }),
+      ),
+    );
+    await openMenu();
+  }
+
+  function menuItem(label: string) {
+    return Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ).find((item) => item.textContent === label);
+  }
+
   it("offers only the requested Explorer actions for file tabs", () => {
     expect(source).toContain('tr("common:fileActions.reveal")');
     expect(source).toContain('tr("explorer:menu.copyPath")');
@@ -75,72 +146,91 @@ describe("TabBar file actions", () => {
   ] as const)(
     "%s 文件标签的文件树根为 %s、复制基准为 %s 时复制相对路径",
     async (kind, explorerRoot, copyPathRoot, filePath, relativePath) => {
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-      copy.mockClear();
-      const container = document.createElement("div");
-      document.body.append(container);
-      const root = createRoot(container);
-      const noop = () => {};
-      try {
-        await act(async () =>
-          root.render(
-            createElement(TabBar, {
-              groupId: 1,
-              tabs: [
-                {
-                  kind,
-                  id: 1,
-                  spaceId: "default",
-                  title: "file",
-                  path: filePath,
-                  explorerRoot,
-                  copyPathRoot,
-                  dirty: false,
-                  preview: true,
-                },
-              ],
-              activeId: 1,
-              activeGroup: true,
-              canClose: true,
-              onSelect: noop,
-              onNew: noop,
-              onNewBlock: noop,
-              onNewPrivate: noop,
-              onNewWebPreview: noop,
-              onNewEditor: noop,
-              onClose: noop,
-              onRunPythonFile: noop,
-              onAttachFileToAgent: noop,
-              onPin: noop,
-              onRename: noop,
-              onDropTab: noop,
-              onSplitTab: noop,
-            }),
-          ),
-        );
-        await act(async () => {
-          container
-            .querySelector('[role="tab"]')
-            ?.dispatchEvent(
-              new MouseEvent("contextmenu", { bubbles: true, button: 2 }),
-            );
-        });
-        const item = Array.from(
-          document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-        ).find((item) => item.textContent === "explorer:menu.copyRelativePath");
-        expect(item).toBeDefined();
-        await act(async () => item?.click());
-        if (relativePath) {
-          expect(copy).toHaveBeenCalledExactlyOnceWith(relativePath);
-        } else {
-          expect(item?.getAttribute("aria-disabled")).toBe("true");
-          expect(copy).not.toHaveBeenCalled();
-        }
-      } finally {
-        await act(async () => root.unmount());
-        container.remove();
-        vi.unstubAllGlobals();
+      await renderTabMenu({
+        kind,
+        id: 1,
+        spaceId: "default",
+        title: "file",
+        path: filePath,
+        explorerRoot,
+        copyPathRoot,
+        dirty: false,
+        preview: true,
+      });
+      const item = menuItem("explorer:menu.copyRelativePath");
+      expect(item).toBeDefined();
+      await act(async () => item?.click());
+      if (relativePath) {
+        expect(copy).toHaveBeenCalledExactlyOnceWith(relativePath);
+      } else {
+        expect(item?.getAttribute("aria-disabled")).toBe("true");
+        expect(copy).not.toHaveBeenCalled();
       }
     },
   );
+
+  const diffTab = {
+    id: 1,
+    spaceId: "default",
+    title: "file.ts",
+    path: "src/file.ts",
+    repoRoot: "/repo",
+    originalPath: "src/old.ts",
+    preview: true,
+  };
+
+  const historyTab = {
+    ...diffTab,
+    kind: "git-commit-file",
+    sha: "0123456789abcdef",
+    shortSha: "0123456",
+    subject: "Rename file",
+  } as const;
+
+  it.each([
+    [
+      "worktree",
+      { ...diffTab, kind: "git-diff", side: "worktree" },
+      "menu.openFile",
+    ],
+    ["index", { ...diffTab, kind: "git-diff", side: "index" }, "menu.openFile"],
+    ["history", historyTab, "menu.openWorkingFile"],
+  ] as const)(
+    "opens the current file from a %s diff",
+    async (source, tab, label) => {
+      resolveFile.mockResolvedValue({
+        path: "/repo/src/file.ts",
+        isDir: false,
+      });
+      await renderTabMenu(tab);
+      expect(menuItem("common:fileActions.reveal")).toBeDefined();
+      expect(Boolean(menuItem("gitHistory:copySha"))).toBe(
+        source === "history",
+      );
+      await act(async () => menuItem(label)?.click());
+      expect(openDiffFile).toHaveBeenCalledExactlyOnceWith(
+        "/repo/src/file.ts",
+        "/repo",
+        1,
+        1,
+      );
+    },
+  );
+
+  it("copies paths and the full SHA even when the historical file is missing", async () => {
+    resolveFile.mockRejectedValue(new Error("missing file"));
+    await renderTabMenu(historyTab);
+    expect(menuItem("menu.openWorkingFile")).toBeUndefined();
+    expect(menuItem("common:fileActions.reveal")).toBeUndefined();
+    await act(async () => menuItem("menu.copyAbsolutePath")?.click());
+    await openMenu();
+    await act(async () => menuItem("menu.copyRelativePath")?.click());
+    await openMenu();
+    await act(async () => menuItem("gitHistory:copySha")?.click());
+    expect(copy.mock.calls).toEqual([
+      ["/repo/src/file.ts"],
+      ["src/file.ts"],
+      ["0123456789abcdef"],
+    ]);
+  });
 });

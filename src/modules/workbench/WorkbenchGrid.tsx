@@ -36,6 +36,12 @@ export type WorkbenchChromeActions = {
   newWebPreview: (groupId: number) => void;
   newEditor: (groupId: number) => void;
   closeTab: (tabId: number) => void;
+  openDiffFile: (
+    path: string,
+    repoRoot: string,
+    groupId: number,
+    tabId: number,
+  ) => void;
   runPythonFile: (tabId: number, groupId: number) => void;
   attachFileToAgent: (path: string) => void;
   pinTab: (tabId: number) => void;
@@ -150,6 +156,7 @@ function WorkbenchGroup({
             onNewWebPreview={() => actions.newWebPreview(group.id)}
             onNewEditor={() => actions.newEditor(group.id)}
             onClose={actions.closeTab}
+            onOpenDiffFile={actions.openDiffFile}
             onRunPythonFile={actions.runPythonFile}
             onAttachFileToAgent={actions.attachFileToAgent}
             onPin={actions.pinTab}

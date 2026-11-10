@@ -70,15 +70,23 @@ function isPreviewTab(tab: Tab | undefined): tab is PreviewTab {
   );
 }
 
-/** 用新的文件或 Git 差异页面原位替换当前分组中的临时预览。 */
+/** 替换临时预览，或在从该预览打开新页面时保留来源。 */
 function replacePreview(
   state: WorkbenchState,
   groupId: number,
   previousId: number,
   tab: PreviewTab,
+  sourcePreviewId?: number,
 ): WorkbenchState {
   const owner = findGroupForTab(state, previousId);
   if (!owner || owner.group.id !== groupId) return state;
+  if (previousId === sourcePreviewId) {
+    return addTabToGroup(
+      patchTab(state, previousId, { preview: false }),
+      tab,
+      groupId,
+    );
+  }
   const tabs = { ...state.tabs };
   delete tabs[previousId];
   tabs[tab.id] = tab;
@@ -383,6 +391,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       explorerRoot?: string,
       groupId?: number,
       forceNew = false,
+      sourcePreviewId?: number,
     ) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
@@ -423,7 +432,9 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (!pin && !forceNew) {
         const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
-          commit((current) => replacePreview(current, target, preview.id, tab));
+          commit((current) =>
+            replacePreview(current, target, preview.id, tab, sourcePreviewId),
+          );
           return id;
         }
       }
@@ -441,6 +452,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       explorerRoot?: string,
       groupId?: number,
       forceNew = false,
+      sourcePreviewId?: number,
     ) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
@@ -481,7 +493,9 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (!pin && !forceNew) {
         const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
-          commit((current) => replacePreview(current, target, preview.id, tab));
+          commit((current) =>
+            replacePreview(current, target, preview.id, tab, sourcePreviewId),
+          );
           return id;
         }
       }

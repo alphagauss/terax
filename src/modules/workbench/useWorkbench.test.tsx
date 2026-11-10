@@ -55,6 +55,67 @@ it("closes tabs across split groups and Spaces while keeping the active Space", 
 });
 
 describe("useWorkbench Git diff previews", () => {
+  it.each(["editor", "markdown"] as const)(
+    "keeps the source diff when opening a new %s preview",
+    (kind) => {
+      root = createRoot(document.createElement("div"));
+      act(() => root?.render(createElement(Harness)));
+      const path = kind === "editor" ? "file.ts" : "file.md";
+      let diffId: number | null | undefined;
+      act(() => {
+        if (!workbench) return;
+        diffId = workbench.openGitDiffTab({
+          path,
+          repoRoot: "/work",
+          side: "worktree",
+        });
+        const open =
+          kind === "editor" ? workbench.openFileTab : workbench.newMarkdownTab;
+        open(
+          `/work/${path}`,
+          false,
+          "/work",
+          undefined,
+          false,
+          diffId ?? undefined,
+        );
+      });
+      expect(workbench?.tabs).toMatchObject([
+        { id: diffId, kind: "git-diff", preview: false },
+        { kind, path: `/work/${path}`, preview: true },
+      ]);
+      expect(workbench?.activeId).toBe(workbench?.tabs[1].id);
+      if (workbench) assertWorkbenchState(workbench.state);
+    },
+  );
+
+  it("leaves the source diff as a preview when revealing an existing file tab", () => {
+    root = createRoot(document.createElement("div"));
+    act(() => root?.render(createElement(Harness)));
+    let fileId: number | null | undefined;
+    act(() => {
+      fileId = workbench?.openFileTab("/work/file.ts");
+      const diffId = workbench?.openGitDiffTab({
+        path: "file.ts",
+        repoRoot: "/work",
+        side: "index",
+      });
+      workbench?.openFileTab(
+        "/work/file.ts",
+        false,
+        "/work",
+        undefined,
+        false,
+        diffId ?? undefined,
+      );
+    });
+    expect(workbench?.tabs).toMatchObject([
+      { id: fileId, kind: "editor", preview: false },
+      { kind: "git-diff", preview: true },
+    ]);
+    expect(workbench?.activeId).toBe(fileId);
+  });
+
   it("replaces the temporary diff until the tab is pinned", () => {
     root = createRoot(document.createElement("div"));
     act(() => root?.render(createElement(Harness)));

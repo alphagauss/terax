@@ -127,6 +127,7 @@
   "menu": {
     "openDiff": "打开差异",
     "openFile": "打开文件",
+    "openWorkingFile": "打开工作区文件",
     "unstage": "取消暂存",
     "stage": "暂存",
     "discardChanges": "放弃更改",
