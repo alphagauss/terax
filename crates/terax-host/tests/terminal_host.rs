@@ -153,33 +153,55 @@ fn detached_service_is_not_listed_and_survives_host_exit() {
     );
     #[cfg(windows)]
     let (command, shell) = {
-        let script = root.path().join("service.ps1");
-        std::fs::write(&script, format!(
-            "Set-Content -LiteralPath '{}' ready\n$deadline = [DateTime]::UtcNow.AddSeconds(15)\nwhile (!(Test-Path -LiteralPath '{}') -and [DateTime]::UtcNow -lt $deadline) {{ Start-Sleep -Milliseconds 20 }}\nif (Test-Path -LiteralPath '{}') {{ Set-Content -LiteralPath '{}' done }}",
-            ready.display(), release.display(), release.display(), finished.display(),
-        )).unwrap();
+        std::fs::write(
+            root.path().join("service.ps1"),
+            r#"Set-Content -LiteralPath ready -Value ready
+$deadline = [DateTime]::UtcNow.AddSeconds(45)
+while (!(Test-Path -LiteralPath release) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }
+if (Test-Path -LiteralPath release) { Set-Content -LiteralPath finished -Value done }"#,
+        )
+        .unwrap();
         // WMI 由系统服务创建进程，不继承受管启动 Shell 的 Job Object。
         (
-            format!(
-                "$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ ShowWindow = [uint16]0 }}; $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = 'cmd.exe /d /c powershell.exe -NoProfile -NonInteractive -File \"{}\" <NUL >\"{}\" 2>&1'; CurrentDirectory = '{}'; ProcessStartupInformation = $startup }}; if ($result.ReturnValue -ne 0) {{ throw \"Create failed: $($result.ReturnValue)\" }}; $result.ProcessId",
-                script.display(), root.path().join("service.log").display(), root.path().display(),
-            ),
+            r#"$ErrorActionPreference = 'Stop'
+Import-Module "$PSHOME\Modules\CimCmdlets\CimCmdlets.psd1"
+$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+$command = '"{0}\System32\cmd.exe" /d /s /c ""{0}\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File service.ps1 <NUL >service.log 2>&1"' -f $env:SystemRoot
+$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $PWD.Path; ProcessStartupInformation = $startup }
+if ($result.ReturnValue -ne 0 -or !$result.ProcessId) { throw "Create failed: $($result.ReturnValue)" }
+$result.ProcessId"#
+                .to_string(),
             "powershell",
         )
     };
     let mut host = HostProcess::new(root.path());
     let owner = "6b9145ce-933e-4c54-8a4b-90831a2e4d84";
+    let yield_time_ms = if cfg!(windows) { 0 } else { 10000 };
     let result = host.call("shell_exec", json!({
         "ownerSessionId": owner, "command": command, "initialCwd": root.path(), "cwd": root.path(),
-        "permissionMode": "full-access", "timeoutSecs": 30, "yieldTimeMs": 10000, "maxOutputBytes": 4096, "shell": shell, "login": false
+        "permissionMode": "full-access", "timeoutSecs": 30, "yieldTimeMs": yield_time_ms, "maxOutputBytes": 4096, "shell": shell, "login": false
     }));
+    #[cfg(windows)]
+    let result = if result["result"]["status"] == "running" {
+        host.call(
+            "shell_process",
+            json!({"ownerSessionId": owner, "processId": result["result"]["process_id"],
+                "action": "close_stdin", "closeStdin": false, "yieldTimeMs": 15000}),
+        )
+    } else {
+        result
+    };
     assert_eq!(result["result"]["status"], "exited", "{result}");
     assert_eq!(result["result"]["exit_code"], 0, "{result}");
     let deadline = Instant::now() + Duration::from_secs(5);
     while !ready.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(ready.exists(), "service did not start: {result}");
+    assert!(
+        ready.exists(),
+        "service did not start: {result}\n{}",
+        std::fs::read_to_string(root.path().join("service.log")).unwrap_or_default()
+    );
     assert_eq!(
         host.call(
             "shell_list",
@@ -200,6 +222,7 @@ fn detached_service_is_not_listed_and_survives_host_exit() {
     }
     assert!(
         finished.exists(),
-        "detached service did not survive host exit"
+        "detached service did not survive host exit\n{}",
+        std::fs::read_to_string(root.path().join("service.log")).unwrap_or_default()
     );
 }
