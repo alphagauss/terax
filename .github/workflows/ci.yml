@@ -109,8 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows 2025 的托管镜像上，PowerShell 子进程集成测试持续超时。
-        os: [windows-2022, macos-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -122,6 +121,7 @@ jobs:
           workspaces: . -> target
 
       - uses: taiki-e/install-action@v2.85.12
+        if: runner.os != 'Windows'
         with:
           tool: cargo-nextest
 
@@ -132,9 +132,10 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo nextest run --workspace --locked --no-fail-fast --retries 2
 
-      - name: cargo nextest (Windows)
+      - name: cargo test (Windows)
         if: runner.os == 'Windows'
-        run: cargo nextest run --workspace --locked --no-fail-fast --retries 2 --test-threads 2
+        # 使用 Cargo 测试宿主，让 Windows 进程测试直接验证应用的 Job Object。
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=2
 
   coverage:
     runs-on: ubuntu-24.04
