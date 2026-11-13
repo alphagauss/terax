@@ -383,7 +383,7 @@ fn parse_scan(bytes: &[u8]) -> Result<SyncScan, TransferFailure> {
     }
     let mut scan = SyncScan::default();
     let result = &mut scan.entries;
-    for fields in fields.chunks_exact(4) {
+    for fields in fields.as_chunks::<4>().0 {
         validate_relative(fields[0], false)?;
         if fields[1] == "g" {
             if fields[0].rsplit('/').next() != Some(".gitignore")

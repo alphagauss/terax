@@ -963,7 +963,12 @@ mod tests {
 
         let (directories, files) = canonical_launch_targets(vec![file.clone()]).unwrap();
         assert!(directories.is_empty());
-        assert_eq!(files, vec![crate::modules::fs::to_canon(&file)]);
+        assert_eq!(
+            files,
+            vec![crate::modules::fs::to_canon(
+                fs::canonicalize(&file).unwrap()
+            )]
+        );
     }
 
     #[test]
@@ -991,8 +996,8 @@ mod tests {
         assert_eq!(
             files,
             vec![
-                crate::modules::fs::to_canon(&one),
-                crate::modules::fs::to_canon(&two),
+                crate::modules::fs::to_canon(fs::canonicalize(&one).unwrap()),
+                crate::modules::fs::to_canon(fs::canonicalize(&two).unwrap()),
             ]
         );
     }
@@ -1009,8 +1014,8 @@ mod tests {
         assert_eq!(
             directories,
             vec![
-                crate::modules::fs::to_canon(one),
-                crate::modules::fs::to_canon(two)
+                crate::modules::fs::to_canon(fs::canonicalize(one).unwrap()),
+                crate::modules::fs::to_canon(fs::canonicalize(two).unwrap())
             ]
         );
         assert!(files.is_empty());

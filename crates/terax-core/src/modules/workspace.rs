@@ -609,10 +609,8 @@ pub fn decode_command_output(bytes: &[u8]) -> String {
         } else {
             0
         };
-        let units: Vec<u16> = bytes[start..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let (pairs, _) = bytes[start..].as_chunks::<2>();
+        let units: Vec<u16> = pairs.iter().copied().map(u16::from_le_bytes).collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(bytes).into_owned()

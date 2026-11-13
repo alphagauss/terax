@@ -996,7 +996,7 @@ impl RemoteManager {
                     app,
                     TunnelEventKind::Failed,
                     profile_id,
-                    error.info,
+                    error.info.map(|info| *info),
                     Some(error.message),
                 ),
             }

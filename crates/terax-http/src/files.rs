@@ -56,8 +56,8 @@ fn transform(bytes: &mut Vec<u8>, transform: Option<&ByteTransform>) -> Result<(
         return Err("invalid encrypted length".into());
     }
     let cipher = Aes128::new(&Array::from(*key));
-    for chunk in bytes.chunks_exact_mut(16) {
-        let mut block = Array::try_from(&*chunk).expect("AES block length");
+    for chunk in bytes.as_chunks_mut::<16>().0 {
+        let mut block = Array::from(*chunk);
         if encrypt {
             cipher.encrypt_block(&mut block);
         } else {

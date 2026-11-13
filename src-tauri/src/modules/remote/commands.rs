@@ -252,7 +252,7 @@ pub async fn ssh_tunnel_start(
                 &host::remote(&app),
                 TunnelEventKind::Failed,
                 &profile_id,
-                error.info,
+                error.info.map(|info| *info),
                 Some(message.clone()),
             );
             Err(message)
@@ -289,7 +289,7 @@ pub async fn ssh_tunnel_stop(
                 &host::remote(&app),
                 TunnelEventKind::Failed,
                 &existing.profile_id,
-                error.info,
+                error.info.map(|info| *info),
                 Some(message.clone()),
             );
             return Err(message);
@@ -330,7 +330,7 @@ pub async fn ssh_tunnel_update(
                 &host::remote(&app),
                 TunnelEventKind::Failed,
                 &existing.profile_id,
-                error.info,
+                error.info.map(|info| *info),
                 Some(message.clone()),
             );
             Err(message)

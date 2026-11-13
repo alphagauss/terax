@@ -177,14 +177,14 @@ where
 
 #[derive(Clone, Debug)]
 pub struct TunnelFailure {
-    pub info: Option<TunnelInfo>,
+    pub info: Option<Box<TunnelInfo>>,
     pub message: String,
 }
 
 impl TunnelFailure {
     pub(super) fn new(info: Option<TunnelInfo>, message: impl Into<String>) -> Self {
         Self {
-            info,
+            info: info.map(Box::new),
             message: message.into(),
         }
     }
@@ -765,13 +765,13 @@ async fn replace_with_rollback<O: ReplaceOperations>(
                     replacement_error.message
                 ),
             )),
-            Err(restore_error) => Err(TunnelFailure::new(
-                restore_error.info,
-                format!(
+            Err(restore_error) => Err(TunnelFailure {
+                info: restore_error.info,
+                message: format!(
                     "{}. The previous tunnel could not be restored: {}",
                     replacement_error.message, restore_error.message
                 ),
-            )),
+            }),
         },
     }
 }
