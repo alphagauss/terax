@@ -1,9 +1,10 @@
 [package]
 name = "terax"
 default-run = "terax"
-version = "0.8.2"
+version = "1.0.0"
 description = "Terax - an open-source AI-native terminal emulator"
 authors = ["crynta"]
+repository = "https://github.com/alphagauss/terax"
 license = "Apache-2.0"
 edition = "2021"
 

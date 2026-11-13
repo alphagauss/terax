@@ -20,7 +20,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-打包使用 `pnpm tauri build`。检查命令见 [测试指南](docs/contributing/testing.md)。
+本地编译使用 `pnpm tauri build`。在 Windows x64 或 Apple Silicon macOS 上生成发行包时，使用 `pnpm tauri build --config src-tauri/tauri.release.conf.json`。检查命令见 [测试指南](docs/contributing/testing.md)。
 
 ## 配置
 
