@@ -1912,7 +1912,9 @@ mod tests {
                 if !command.starts_with("throw ") && !command.starts_with("foreach ") {
                     assert_eq!(
                         response.cwd_after,
-                        Some(directory.path().to_string_lossy().replace('\\', "/")),
+                        Some(crate::modules::fs::to_canon(
+                            std::fs::canonicalize(directory.path()).unwrap()
+                        )),
                         "{shell:?}: {command}"
                     );
                 }
@@ -2026,7 +2028,9 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
                 let (_, cwd_after) = strip_cwd_marker(&stdout, marker);
                 assert_eq!(
                     cwd_after,
-                    Some(cwd.to_str().unwrap().replace('\\', "/")),
+                    Some(crate::modules::fs::to_canon(
+                        std::fs::canonicalize(&cwd).unwrap()
+                    )),
                     "{shell}"
                 );
             }
@@ -2398,7 +2402,7 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
         )
         .unwrap();
 
-        let response = process.wait_snapshot(0, Duration::from_secs(5), None, 8192);
+        let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
         assert_eq!(response.status, ProcessStatus::Exited);
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(

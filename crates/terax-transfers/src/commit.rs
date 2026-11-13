@@ -584,7 +584,7 @@ impl LocalCommitTransaction {
             }
         }
         for action in self.undo.iter().rev() {
-            if let Err(error) = rename_no_replace(&action.target, &action.source) {
+            if let Err(error) = rename_local_entry(&action.target, &action.source, || {}) {
                 failure.get_or_insert(error);
             }
         }
@@ -739,11 +739,50 @@ fn move_local_entry(
     target: &Path,
     transaction: &mut LocalCommitTransaction,
 ) -> std::io::Result<()> {
-    rename_no_replace(source, target)?;
-    transaction.undo.push(LocalUndo {
-        source: source.to_path_buf(),
-        target: target.to_path_buf(),
-    });
+    rename_local_entry(source, target, || {
+        transaction.undo.push(LocalUndo {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+        });
+    })
+}
+
+fn rename_local_entry(source: &Path, target: &Path, moved: impl FnOnce()) -> std::io::Result<()> {
+    let result = rename_no_replace(source, target);
+    #[cfg(unix)]
+    if let Err(error) = &result {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        if error.kind() == std::io::ErrorKind::PermissionDenied
+            && source.parent() != target.parent()
+        {
+            // Unix 跨父目录移动目录时可能需要写入其 .. 条目。通过句柄恢复权限，避免跟随链接。
+            let directory = match std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+                .open(source)
+            {
+                Ok(directory) => directory,
+                Err(_) => return result,
+            };
+            let original = directory.metadata()?.permissions();
+            if original.mode() & 0o200 == 0 {
+                directory
+                    .set_permissions(std::fs::Permissions::from_mode(original.mode() | 0o200))?;
+                let renamed = rename_no_replace(source, target);
+                if renamed.is_ok() {
+                    moved();
+                }
+                let restored = directory.set_permissions(original);
+                return match renamed {
+                    Ok(()) => restored,
+                    Err(error) => Err(transaction_error(error, restored)),
+                };
+            }
+        }
+    }
+    result?;
+    moved();
     Ok(())
 }
 
@@ -1479,11 +1518,20 @@ mod tests {
         tokio::fs::write(root.stage.join("new.txt"), b"new")
             .await
             .unwrap();
+        let staged_readonly = root.stage.join("new-readonly");
+        std::fs::create_dir(&staged_readonly).unwrap();
+        let mut permissions = std::fs::metadata(&staged_readonly).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&staged_readonly, permissions).unwrap();
 
         let pending_cleanup = commit_local_root(&root).await.unwrap();
 
         assert!(pending_cleanup.is_empty());
         assert!(!backup.exists());
+        assert!(std::fs::metadata(root.final_path.join("new-readonly"))
+            .unwrap()
+            .permissions()
+            .readonly());
         assert_eq!(
             tokio::fs::read(root.final_path.join("new.txt"))
                 .await

@@ -99,7 +99,7 @@ jobs:
         continue-on-error: true
 
       - name: cargo nextest
-        run: cargo nextest run --workspace --locked
+        run: cargo nextest run --workspace --locked --no-fail-fast
 
       - name: fish shell integration
         run: fish --no-config resources/shell-integration/init.test.fish
@@ -128,7 +128,7 @@ jobs:
         run: cargo check --workspace --all-targets --locked
 
       - name: cargo nextest
-        run: cargo nextest run --workspace --locked --retries 2
+        run: cargo nextest run --workspace --locked --no-fail-fast --retries 2
 
   coverage:
     runs-on: ubuntu-24.04
