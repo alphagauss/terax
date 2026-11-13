@@ -2499,6 +2499,11 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
             let stopped = process.terminate_as(ProcessStatus::Terminated).await;
             std::fs::write(directory.path().join("release"), "continue").unwrap();
             stopped.unwrap();
+            // wait 线程可能刚接手最终输出收尾，等它释放清理锁再检查资源归属。
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while process.holds_resources() && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
             assert!(!process.holds_resources());
             tokio::time::sleep(Duration::from_millis(500)).await;
             assert!(!directory.path().join("survived").exists());
