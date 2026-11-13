@@ -109,7 +109,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # 固定 Windows 镜像，避免 runner 镜像切换影响 PowerShell 进程测试。
+        os: [windows-2025, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
