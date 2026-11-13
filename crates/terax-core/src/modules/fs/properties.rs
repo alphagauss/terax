@@ -234,17 +234,15 @@ fn system_time_millis(value: std::io::Result<SystemTime>) -> Option<u64> {
 
 /// 判断路径是否是递归扫描不得跟随的符号链接或 Windows 重解析点。
 fn is_link_like(metadata: &std::fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        metadata.file_type().is_symlink()
+            || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
     #[cfg(not(windows))]
-    false
+    metadata.file_type().is_symlink()
 }
 
 fn local_snapshot(path: &str, resolved: &Path) -> Result<FilePropertiesSnapshot, String> {
