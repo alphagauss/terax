@@ -109,8 +109,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 固定 Windows 镜像，避免 runner 镜像切换影响 PowerShell 进程测试。
-        os: [windows-2025, macos-latest]
+        # Windows 2025 的托管镜像上，PowerShell 子进程集成测试持续超时。
+        os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
