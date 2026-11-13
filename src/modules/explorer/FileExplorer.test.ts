@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, createElement, forwardRef } from "react";
+import { act, createElement, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +22,9 @@ const mocks = vi.hoisted(() => ({
   remoteReady: true,
   runtimePhase: "idle",
   names: ["file.txt"],
-  childNodes: {} as Record<string, unknown>,
+  childNodes: {} as Record<string, { status: string; entries?: unknown[] }>,
+  expand: vi.fn(),
+  searching: false,
 }));
 
 afterEach(() => {
@@ -37,6 +39,8 @@ afterEach(() => {
   mocks.runtimePhase = "idle";
   mocks.names = ["file.txt"];
   mocks.childNodes = {};
+  mocks.expand.mockClear();
+  mocks.searching = false;
 });
 
 vi.mock("@/components/controls/button", () => ({
@@ -97,6 +101,7 @@ vi.mock("@/components/menu/context-menu", () => {
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
 vi.mock("@/lib/errors", () => ({ reportError: mocks.reportError }));
 
 vi.mock("@/modules/transfers/dialogs", () => ({
@@ -191,7 +196,17 @@ vi.mock("@/modules/sidebar", () => ({
   SidebarSectionAction: () => null,
 }));
 vi.mock("./ExplorerSearch", () => ({
-  ExplorerSearch: forwardRef(() => null),
+  ExplorerSearch: function ExplorerSearch({
+    open,
+    onActiveChange,
+  }: {
+    open: boolean;
+    onActiveChange: (active: boolean) => void;
+  }) {
+    const active = open && mocks.searching;
+    useEffect(() => onActiveChange(active), [active, onActiveChange]);
+    return null;
+  },
 }));
 vi.mock("./InlineInput", () => ({ InlineInput: () => null }));
 vi.mock("./TreeRow", () => ({
@@ -218,9 +233,9 @@ vi.mock("./TreeRow", () => ({
   PendingRow: () => null,
   StatusRow: () => null,
 }));
-vi.mock("./lib/contextActions", () => ({
+vi.mock("./lib/contextActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/contextActions")>()),
   copyToClipboard: vi.fn(),
-  relativePath: vi.fn(),
   revealInFinder: vi.fn(),
 }));
 vi.mock("./lib/iconResolver", () => ({
@@ -248,7 +263,7 @@ vi.mock("./lib/useGitStatus", () => ({
 vi.mock("./lib/useFileTree", () => ({
   ancestorDirs: () => [],
   dirname: (value: string) => value.slice(0, value.lastIndexOf("/")),
-  useFileTree: () => ({
+  useFileTree: (rootPath: string | null) => ({
     beginCreate: vi.fn(),
     beginRename: vi.fn(),
     cancelCreate: vi.fn(),
@@ -258,19 +273,23 @@ vi.mock("./lib/useFileTree", () => ({
     commitRename: vi.fn(),
     deletePath: vi.fn(),
     deletingPaths: new Set<string>(),
-    expand: vi.fn(),
-    expanded: new Set(Object.keys(mocks.childNodes)),
+    expand: mocks.expand,
+    expanded: new Set(
+      Object.entries(mocks.childNodes)
+        .filter(([, node]) => node.status !== "idle")
+        .map(([path]) => path),
+    ),
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     movePath: vi.fn(),
     nodes: {
       ...mocks.childNodes,
-      "/home/remote": {
+      [rootPath ?? ""]: {
         status: mocks.rootStatus,
         entries: mocks.empty
           ? []
           : mocks.names.map((name) => ({
               name,
-              kind: mocks.childNodes[`/home/remote/${name}`] ? "dir" : "file",
+              kind: mocks.childNodes[`${rootPath}/${name}`] ? "dir" : "file",
               gitignored: false,
             })),
       },
@@ -389,6 +408,86 @@ it("keeps every file row mounted across sidebar switches and locates the active 
         .querySelector("[data-timeline-enabled]")
         ?.getAttribute("data-timeline-enabled"),
     ).toBe("false");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("从 Git 再次打开同一工作区文件时，在资源管理器可见后定位", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const rootPath = "d:/project";
+  const parent = `${rootPath}/Src`;
+  mocks.names = ["Src", "other.txt"];
+  mocks.childNodes[parent] = { status: "idle" };
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = (
+    active: boolean,
+    activeFileRevealVersion = 1,
+    activeFilePath: string | null = "D:/Project/src/file.txt",
+  ) =>
+    act(async () =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath,
+          active,
+          activeFileRevealVersion,
+          activeFilePath,
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+  const tree = () => container.querySelector('[role="tree"]');
+  const selected = () => tree()?.getAttribute("aria-activedescendant");
+  const fileId = `file-tree-item-${encodeURIComponent(`${parent}/File.txt`)}`;
+  try {
+    await render(false);
+    expect(mocks.expand).not.toHaveBeenCalled();
+    await render(true);
+    expect(mocks.expand).toHaveBeenCalledWith(parent);
+    expect(selected()).toBeNull();
+
+    mocks.childNodes[parent] = {
+      status: "loaded",
+      entries: [{ name: "File.txt", kind: "file" }],
+    };
+    await render(true);
+    expect(selected()).toBe(fileId);
+
+    await act(async () => {
+      tree()?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    const otherId = `file-tree-item-${encodeURIComponent(`${rootPath}/other.txt`)}`;
+    expect(selected()).toBe(otherId);
+    await render(false, 1, null);
+    await render(true, 1, null);
+    expect(selected()).toBe(otherId);
+    await render(true);
+    expect(selected()).toBe(otherId);
+    await render(false, 2);
+    expect(selected()).toBe(otherId);
+    await render(true, 2);
+    expect(selected()).toBe(fileId);
+
+    mocks.expand.mockClear();
+    await render(true, 3, "D:/Project/src/removed/file.txt");
+    await render(true, 4, "D:/Project-other/src/file.txt");
+    expect(mocks.expand).not.toHaveBeenCalled();
+    expect(selected()).toBe(fileId);
+
+    mocks.searching = true;
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="searchFiles"]')
+        ?.click(),
+    );
+    expect(tree()).toBeNull();
+    await render(false, 5);
+    expect(tree()).toBeNull();
+    await render(true, 5);
+    expect(selected()).toBe(fileId);
   } finally {
     await act(async () => root.unmount());
   }

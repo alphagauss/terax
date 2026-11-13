@@ -277,6 +277,10 @@ export default function App() {
   }, []);
   const webPreviewRefs = useRef<Map<number, WebPreviewPaneHandle>>(new Map());
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
+  const [sourceControlFileOpen, setSourceControlFileOpen] = useState<{
+    tabId: number;
+    version: number;
+  } | null>(null);
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
   const { zoomIn, zoomOut, zoomReset } = useZoom();
@@ -881,6 +885,7 @@ export default function App() {
         source?.tabId,
       );
       if (id !== null && copyPathRoot) updateTab(id, { copyPathRoot });
+      return id;
     },
     [explorerRoot, openFileTab, newMarkdownTab, updateTab],
   );
@@ -1855,6 +1860,11 @@ export default function App() {
           onReconnect={requestSshReconnect}
           gitStatus={explorerGitDecorations ? sourceControl.status : null}
           activeFilePath={explorerActiveFilePath}
+          activeFileRevealVersion={
+            sourceControlFileOpen?.tabId === activeTab?.id
+              ? sourceControlFileOpen?.version
+              : undefined
+          }
           onOpenFile={(path, pin) =>
             openWorkspaceFromSidebar("explorer", () =>
               handleOpenFile(path, pin),
@@ -1915,9 +1925,15 @@ export default function App() {
             )
           }
           onOpenFile={(path, repoRoot) =>
-            openWorkspaceFromSidebar("source-control", () =>
-              handleOpenFile(path, false, repoRoot),
-            )
+            openWorkspaceFromSidebar("source-control", () => {
+              const tabId = handleOpenFile(path, false, repoRoot);
+              if (tabId !== null) {
+                setSourceControlFileOpen((previous) => ({
+                  tabId,
+                  version: (previous?.version ?? 0) + 1,
+                }));
+              }
+            })
           }
           onNavigateToPath={(path) =>
             openWorkspaceFromSidebar("source-control", () => cdInNewTab(path))

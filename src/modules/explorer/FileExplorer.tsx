@@ -38,7 +38,7 @@ import {
 } from "@/components/controls/alert-dialog";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
-import { fmtShortcut, MOD_KEY } from "@/lib/platform";
+import { fmtShortcut, IS_WINDOWS, MOD_KEY } from "@/lib/platform";
 import { scrollListRowIntoView } from "@/lib/scrollIntoView";
 import { cn } from "@/lib/utils";
 import { FileTimeline } from "@/modules/git-history/FileTimeline";
@@ -162,6 +162,7 @@ type Props = {
   onOpenPath?: (path: string) => void;
   onReconnect?: () => void;
   activeFilePath?: string | null;
+  activeFileRevealVersion?: number;
   onOpenFile: (path: string, pin?: boolean) => void;
   onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
   onPathRenamed?: (from: string, to: string) => void;
@@ -437,6 +438,7 @@ export const FileExplorer = memo(
       onOpenPath,
       onReconnect,
       activeFilePath,
+      activeFileRevealVersion,
       onOpenFile,
       onOpenCommitFile,
       onPathRenamed,
@@ -681,35 +683,68 @@ export const FileExplorer = memo(
       }
     }, [entryIndexByPath, pasteSelection, rootPath, scrollEntryIntoView]);
 
-    const [lastSyncedActivePath, setLastSyncedActivePath] = useViewState<
-      string | null
-    >(`activePath:${rootPath}`, null);
+    const [lastSyncedFile, setLastSyncedFile] = useViewState<string | null>(
+      `activePath:${rootPath}`,
+      null,
+    );
+    const windowsPaths = IS_WINDOWS && workspaceEnv.kind === "local";
 
     useEffect(() => {
-      if (
-        !active ||
-        !activeFilePath ||
-        activeFilePath === lastSyncedActivePath
-      ) {
-        return;
-      }
-      if (rootPath) {
-        for (const dir of ancestorDirs(rootPath, activeFilePath)) {
-          tree.expand(dir);
+      if (!active || !rootPath || !activeFilePath) return;
+      if (isSearchActive && activeFileRevealVersion === undefined) return;
+      const fileKey = `${activeFileRevealVersion ?? 0}\0${activeFilePath}`;
+      if (fileKey === lastSyncedFile) return;
+
+      const path = windowsPaths
+        ? activeFilePath.replace(/\\/g, "/")
+        : activeFilePath;
+      const root = windowsPaths ? rootPath.replace(/\\/g, "/") : rootPath;
+      const relative = relativePath(root, path, windowsPaths);
+      if (relative === path || relative === ".") return;
+
+      // 逐层使用文件树返回的名称，等待目录加载后再继续定位。
+      let entryPath = rootPath;
+      const segments = relative.split("/");
+      for (const [index, name] of segments.entries()) {
+        const node = tree.nodes[entryPath];
+        if (node?.status !== "loaded") return;
+        const entry =
+          node.entries.find((entry) => entry.name === name) ??
+          (windowsPaths
+            ? node.entries.find(
+                (entry) => entry.name.toLowerCase() === name.toLowerCase(),
+              )
+            : undefined);
+        const isParent = index < segments.length - 1;
+        if (!entry || (entry.kind === "dir") !== isParent) return;
+        entryPath = tree.joinPath(entryPath, entry.name);
+        if (isParent && !tree.expanded.has(entryPath)) {
+          tree.expand(entryPath);
+          return;
         }
       }
-      if (!entryIndexByPath.has(activeFilePath)) return;
-      setLastSyncedActivePath(activeFilePath);
-      setSelectedPath(activeFilePath);
-      requestAnimationFrame(() => scrollEntryIntoView(activeFilePath));
+      if (!entryIndexByPath.has(entryPath)) return;
+      if (isSearchActive) {
+        setIsSearchOpen(false);
+        return;
+      }
+      setLastSyncedFile(fileKey);
+      setSelectedPath(entryPath);
+      requestAnimationFrame(() => scrollEntryIntoView(entryPath));
     }, [
       active,
-      lastSyncedActivePath,
       activeFilePath,
+      activeFileRevealVersion,
+      lastSyncedFile,
+      isSearchActive,
       rootPath,
+      windowsPaths,
       entryIndexByPath,
       scrollEntryIntoView,
       tree.expand,
+      tree.expanded,
+      tree.joinPath,
+      tree.nodes,
     ]);
 
     useImperativeHandle(
