@@ -215,17 +215,20 @@ vi.mock("./TreeRow", () => ({
     name,
     domId,
     isCut,
+    isLastSelected,
   }: {
     path: string;
     name: string;
     domId: string;
     isCut?: boolean;
+    isLastSelected?: boolean;
   }) =>
     createElement(
       "div",
       {
         "data-fs-path": path,
         "data-fs-cut": isCut ? "" : undefined,
+        "data-last-selected": isLastSelected ? "" : undefined,
         id: domId,
       },
       name,
@@ -897,6 +900,81 @@ it("空目录也能粘贴，目标与顶部新建按钮一致", async () => {
     act(() => root.unmount());
   }
 });
+
+it.each([
+  ["click", "/home/remote/target"],
+  ["contextmenu", "/home/remote/target/file.txt"],
+] as const)(
+  "文件树空白处收到 %s 后标记上次选中项并使用根目录作为操作目标",
+  async (type, path) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const rootPath = "/home/remote";
+    const directory = `${rootPath}/target`;
+    mocks.names = ["target"];
+    mocks.childNodes[directory] = {
+      status: "loaded",
+      entries: [{ name: "file.txt", kind: "file" }],
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      act(() =>
+        root.render(
+          createElement(FileExplorer, { rootPath, onOpenFile: vi.fn() }),
+        ),
+      );
+      const tree = container.querySelector<HTMLElement>('[role="tree"]');
+      const row = container.querySelector(`[data-fs-path="${path}"]`);
+      if (!tree || !row) throw new Error("Missing file tree or row");
+
+      act(() =>
+        row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
+      );
+      expect(tree.getAttribute("aria-activedescendant")).toBe(row.id);
+      expect(row.hasAttribute("data-last-selected")).toBe(false);
+
+      act(() => tree.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+      expect(tree.hasAttribute("aria-activedescendant")).toBe(false);
+      expect(document.activeElement).toBe(tree);
+      expect(row.hasAttribute("data-last-selected")).toBe(true);
+      if (type === "contextmenu") {
+        expect(container.textContent).toContain("menu.refresh");
+      }
+
+      await act(async () =>
+        tree.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "v",
+            code: "KeyV",
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      expect(mocks.pasteFiles).toHaveBeenCalledWith(rootPath);
+
+      act(() => tree.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+      expect(row.hasAttribute("data-last-selected")).toBe(true);
+
+      const otherRow = container.querySelector(
+        `[data-fs-path]:not([data-fs-path="${path}"])`,
+      );
+      if (!otherRow) throw new Error("Missing second file tree row");
+      act(() =>
+        otherRow.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true }),
+        ),
+      );
+      expect(tree.getAttribute("aria-activedescendant")).toBe(otherRow.id);
+      expect(row.hasAttribute("data-last-selected")).toBe(false);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  },
+);
 
 it("右键粘贴使用点击的目录，移动失败后保留剪切并允许重试", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

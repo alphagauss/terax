@@ -544,6 +544,14 @@ export const FileExplorer = memo(
       "selectedPath",
       null,
     );
+    const [lastSelectedPath, setLastSelectedPath] = useViewState<string | null>(
+      `lastSelectedPath:${rootPath}`,
+      null,
+    );
+    const selectPath = useCallback((path: string) => {
+      setSelectedPath(path);
+      setLastSelectedPath(null);
+    }, []);
     const [isSearchOpen, setIsSearchOpen] = useViewState("searchOpen", false);
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
@@ -678,10 +686,16 @@ export const FileExplorer = memo(
         setPasteSelection(null);
       } else if (entryIndexByPath.has(pasteSelection.path)) {
         setPasteSelection(null);
-        setSelectedPath(pasteSelection.path);
+        selectPath(pasteSelection.path);
         requestAnimationFrame(() => scrollEntryIntoView(pasteSelection.path));
       }
-    }, [entryIndexByPath, pasteSelection, rootPath, scrollEntryIntoView]);
+    }, [
+      entryIndexByPath,
+      pasteSelection,
+      rootPath,
+      scrollEntryIntoView,
+      selectPath,
+    ]);
 
     const [lastSyncedFile, setLastSyncedFile] = useViewState<string | null>(
       `activePath:${rootPath}`,
@@ -729,7 +743,7 @@ export const FileExplorer = memo(
         return;
       }
       setLastSyncedFile(fileKey);
-      setSelectedPath(entryPath);
+      selectPath(entryPath);
       requestAnimationFrame(() => scrollEntryIntoView(entryPath));
     }, [
       active,
@@ -741,6 +755,7 @@ export const FileExplorer = memo(
       windowsPaths,
       entryIndexByPath,
       scrollEntryIntoView,
+      selectPath,
       tree.expand,
       tree.expanded,
       tree.joinPath,
@@ -755,7 +770,7 @@ export const FileExplorer = memo(
           else searchRef.current?.focus();
           if (!selectedPath && entryPaths.length > 0) {
             const first = entryPaths[0];
-            setSelectedPath(first);
+            selectPath(first);
             requestAnimationFrame(() => scrollEntryIntoView(first));
           }
         },
@@ -771,7 +786,13 @@ export const FileExplorer = memo(
         },
         collapseAll: tree.collapseAll,
       }),
-      [entryPaths, scrollEntryIntoView, selectedPath, tree.collapseAll],
+      [
+        entryPaths,
+        scrollEntryIntoView,
+        selectedPath,
+        selectPath,
+        tree.collapseAll,
+      ],
     );
 
     const requestTrashDelete = useCallback(
@@ -1028,7 +1049,7 @@ export const FileExplorer = memo(
       const move = (next: number) => {
         const clamped = Math.max(0, Math.min(entryPaths.length - 1, next));
         const path = entryPaths[clamped];
-        setSelectedPath(path);
+        selectPath(path);
         requestAnimationFrame(() => scrollEntryIntoView(path));
       };
 
@@ -1092,7 +1113,7 @@ export const FileExplorer = memo(
             tree.toggle(row.path);
           } else {
             const parent = row.path.slice(0, row.path.lastIndexOf("/"));
-            if (parent && parent !== rootPath) setSelectedPath(parent);
+            if (parent && parent !== rootPath) selectPath(parent);
           }
           break;
         }
@@ -1128,6 +1149,7 @@ export const FileExplorer = memo(
               actions={rowActions}
               renameInProgress={renameInProgress}
               isSelected={selectedPath === row.path}
+              isLastSelected={lastSelectedPath === row.path}
               isContextTarget={contextMenuPath === row.path}
               isCut={
                 clipboard.entry?.mode === "cut" &&
@@ -1136,7 +1158,7 @@ export const FileExplorer = memo(
               isRenaming={row.kind === "rename"}
               isDropTarget={dropTargetDir === row.path}
               onOpenFile={onOpenFile}
-              onSelectPath={setSelectedPath}
+              onSelectPath={selectPath}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
               deletingLabel={t("deleting")}
@@ -1178,6 +1200,12 @@ export const FileExplorer = memo(
       });
     };
 
+    const focusTreeRoot = (element: HTMLDivElement) => {
+      if (selectedPath) setLastSelectedPath(selectedPath);
+      setSelectedPath(null);
+      element.focus({ preventScroll: true });
+    };
+
     /** 为文件行、文件树空白处和根目录标题准备同一个右键菜单上下文。 */
     const prepareContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
       const contextSurface = (e.target as HTMLElement).closest<HTMLElement>(
@@ -1200,7 +1228,14 @@ export const FileExplorer = memo(
           : null;
       setContextMenuPath(target?.path ?? null);
       setMenuTarget(target);
-      setSelectedPath(target?.path ?? null);
+      // 菜单打开前聚焦文件树，关闭时即可恢复根目录的键盘操作。
+      if (e.target === treeRef.current) {
+        focusTreeRoot(treeRef.current);
+      } else if (target) {
+        selectPath(target.path);
+      } else {
+        setSelectedPath(null);
+      }
       setDeleteConfirm(false);
       menuSourcePointRef.current =
         e.clientX === 0 && e.clientY === 0
@@ -1389,6 +1424,10 @@ export const FileExplorer = memo(
                             )}
                             onPointerDown={dnd.onPointerDown}
                             onClickCapture={dnd.onClickCapture}
+                            onClick={(e) => {
+                              if (e.target !== e.currentTarget) return;
+                              focusTreeRoot(e.currentTarget);
+                            }}
                             onKeyDown={handleKeyDown}
                           >
                             {root?.status === "loading" && (

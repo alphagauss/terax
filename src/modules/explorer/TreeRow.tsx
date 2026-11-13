@@ -35,6 +35,7 @@ export type EntryRowProps = {
   actions: RowActions;
   renameInProgress: boolean;
   isSelected: boolean;
+  isLastSelected?: boolean;
   isContextTarget?: boolean;
   isCut?: boolean;
   isRenaming: boolean;
@@ -58,6 +59,7 @@ function EntryRowImpl(props: EntryRowProps) {
     actions,
     renameInProgress,
     isSelected,
+    isLastSelected = false,
     isContextTarget = false,
     isCut = false,
     isRenaming,
@@ -149,7 +151,7 @@ function EntryRowImpl(props: EntryRowProps) {
           ? "bg-interactive-active hover:bg-interactive-active"
           : isSelected
             ? "bg-primary/12 ring-1 ring-inset ring-primary/70 hover:bg-primary/12"
-            : null,
+            : isLastSelected && "bg-interactive-hover",
         isDropTarget && FILE_DROP_TARGET_CLASS,
       )}
       style={{ paddingLeft }}

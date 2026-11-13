@@ -95,6 +95,7 @@ describe("EntryRow Git decorations", () => {
 
   it.each([
     ["selected", { isSelected: true }, "bg-primary/12"],
+    ["last selected", { isLastSelected: true }, "bg-interactive-hover"],
     [
       "the context-menu target",
       { isContextTarget: true },
