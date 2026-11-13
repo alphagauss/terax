@@ -1989,6 +1989,7 @@ mod tests {
 [Console]::Error.WriteLine('中文错误')
 $line = [Console]::ReadLine()
 [Console]::WriteLine("stdin:$line")
+$env:PSModulePath = "$PSHOME\Modules"
 $env:{PIPE_EXIT_CODE} = '{exit_code}'
 $line | & '{pipe_reader}' --exact '{test_name}' --nocapture"#
                 );
