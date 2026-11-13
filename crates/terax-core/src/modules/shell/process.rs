@@ -1953,15 +1953,26 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn powershell_utf8_pipes_preserve_text_cwd_and_exit_code() {
+        const PIPE_EXIT_CODE: &str = "TERAX_TEST_UTF8_PIPE_EXIT_CODE";
+        if let Ok(code) = std::env::var(PIPE_EXIT_CODE) {
+            // 作为原生子进程，直接按 UTF-8 读取父 Shell 写入管道的字节。
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            println!("pipe:{}", line.trim_end_matches(['\r', '\n']));
+            std::process::exit(code.parse().unwrap());
+        }
+
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().join("中文目录");
         std::fs::create_dir(&cwd).unwrap();
-        // 文件入口让子 Shell 把重定向的 stdin 留给脚本读取。
-        std::fs::write(
-            cwd.join("pipe-input.ps1"),
-            "param([int]$Code)\n[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n[Console]::WriteLine('pipe:' + [Console]::ReadLine())\nexit $Code\n",
-        )
-        .unwrap();
+        let pipe_reader = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\'', "''");
+        let test_name = concat!(
+            "modules::shell::process::tests::",
+            "powershell_utf8_pipes_preserve_text_cwd_and_exit_code"
+        );
         let mut tested = 0;
         for identity in agent_shells(&WorkspaceEnv::Local)
             .unwrap()
@@ -1978,8 +1989,8 @@ mod tests {
 [Console]::Error.WriteLine('中文错误')
 $line = [Console]::ReadLine()
 [Console]::WriteLine("stdin:$line")
-$shellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-$line | & $shellPath -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./pipe-input.ps1 {exit_code}"#
+$env:{PIPE_EXIT_CODE} = '{exit_code}'
+$line | & '{pipe_reader}' --exact '{test_name}' --nocapture"#
                 );
                 let process = AgentProcess::spawn_local(
                     uuid::Uuid::new_v4().to_string(),
