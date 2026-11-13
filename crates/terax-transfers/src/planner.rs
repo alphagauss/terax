@@ -74,7 +74,7 @@ pub(crate) struct LocalPlan {
     pub(crate) wsl: WslArchiveContext,
     #[cfg_attr(
         not(windows),
-        expect(dead_code, reason = "WSL Archive 仅在 Windows 使用宿主目标目录")
+        allow(dead_code, reason = "仅 Windows 的 WSL 归档读取此字段")
     )]
     pub(crate) destination_parent: PathBuf,
     pub(crate) directories: Vec<PlannedDirectory<PathBuf, PathBuf>>,
