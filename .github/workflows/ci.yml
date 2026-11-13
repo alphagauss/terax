@@ -128,7 +128,12 @@ jobs:
         run: cargo check --workspace --all-targets --locked
 
       - name: cargo nextest
+        if: runner.os != 'Windows'
         run: cargo nextest run --workspace --locked --no-fail-fast --retries 2
+
+      - name: cargo nextest (Windows)
+        if: runner.os == 'Windows'
+        run: cargo nextest run --workspace --locked --no-fail-fast --retries 2 --test-threads 2
 
   coverage:
     runs-on: ubuntu-24.04
