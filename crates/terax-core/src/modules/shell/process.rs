@@ -1843,13 +1843,14 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[test]
-    fn powershell_objects_errors_and_native_status_survive_wrapping() {
+    #[tokio::test]
+    async fn powershell_objects_errors_and_native_status_survive_wrapping() {
         let directory = tempfile::tempdir().unwrap();
         for shell in [ShellKind::Pwsh, ShellKind::Powershell] {
             if select_shell(&agent_shells(&WorkspaceEnv::Local).unwrap(), shell).is_err() {
                 continue;
             }
+            // 测试只依赖系统模块，避免命令发现扫描用户和 runner 安装的模块。
             for (command, code, stdout, stderr) in [
                 (
                     "[pscustomobject]@{Name='hello';Value=1}; 'after'",
@@ -1858,15 +1859,15 @@ mod tests {
                     "",
                 ),
                 (
-                    "cmd /c exit 0; missing_terax_test_command",
+                    "$PSModuleAutoLoadingPreference = 'None'; & $env:ComSpec /d /c exit 0; missing_terax_test_command",
                     1,
                     "",
                     "missing_terax_test_command",
                 ),
-                ("cmd /c exit 7", 7, "", ""),
-                ("cmd /c exit 7; 'recovered'", 0, "recovered", ""),
+                ("& $env:ComSpec /d /c exit 7", 7, "", ""),
+                ("& $env:ComSpec /d /c exit 7; 'recovered'", 0, "recovered", ""),
                 (
-                    "missing_terax_test_command; 'recovered'",
+                    "$PSModuleAutoLoadingPreference = 'None'; missing_terax_test_command; 'recovered'",
                     0,
                     "recovered",
                     "missing_terax_test_command",
@@ -1885,19 +1886,20 @@ mod tests {
                     uuid::Uuid::new_v4().to_string(),
                     uuid::Uuid::new_v4().to_string(),
                     WorkspaceEnv::Local,
-                    command.into(),
+                    format!("$env:PSModulePath = \"$PSHOME\\Modules\"\n{command}"),
                     directory.path().to_string_lossy().into_owned(),
                     shell,
                     false,
                     ProcessPurpose::Shell,
                 )
                 .unwrap();
+                process.close_stdin().await.unwrap();
                 let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
                 assert_eq!(
                     response.exit_code,
                     Some(code),
                     "{shell:?}: {command}: {}",
-                    response.stderr
+                    serde_json::to_string(&response).unwrap()
                 );
                 assert!(
                     response.stdout.contains(stdout),
@@ -1949,12 +1951,28 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[test]
-    fn powershell_utf8_pipes_preserve_text_cwd_and_exit_code() {
+    #[tokio::test]
+    async fn powershell_utf8_pipes_preserve_text_cwd_and_exit_code() {
+        const PIPE_EXIT_CODE: &str = "TERAX_TEST_UTF8_PIPE_EXIT_CODE";
+        if let Ok(code) = std::env::var(PIPE_EXIT_CODE) {
+            // 作为原生子进程，直接按 UTF-8 读取父 Shell 写入管道的字节。
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            println!("pipe:{}", line.trim_end_matches(['\r', '\n']));
+            std::process::exit(code.parse().unwrap());
+        }
+
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().join("中文目录");
         std::fs::create_dir(&cwd).unwrap();
-        let marker = "__TERAX_AGENT_CWD_encoding__";
+        let pipe_reader = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\'', "''");
+        let test_name = concat!(
+            "modules::shell::process::tests::",
+            "powershell_utf8_pipes_preserve_text_cwd_and_exit_code"
+        );
         let mut tested = 0;
         for identity in agent_shells(&WorkspaceEnv::Local)
             .unwrap()
@@ -1967,67 +1985,45 @@ mod tests {
                 // 子进程显式按 UTF-8 接收管道，验证父 Shell 的 $OutputEncoding。
                 let script = format!(
                     r#"[System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('zh-CN')
-Get-Date -Date '2026-09-08' -Format 'yyyy-MM-dd dddd'
+[Console]::WriteLine([datetime]::new(2026, 9, 8).ToString('yyyy-MM-dd dddd'))
 [Console]::Error.WriteLine('中文错误')
 $line = [Console]::ReadLine()
-Write-Output "stdin:$line"
-$line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::WriteLine(''pipe:'' + [Console]::ReadLine()); exit {exit_code}'"#
+[Console]::WriteLine("stdin:$line")
+$env:PSModulePath = "$PSHOME\Modules"
+$env:{PIPE_EXIT_CODE} = '{exit_code}'
+$line | & '{pipe_reader}' --exact '{test_name}' --nocapture"#
                 );
-                let (mut native, _) = build_local_command(
-                    "encoding",
-                    &WorkspaceEnv::Local,
-                    &script,
-                    cwd.to_str().unwrap(),
-                    identity,
+                let process = AgentProcess::spawn_local(
+                    uuid::Uuid::new_v4().to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                    WorkspaceEnv::Local,
+                    script,
+                    cwd.to_string_lossy().into_owned(),
+                    identity.kind,
                     false,
-                    marker,
                     ProcessPurpose::Shell,
                 )
                 .unwrap();
-                native
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-                apply_minimal_environment(&mut native);
-                let (child, _job) =
-                    crate::modules::proc::job::ProcessJob::spawn(&mut native).unwrap();
-                child
-                    .take_stdin()
-                    .unwrap()
-                    .write_all("中文输入\n".as_bytes())
-                    .unwrap();
-                let deadline = Instant::now() + Duration::from_secs(15);
-                let status = loop {
-                    if let Some(status) = child.try_wait().unwrap() {
-                        break status;
-                    }
-                    if Instant::now() >= deadline {
-                        child.kill().unwrap();
-                        child.wait().unwrap();
-                        panic!("{shell} encoding test timed out");
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                };
-                let mut stdout = String::new();
-                let mut stderr = String::new();
-                child
-                    .take_stdout()
-                    .unwrap()
-                    .read_to_string(&mut stdout)
-                    .unwrap();
-                child
-                    .take_stderr()
-                    .unwrap()
-                    .read_to_string(&mut stderr)
-                    .unwrap();
-                assert_eq!(status.code(), Some(exit_code), "{shell}: {stderr}");
-                assert!(stdout.contains("2026-09-08 星期二"), "{shell}: {stdout}");
-                assert!(stdout.contains("stdin:中文输入"), "{shell}: {stdout}");
-                assert!(stdout.contains("pipe:中文输入"), "{shell}: {stdout}");
-                assert_eq!(stderr.trim(), "中文错误", "{shell}");
-                let (_, cwd_after) = strip_cwd_marker(&stdout, marker);
+                process.write("中文输入\n".into()).await.unwrap();
+                process.close_stdin().await.unwrap();
+                let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
                 assert_eq!(
-                    cwd_after,
+                    response.exit_code,
+                    Some(exit_code),
+                    "{shell}: {}",
+                    serde_json::to_string(&response).unwrap()
+                );
+                for expected in ["2026-09-08 星期二", "stdin:中文输入", "pipe:中文输入"]
+                {
+                    assert!(
+                        response.stdout.contains(expected),
+                        "{shell}: {}",
+                        response.stdout
+                    );
+                }
+                assert_eq!(response.stderr.trim(), "中文错误", "{shell}");
+                assert_eq!(
+                    response.cwd_after,
                     Some(crate::modules::fs::to_canon(
                         std::fs::canonicalize(&cwd).unwrap()
                     )),
@@ -2361,27 +2357,33 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
 
     #[tokio::test]
     async fn external_agent_root_exit_reaps_descendants() {
+        #[cfg(windows)]
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        #[cfg(windows)]
+        use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+        #[cfg(windows)]
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+        };
+
         let directory = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
         let marker = directory.path().join("normal-exit-descendant.txt");
         #[cfg(windows)]
-        let (command, shell) = {
-            let script = directory.path().join("descendant.cmd");
-            std::fs::write(
-                &script,
-                format!(
-                    "@ping -n 4 127.0.0.1 > nul\r\n@echo survived > \"{}\"\r\n",
-                    marker.display()
-                ),
-            )
-            .unwrap();
-            (
-                format!(
-                    "Start-Process -FilePath $env:COMSPEC -ArgumentList '/D','/C','\"{}\"' -WindowStyle Hidden; exit 0",
-                    script.display()
-                ),
-                ShellKind::Powershell,
-            )
-        };
+        let (command, shell) = (
+            r#"$info = [System.Diagnostics.ProcessStartInfo]::new("$env:SystemRoot\System32\ping.exe", '-n 60 127.0.0.1')
+$info.UseShellExecute = $false
+$info.CreateNoWindow = $true
+$info.RedirectStandardOutput = $true
+$info.RedirectStandardError = $true
+$child = [System.Diagnostics.Process]::Start($info)
+[Console]::WriteLine($child.Id)
+[Console]::WriteLine('descendant-ready')
+$null = [Console]::ReadLine()
+exit 0"#
+                .to_string(),
+            ShellKind::Powershell,
+        );
         #[cfg(unix)]
         let (command, shell) = (
             format!(
@@ -2402,13 +2404,50 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
         )
         .unwrap();
 
+        #[cfg(windows)]
+        let descendant = {
+            // 先持有仍在运行的子进程句柄，再让根 Shell 退出。
+            let ready =
+                process.wait_snapshot(0, Duration::from_secs(15), Some("descendant-ready"), 8192);
+            assert_eq!(
+                ready.wait_for_matched,
+                Some(true),
+                "{}",
+                serde_json::to_string(&ready).unwrap()
+            );
+            let pid = ready.stdout.lines().next().unwrap().parse().unwrap();
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            assert!(!handle.is_null(), "{}", std::io::Error::last_os_error());
+            let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+            assert_eq!(
+                unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) },
+                WAIT_TIMEOUT
+            );
+            process.close_stdin().await.unwrap();
+            handle
+        };
+
         let response = process.wait_snapshot(0, Duration::from_secs(15), None, 8192);
-        assert_eq!(response.status, ProcessStatus::Exited);
-        tokio::time::sleep(Duration::from_secs(4)).await;
-        assert!(
-            !marker.exists(),
+        assert_eq!(
+            (response.status, response.exit_code),
+            (ProcessStatus::Exited, Some(0)),
+            "{}",
+            serde_json::to_string(&response).unwrap()
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            unsafe { WaitForSingleObject(descendant.as_raw_handle(), 4000) },
+            WAIT_OBJECT_0,
             "descendant survived after the root shell exited"
         );
+        #[cfg(unix)]
+        {
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            assert!(
+                !marker.exists(),
+                "descendant survived after the root shell exited"
+            );
+        }
     }
 
     fn posix_test_workspace(directory: &std::path::Path) -> (WorkspaceEnv, String) {
