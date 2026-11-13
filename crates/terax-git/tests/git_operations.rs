@@ -445,13 +445,21 @@ fn quick_diff_baseline_does_not_follow_untracked_symlinks() {
     let outside = TempDir::new().expect("outside tempdir");
     let target = outside.path().join("secret.txt");
     std::fs::write(&target, "secret\n").expect("write outside target");
-    symlink(target, fx.repo_path.join("link.txt")).expect("create symlink");
-    let path = to_canon(fx.repo_path.join("link.txt"));
+    fx.write_file("tracked.txt", "tracked\n");
+    fx.run_git(&["add", "tracked.txt"]);
+    fx.run_git(&["commit", "-qm", "seed"]);
 
-    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
-        .expect("quick diff baseline");
-
-    assert!(matches!(baseline, GitQuickDiffBaseline::Unsupported));
+    for (name, target) in [
+        ("outside-link.txt", target),
+        ("inside-link.txt", fx.repo_path.join("tracked.txt")),
+    ] {
+        let link = fx.repo_path.join(name);
+        symlink(target, &link).expect("create symlink");
+        let baseline =
+            operations::quick_diff_baseline(&fx.registry, &to_canon(link), &fx.workspace)
+                .expect("quick diff baseline");
+        assert!(matches!(baseline, GitQuickDiffBaseline::Unsupported));
+    }
 }
 
 #[test]

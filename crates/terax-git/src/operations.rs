@@ -446,6 +446,13 @@ pub fn quick_diff_baseline(
         file_name
     );
     let relative_path = relative_git_path(&repo_root.git_path, &file_path, repo_root.remote)?;
+    // 保留链接自身的路径，避免把链接目标误当成当前文件的基线。
+    if !repo_root.remote
+        && std::fs::symlink_metadata(repo_root.local_path.join(&relative_path))
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Ok(GitQuickDiffBaseline::Unsupported);
+    }
     let relative_path =
         pathspec_from_input(&repo_root.local_path, &relative_path, repo_root.remote)?;
     // 保留 Git 默认的索引检查，匹配忽略规则但已跟踪的文件仍需显示变更。
