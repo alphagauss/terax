@@ -1850,7 +1850,7 @@ mod tests {
             if select_shell(&agent_shells(&WorkspaceEnv::Local).unwrap(), shell).is_err() {
                 continue;
             }
-            // 未知命令用例只验证错误和退出码，避免扫描已安装的 PowerShell 模块。
+            // 测试只依赖系统模块，避免命令发现扫描用户和 runner 安装的模块。
             for (command, code, stdout, stderr) in [
                 (
                     "[pscustomobject]@{Name='hello';Value=1}; 'after'",
@@ -1886,7 +1886,7 @@ mod tests {
                     uuid::Uuid::new_v4().to_string(),
                     uuid::Uuid::new_v4().to_string(),
                     WorkspaceEnv::Local,
-                    command.into(),
+                    format!("$env:PSModulePath = \"$PSHOME\\Modules\"\n{command}"),
                     directory.path().to_string_lossy().into_owned(),
                     shell,
                     false,
@@ -1974,11 +1974,12 @@ mod tests {
                 // 子进程显式按 UTF-8 接收管道，验证父 Shell 的 $OutputEncoding。
                 let script = format!(
                     r#"[System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('zh-CN')
-Get-Date -Date '2026-09-08' -Format 'yyyy-MM-dd dddd'
+[Console]::WriteLine([datetime]::new(2026, 9, 8).ToString('yyyy-MM-dd dddd'))
 [Console]::Error.WriteLine('中文错误')
 $line = [Console]::ReadLine()
-Write-Output "stdin:$line"
-$line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./pipe-input.ps1 {exit_code}"#
+[Console]::WriteLine("stdin:$line")
+$shellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$line | & $shellPath -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./pipe-input.ps1 {exit_code}"#
                 );
                 let process = AgentProcess::spawn_local(
                     uuid::Uuid::new_v4().to_string(),

@@ -155,18 +155,21 @@ fn detached_service_is_not_listed_and_survives_host_exit() {
     let (command, shell) = {
         std::fs::write(
             root.path().join("service.ps1"),
-            r#"Set-Content -LiteralPath ready -Value ready
+            r#"[IO.File]::WriteAllText('ready', 'ready')
 $deadline = [DateTime]::UtcNow.AddSeconds(45)
-while (!(Test-Path -LiteralPath release) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }
-if (Test-Path -LiteralPath release) { Set-Content -LiteralPath finished -Value done }"#,
+while (![IO.File]::Exists('release') -and [DateTime]::UtcNow -lt $deadline) { [Threading.Thread]::Sleep(20) }
+if ([IO.File]::Exists('release')) { [IO.File]::WriteAllText('finished', 'done') }"#,
         )
         .unwrap();
         // WMI 由系统服务创建进程，不继承受管启动 Shell 的 Job Object。
         (
             r#"$ErrorActionPreference = 'Stop'
+$env:PSModulePath = "$PSHOME\Modules"
+[Console]::WriteLine('loading CimCmdlets')
 Import-Module "$PSHOME\Modules\CimCmdlets\CimCmdlets.psd1"
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
 $command = '"{0}\System32\cmd.exe" /d /s /c ""{0}\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File service.ps1 <NUL >service.log 2>&1"' -f $env:SystemRoot
+[Console]::WriteLine('creating WMI process')
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $PWD.Path; ProcessStartupInformation = $startup }
 if ($result.ReturnValue -ne 0 -or !$result.ProcessId) { throw "Create failed: $($result.ReturnValue)" }
 $result.ProcessId"#
@@ -179,14 +182,14 @@ $result.ProcessId"#
     let yield_time_ms = if cfg!(windows) { 0 } else { 10000 };
     let result = host.call("shell_exec", json!({
         "ownerSessionId": owner, "command": command, "initialCwd": root.path(), "cwd": root.path(),
-        "permissionMode": "full-access", "timeoutSecs": 30, "yieldTimeMs": yield_time_ms, "maxOutputBytes": 4096, "shell": shell, "login": false
+        "permissionMode": "full-access", "timeoutSecs": 35, "yieldTimeMs": yield_time_ms, "maxOutputBytes": 4096, "shell": shell, "login": false
     }));
     #[cfg(windows)]
     let result = if result["result"]["status"] == "running" {
         host.call(
             "shell_process",
             json!({"ownerSessionId": owner, "processId": result["result"]["process_id"],
-                "action": "close_stdin", "closeStdin": false, "yieldTimeMs": 15000}),
+                "action": "close_stdin", "closeStdin": false, "yieldTimeMs": 30000}),
         )
     } else {
         result
