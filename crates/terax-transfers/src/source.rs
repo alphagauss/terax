@@ -446,7 +446,10 @@ mod tests {
         #[cfg(windows)]
         assert!(identity.is_some_and(|value| value.volume.is_some() && value.index.is_some()));
 
-        tokio::fs::remove_file(&path).await.unwrap();
+        // 保留原文件，避免文件系统立即复用其 inode 或文件 ID。
+        tokio::fs::rename(&path, directory.path().join("original"))
+            .await
+            .unwrap();
         tokio::fs::write(&path, b"other").await.unwrap();
         if let Some(modified) = modified {
             filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(modified))
