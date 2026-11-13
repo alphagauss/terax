@@ -84,7 +84,7 @@ notify-rust = { version = "4.18" }
 zbus = { version = "5.19" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-webview2-com = { version = "0.38.2" }
+webview2-com = { version = "0.39.1" }
 windows = { version = "0.61.3" }
 tauri-winrt-notification = { version = "0.7.3" }
 windows-sys = { workspace = true, features = [
