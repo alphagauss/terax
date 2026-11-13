@@ -121,7 +121,6 @@ jobs:
           workspaces: . -> target
 
       - uses: taiki-e/install-action@v2.85.12
-        if: runner.os != 'Windows'
         with:
           tool: cargo-nextest
 
@@ -129,13 +128,7 @@ jobs:
         run: cargo check --workspace --all-targets --locked
 
       - name: cargo nextest
-        if: runner.os != 'Windows'
         run: cargo nextest run --workspace --locked --no-fail-fast --retries 2
-
-      - name: cargo test (Windows)
-        if: runner.os == 'Windows'
-        # 使用 Cargo 测试宿主，让 Windows 进程测试直接验证应用的 Job Object。
-        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=2
 
   coverage:
     runs-on: ubuntu-24.04
