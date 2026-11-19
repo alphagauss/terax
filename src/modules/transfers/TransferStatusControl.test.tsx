@@ -83,9 +83,6 @@ vi.mock("@/components/ui/progress", () => ({
 vi.mock("@/components/ui/spinner", () => ({
   Spinner: () => createElement("svg", { "data-slot": "spinner" }),
 }));
-vi.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children?: ReactNode }) => children,
-}));
 vi.mock("@/modules/transfers/native", () => ({
   transferNative: {
     resolveConflict: mocks.resolveConflict,

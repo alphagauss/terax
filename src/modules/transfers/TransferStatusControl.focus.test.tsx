@@ -148,3 +148,24 @@ it("restores focus after the user enters an automatically opened panel", async (
   await wait();
   expect(document.activeElement).toBe(entrance());
 });
+
+it("shows the full name of a single transfer on hover", async () => {
+  const name = `${"long-file-name-".repeat(12)}.txt`;
+  await act(async () =>
+    useTransferStore.setState({ tasks: { completed: { ...completed, name } } }),
+  );
+  await act(async () => entrance().click());
+  await wait();
+
+  const label = Array.from(document.querySelectorAll("span")).find(
+    (span) => span.firstChild?.nodeValue === name,
+  );
+  expect(label).toBeDefined();
+  await act(async () =>
+    label?.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(800));
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(name);
+});

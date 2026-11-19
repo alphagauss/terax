@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import ArrowDataTransferVerticalIcon from "@hugeicons/core-free-icons/ArrowDataTransferVerticalIcon";
@@ -252,17 +251,15 @@ function TransferStatusPanel({ showTiming }: { showTiming: boolean }) {
             {t("transfers.empty")}
           </div>
         ) : (
-          <ScrollArea className="max-h-[380px]">
-            <div className="divide-y divide-border/50">
-              {tasks.map((task) => (
-                <TransferTaskRow
-                  key={task.id}
-                  task={task}
-                  showTiming={showTiming}
-                />
-              ))}
-            </div>
-          </ScrollArea>
+          <div className="app-scrollbar min-h-0 max-h-[380px] divide-y divide-border/50 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+            {tasks.map((task) => (
+              <TransferTaskRow
+                key={task.id}
+                task={task}
+                showTiming={showTiming}
+              />
+            ))}
+          </div>
         )}
       </PopoverContent>
       <AlertDialog
@@ -393,12 +390,20 @@ export function TransferTaskRow({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-xs font-medium">
-              {displayName}
-              <span className="ml-1 font-normal text-muted-foreground">
-                · {t(`transfers.strategy.${task.strategy}`)}
+            <Hint
+              content={
+                task.sourceCount > 1 ? undefined : (
+                  <span className="wrap-anywhere">{displayName}</span>
+                )
+              }
+            >
+              <span className="min-w-0 truncate text-xs font-medium">
+                {displayName}
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · {t(`transfers.strategy.${task.strategy}`)}
+                </span>
               </span>
-            </span>
+            </Hint>
             {!phaseOnly || showTiming ? (
               <span
                 className={cn(
@@ -439,7 +444,7 @@ export function TransferTaskRow({
               </span>
             ) : null}
           </div>
-          <Hint content={detail}>
+          <Hint content={<span className="wrap-anywhere">{detail}</span>}>
             <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
               {detail}
             </div>
