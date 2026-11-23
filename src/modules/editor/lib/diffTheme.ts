@@ -18,12 +18,35 @@ const UNIFIED_CHANGE_RULES = {
     background: ADDED_TEXT,
     ...CHANGED_TEXT_SHAPE,
   },
-  ".cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText": {
-    background: REMOVED_TEXT,
-    ...CHANGED_TEXT_SHAPE,
-  },
+  ".cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText, .cm-gitPatchRemoved .cm-deletedText":
+    {
+      background: REMOVED_TEXT,
+      ...CHANGED_TEXT_SHAPE,
+    },
   "&.cm-merge-b .cm-changedLine, .cm-changedLine, .cm-inlineChangedLine": {
     backgroundColor: ADDED_LINE,
+  },
+  ".cm-gitPatchAnnotation": {
+    color: "var(--muted-foreground)",
+  },
+  ".cm-gitPatchAdded": {
+    backgroundColor: `color-mix(in srgb, ${ADDED} 10%, transparent) !important`,
+  },
+  ".cm-gitPatchRemoved": {
+    backgroundColor: `color-mix(in srgb, ${REMOVED} 10%, transparent) !important`,
+  },
+  ".cm-gitPatchExpand": {
+    color: "var(--muted-foreground)",
+    backgroundColor: "var(--muted)",
+    lineHeight: "inherit",
+    minWidth: "3ch",
+    padding: "0 0.5ch",
+    borderRadius: "3px",
+    cursor: "pointer",
+  },
+  ".cm-gitPatchExpand:hover, .cm-gitPatchExpand:focus-visible": {
+    color: "var(--foreground)",
+    backgroundColor: "var(--interactive-hover)",
   },
   ".cm-deletedChunk": {
     backgroundColor: REMOVED_LINE,

@@ -17,6 +17,7 @@
     "overwrite": "Overwrite"
   },
   "diff": {
+    "expandContext": "Show more unchanged lines",
     "resizeColumns": "Resize diff columns",
     "loading": "Loading diff…",
     "unavailable": "Diff preview is not available for this file."

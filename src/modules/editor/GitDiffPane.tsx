@@ -39,6 +39,10 @@ import {
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { GIT_DIFF_CONFIG } from "./lib/gitDiffConfig";
 import { gitChangeOverview } from "./lib/gitGutter";
+import {
+  buildGitPatchPreview,
+  prepareGitPatchPreview,
+} from "./lib/gitPatchPreview";
 import { resolveLanguage } from "./lib/languageResolver";
 import {
   matchesTemporaryWordWrapShortcut,
@@ -58,6 +62,7 @@ type LoadState =
       modifiedContent: string;
       isBinary: boolean;
       fallbackPatch: string;
+      truncated: boolean;
       /** 需在 MergeView 挂载前解析，避免删除块部件缺少语法高亮。 */
       langExt: Extension | null;
       sourceKey?: string;
@@ -130,6 +135,7 @@ export const WorkingGitDiffPane = forwardRef<
           modifiedContent: result.modifiedContent,
           isBinary: result.isBinary,
           fallbackPatch: result.fallbackPatch,
+          truncated: result.truncated,
           langExt: language?.ext ?? null,
           sourceKey,
         });
@@ -190,6 +196,7 @@ export const CommitGitDiffPane = forwardRef<
           modifiedContent: result.modifiedContent,
           isBinary: result.isBinary,
           fallbackPatch: result.fallbackPatch,
+          truncated: result.truncated,
           langExt: language?.ext ?? null,
         });
       })
@@ -235,8 +242,48 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
     const splitRef = useRef<FindHandle>(null);
     const useFallback =
       (loaded?.isBinary ?? false) ||
+      fallbackPatch.length > 0 ||
       originalContent.length > LARGE_FILE_THRESHOLD ||
       modifiedContent.length > LARGE_FILE_THRESHOLD;
+    const canPreviewPatch = !loaded?.isBinary && !loaded?.truncated;
+    const patchSource = useMemo(
+      () =>
+        canPreviewPatch && fallbackPatch
+          ? prepareGitPatchPreview(
+              fallbackPatch,
+              originalContent,
+              modifiedContent,
+            )
+          : null,
+      [canPreviewPatch, fallbackPatch, originalContent, modifiedContent],
+    );
+    const [expansion, setExpansion] = useState<{
+      snapshotId: symbol | undefined;
+      gaps: ReadonlyMap<number, number>;
+    } | null>(null);
+    const snapshotId = patchSource?.snapshotId;
+    const expanded =
+      expansion?.snapshotId === snapshotId ? expansion?.gaps : undefined;
+    const expandGap = useCallback(
+      (gap: number) => {
+        setExpansion((current) => {
+          const gaps = new Map(
+            current?.snapshotId === snapshotId ? current?.gaps : undefined,
+          );
+          gaps.set(gap, (gaps.get(gap) ?? 0) + 1);
+          return { snapshotId, gaps };
+        });
+      },
+      [snapshotId],
+    );
+    const expandLabel = t("diff.expandContext");
+    const patchPreview = useMemo(
+      () =>
+        patchSource
+          ? buildGitPatchPreview(patchSource, expanded, expandGap, expandLabel)
+          : null,
+      [expandGap, expandLabel, expanded, patchSource],
+    );
     const isDeletion =
       originalContent.length > 0 && modifiedContent.length === 0;
     const effectiveDiffViewMode =
@@ -247,7 +294,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
         : diffViewMode;
     const extensions = useMemo(
       () =>
-        effectiveDiffViewMode === "split"
+        useFallback || effectiveDiffViewMode === "split"
           ? []
           : [
               ...SHARED_EXT,
@@ -271,7 +318,13 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
                     UNIFIED_DIFF_THEME,
                   ]),
             ],
-      [effectiveDiffViewMode, isDeletion, loaded?.langExt, originalContent],
+      [
+        effectiveDiffViewMode,
+        isDeletion,
+        loaded?.langExt,
+        originalContent,
+        useFallback,
+      ],
     );
     const fallbackExtensions = useMemo(
       () => [
@@ -279,8 +332,9 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
         DEFAULT_INDENT,
         ...FOCUSABLE_READONLY_EXTENSIONS,
         wrapCompartment.of([]),
+        patchPreview?.extensions ?? [],
       ],
-      [],
+      [patchPreview],
     );
 
     useEffect(() => {
@@ -329,7 +383,9 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
             </div>
           ) : useFallback ? (
             <CodeMirror
-              value={fallbackPatch || t("diff.unavailable")}
+              value={
+                patchPreview?.text ?? (fallbackPatch || t("diff.unavailable"))
+              }
               theme={themeExt}
               extensions={fallbackExtensions}
               editable={false}
@@ -337,7 +393,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               className="h-full"
               onCreateEditor={registerEditor}
               basicSetup={{
-                lineNumbers: true,
+                lineNumbers: !patchPreview,
                 foldGutter: false,
                 highlightActiveLine: false,
                 highlightActiveLineGutter: false,

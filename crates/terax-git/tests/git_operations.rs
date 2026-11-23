@@ -1031,6 +1031,73 @@ fn diff_staged_only_shows_index_change() {
 }
 
 #[test]
+fn large_file_preview_keeps_three_context_lines_without_color() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let path = "large.mjs";
+    let original = (1..=4000)
+        .map(|line| format!("// {line}: {}\n", "context ".repeat(10)))
+        .collect::<String>();
+    fx.write_file(path, &original);
+    fx.run_git(&["add", path]);
+    fx.run_git(&["commit", "-qm", "baseline"]);
+    fx.run_git(&["config", "diff.context", "0"]);
+    fx.run_git(&["config", "diff.interHunkContext", "20"]);
+    fx.run_git(&["config", "color.ui", "always"]);
+    fx.write_file(
+        path,
+        &original
+            .replace("// 10:", "// first:")
+            .replace("// 20:", "// second:"),
+    );
+
+    let worktree = operations::diff_content(
+        &fx.registry,
+        &fx.repo_str(),
+        path,
+        GitDiffSide::Worktree,
+        None,
+        &fx.workspace,
+    )
+    .unwrap();
+    let patch = worktree.fallback_patch;
+    assert!(patch.contains("@@ -7,7 +7,7 @@"));
+    assert!(patch.contains("@@ -17,7 +17,7 @@"));
+    assert_eq!(
+        patch.lines().filter(|line| line.starts_with(' ')).count(),
+        12
+    );
+    assert!(!patch.contains('\x1b'));
+
+    fx.run_git(&["add", path]);
+    let staged = operations::diff_content(
+        &fx.registry,
+        &fx.repo_str(),
+        path,
+        GitDiffSide::Index,
+        None,
+        &fx.workspace,
+    )
+    .unwrap();
+    assert_eq!(staged.fallback_patch, patch);
+
+    fx.run_git(&["commit", "-qm", "change"]);
+    let head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    let committed = operations::commit_file_diff(
+        &fx.registry,
+        &fx.repo_str(),
+        &head,
+        path,
+        None,
+        &fx.workspace,
+    )
+    .unwrap();
+    assert_eq!(committed.fallback_patch, patch);
+}
+
+#[test]
 fn discard_tracked_restores_worktree() {
     if skip_if_no_git() {
         return;

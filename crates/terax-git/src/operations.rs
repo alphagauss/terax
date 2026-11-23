@@ -31,6 +31,12 @@ use terax_core::modules::remote::git_service::{GitRemoteAction, HISTORY_FORMAT a
 use terax_core::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 const DIFF_VIEW_TEXT_LIMIT: usize = 256 * 1024;
+const DIFF_PREVIEW_ARGS: &[&str] = &[
+    "--no-color",
+    "--no-textconv",
+    "--unified=3",
+    "--inter-hunk-context=0",
+];
 
 /// 返回所有可见引用、当前分支及 upstream 的轻量摘要，不扫描工作树或提交历史。
 pub fn graph_revision(
@@ -415,6 +421,7 @@ pub fn diff(
             GitDiffSide::Worktree => DiffMode::Worktree,
             GitDiffSide::Index => DiffMode::Index,
         },
+        &[],
     )
 }
 
@@ -524,8 +531,10 @@ fn diff_inner(
     repo_root: &ResolvedGitDirectory,
     path: Option<&str>,
     mode: DiffMode,
+    extra_args: &[&str],
 ) -> Result<GitDiffResult> {
     let mut args: Vec<OsString> = vec!["diff".into(), "--no-ext-diff".into()];
+    args.extend(extra_args.iter().copied().map(OsString::from));
     match mode {
         DiffMode::Worktree => {}
         DiffMode::Index => args.push("--cached".into()),
@@ -619,6 +628,7 @@ pub fn diff_content(
                 GitDiffSide::Worktree => DiffMode::Worktree,
                 GitDiffSide::Index => DiffMode::Index,
             },
+            if is_binary { &[] } else { DIFF_PREVIEW_ARGS },
         )?)
     } else {
         None
@@ -1266,14 +1276,18 @@ pub fn commit_file_diff(
     if needs_patch {
         let mut diff_args: Vec<OsString> = vec![
             "show".into(),
-            "--no-color".into(),
             "--no-ext-diff".into(),
             "--format=".into(),
             "-m".into(),
             "--first-parent".into(),
-            sha.into(),
-            "--".into(),
         ];
+        let preview_args: &[&str] = if is_binary {
+            &["--no-color"]
+        } else {
+            DIFF_PREVIEW_ARGS
+        };
+        diff_args.extend(preview_args.iter().copied().map(OsString::from));
+        diff_args.extend([OsString::from(sha), OsString::from("--")]);
         diff_args.push(rel.clone().into());
         if original_rel != rel {
             diff_args.push(original_rel.clone().into());

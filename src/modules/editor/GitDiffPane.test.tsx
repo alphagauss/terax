@@ -63,9 +63,10 @@ vi.mock("./lib/extensions", () => ({
 }));
 vi.mock("./lib/useEditorThemeExt", () => ({ useEditorThemeExt: () => [] }));
 vi.mock("@uiw/react-codemirror", async (importOriginal) => {
-  const { default: CodeMirror } =
-    await importOriginal<typeof import("@uiw/react-codemirror")>();
+  const actual = await importOriginal<typeof import("@uiw/react-codemirror")>();
+  const { default: CodeMirror } = actual;
   return {
+    ...actual,
     default: (props: ReactCodeMirrorProps) =>
       mocks.realEditor ? (
         <CodeMirror {...props} />
@@ -169,6 +170,8 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
   vi.clearAllMocks();
+  mocks.gitDiffContent.mockReset();
+  mocks.gitCommitFileDiff.mockReset();
   mocks.realEditor = false;
   mocks.diffViewMode = "split";
   vi.unstubAllGlobals();
@@ -308,6 +311,155 @@ describe("WorkingGitDiffPane", () => {
 
     expect(diff?.getAttribute("data-word-wrap")).toBe("true");
   });
+
+  it("highlights large Git patches and reveals only nearby unchanged lines", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    mocks.realEditor = true;
+    const originalLines = Array.from(
+      { length: 9030 },
+      (_, index) => `line ${index + 1} 未改动的上下文内容`,
+    );
+    originalLines[8031] = "context";
+    originalLines[8032] = "old value";
+    originalLines[8999] = "old status";
+    originalLines[9000] = "trailing context";
+    const modifiedLines = [...originalLines];
+    modifiedLines.splice(8032, 1, "new value", "another value");
+    modifiedLines[9000] = "new status";
+    const patch = [
+      "diff --git a/large.mjs b/large.mjs",
+      "--- a/large.mjs",
+      "+++ b/large.mjs",
+      "@@ -8032,2 +8032,3 @@",
+      " context",
+      "-old value",
+      "+new value",
+      "+another value",
+      "@@ -9000,2 +9001,2 @@",
+      "-old status",
+      "+new status",
+      " trailing context",
+      "",
+    ].join("\n");
+    const result = {
+      ...diffResult("large"),
+      originalContent: originalLines.join("\n"),
+      modifiedContent: modifiedLines.join("\n"),
+      fallbackPatch: patch,
+    };
+    mocks.gitDiffContent.mockResolvedValueOnce(result).mockResolvedValueOnce({
+      ...result,
+      fallbackPatch: patch.replace(/8032/g, "8042"),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const readGutter = (side: "oldLine" | "newLine") =>
+      [
+        ...container.querySelectorAll<HTMLElement>(
+          `.cm-gitPatch-${side} .cm-gutterElement`,
+        ),
+      ]
+        .filter((element) => element.style.visibility !== "hidden")
+        .map((element) => element.textContent);
+
+    await act(async () =>
+      renderPane(1, true, { ...source, path: "large.mjs" }),
+    );
+    expect(container.querySelector(".cm-mergeView")).toBeNull();
+    const editor = container.querySelector<HTMLElement>(".cm-editor");
+    if (!editor) throw new Error("missing patch editor");
+    const view = EditorView.findFromDOM(editor);
+    if (!view) throw new Error("missing patch editor view");
+    const buttons = () =>
+      container.querySelectorAll<HTMLButtonElement>(".cm-gitPatchExpand");
+    expect(buttons()).toHaveLength(3);
+    expect(view.state.doc.lines).toBe(10);
+    expect(readGutter("oldLine")).toEqual(["8032", "8033", "9000", "9001"]);
+    expect(readGutter("newLine")).toEqual([
+      "8032",
+      "8033",
+      "8034",
+      "9001",
+      "9002",
+    ]);
+    expect(container.querySelectorAll(".cm-gitPatchRemoved")).toHaveLength(2);
+    expect(container.querySelectorAll(".cm-changedLine")).toHaveLength(3);
+    expect(
+      container.querySelectorAll(".cm-deletedText").item(1)?.textContent,
+    ).toBe("old");
+    expect(
+      container.querySelectorAll(".cm-changedText").item(2)?.textContent,
+    ).toBe("new");
+
+    const selectedText = "trailing context";
+    const selectionStart = view.state.doc.toString().indexOf(selectedText);
+    await act(async () => {
+      view.dispatch({
+        selection: {
+          anchor: selectionStart,
+          head: selectionStart + selectedText.length,
+        },
+      });
+    });
+    await act(async () => buttons()[1].click());
+    expect(view.state.doc.lines).toBe(20);
+    expect(view.state.doc.toString()).toContain(originalLines[8033]);
+    expect(view.state.doc.toString()).toContain(originalLines[8998]);
+    expect(readGutter("oldLine")).toContain("8034");
+    expect(readGutter("newLine")).toContain("8035");
+    expect(
+      view.state.sliceDoc(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      ),
+    ).toBe(selectedText);
+    await act(async () => buttons()[0].click());
+    expect(view.state.doc.lines).toBe(30);
+    expect(view.state.doc.toString()).toContain(originalLines[8030]);
+    await act(async () => buttons()[2].click());
+    expect(view.state.doc.lines).toBe(40);
+    expect(view.state.doc.toString()).toContain(originalLines[9001]);
+    expect(mocks.gitDiffContent).toHaveBeenCalledTimes(1);
+
+    await act(async () =>
+      renderPane(2, true, { ...source, path: "large.mjs" }),
+    );
+    expect(view.state.doc.lines).toBe(10);
+    expect(readGutter("oldLine")).toEqual(["8042", "8043", "9000", "9001"]);
+    expect(readGutter("newLine")).toEqual([
+      "8042",
+      "8043",
+      "8044",
+      "9001",
+      "9002",
+    ]);
+  });
+
+  it.each([
+    ["binary", "@@ -10 +10 @@\n-before\n+after\n"],
+    ["truncated", "@@ -10 +10 @@\n-before\n+after\n"],
+    ["malformed", "@@ -10,2 +10,2 @@\n-before\n+after\n"],
+  ])(
+    "preserves the raw fallback for a %s patch",
+    async (kind, fallbackPatch) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      mocks.gitDiffContent.mockResolvedValueOnce({
+        ...diffResult("fallback"),
+        isBinary: kind === "binary",
+        truncated: kind === "truncated",
+        fallbackPatch,
+      });
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+
+      await act(async () => renderPane(1, true));
+      expect(
+        container.querySelector('[data-testid="inline-diff"]')?.textContent,
+      ).toBe(fallbackPatch);
+    },
+  );
 
   it.each(["split", "inline"] as const)(
     "shows original line numbers and body highlighting without change gutters in %s mode",

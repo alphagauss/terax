@@ -17,6 +17,7 @@
     "overwrite": "覆盖"
   },
   "diff": {
+    "expandContext": "展开附近未改动的行",
     "resizeColumns": "调整差异视图左右宽度",
     "loading": "正在加载差异…",
     "unavailable": "无法预览此文件的差异。"
