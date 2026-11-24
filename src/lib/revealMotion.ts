@@ -22,6 +22,9 @@ export class RevealMotion {
   constructor(
     private complete: () => void = () => {},
     preset: "control" | "pane" | "surface" = "control",
+    private readonly translationProperty:
+      | "translate"
+      | "transform" = "translate",
   ) {
     this.options = {
       duration: readMotionDurationMs(
@@ -55,16 +58,26 @@ export class RevealMotion {
   move(element: HTMLElement, from: number, to = 0) {
     if (!element.animate || !this.options.duration) return;
     if (Math.abs(from - to) < 0.5) {
-      if (Math.abs(to) >= 0.5) this.style(element, "translate", `0 ${to}px`);
+      if (Math.abs(to) >= 0.5)
+        this.style(element, this.translationProperty, this.translation(to));
       return;
     }
-    // 独立 translate 不覆盖虚拟行定位或业务自身的 transform。
     this.animations.push(
       element.animate(
-        [{ translate: `0 ${from}px` }, { translate: `0 ${to}px` }],
+        [
+          { [this.translationProperty]: this.translation(from) },
+          { [this.translationProperty]: this.translation(to) },
+        ],
         this.options,
       ),
     );
+  }
+
+  private translation(distance: number) {
+    // 默认保留虚拟行定位等宿主自身的 transform。
+    return this.translationProperty === "transform"
+      ? `translateY(${distance}px)`
+      : `0 ${distance}px`;
   }
 
   /** 虚拟行使用有界外壳，按整个展开区的边界进度依次揭示，图层不随文件总数增长。 */
@@ -89,22 +102,27 @@ export class RevealMotion {
           height - Math.max(0, Math.min(height, from + (to - from) * offset)),
       }));
     if (frames.every((frame) => frame.distance === frames[0].distance)) {
-      this.style(viewport, "translate", `0 ${-frames[0].distance}px`);
-      this.style(content, "translate", `0 ${frames[0].distance}px`);
+      const { distance } = frames[0];
+      this.style(
+        viewport,
+        this.translationProperty,
+        this.translation(-distance),
+      );
+      this.style(content, this.translationProperty, this.translation(distance));
       return;
     }
     this.animations.push(
       viewport.animate(
         frames.map(({ offset, distance }) => ({
           offset,
-          translate: `0 ${-distance}px`,
+          [this.translationProperty]: this.translation(-distance),
         })),
         this.options,
       ),
       content.animate(
         frames.map(({ offset, distance }) => ({
           offset,
-          translate: `0 ${distance}px`,
+          [this.translationProperty]: this.translation(distance),
         })),
         this.options,
       ),

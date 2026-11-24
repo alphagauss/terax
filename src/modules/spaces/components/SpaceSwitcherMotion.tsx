@@ -187,6 +187,8 @@ export class SpaceSwitcherMotion extends Component<
         this.setState({ present: this.props.expanded });
       },
       snapshot.moving ? "surface" : "control",
+      // WKWebView 中独立 translate 的裁剪边界和行位置可能在过渡中停住。
+      "transform",
     );
     this.motion = motion;
     if (scroller && scrollContent) {

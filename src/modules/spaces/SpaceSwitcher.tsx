@@ -320,6 +320,7 @@ export function SpaceSwitcher({
           </Button>
         </Hint>
       </PopoverTrigger>
+      {/* 入场期间也允许展开，浮窗缩放会干扰列表的几何测量。 */}
       <PopoverContent
         align="start"
         sideOffset={6}
@@ -331,7 +332,7 @@ export function SpaceSwitcher({
         onInteractOutside={(event) => {
           if (confirmingCloseAllTabs) event.preventDefault();
         }}
-        className="w-[20rem] gap-0 bg-transparent p-0 shadow-none ring-0 dark:ring-0"
+        className="w-[20rem] gap-0 bg-transparent p-0 shadow-none ring-0 data-open:[--tw-enter-scale:1]! dark:ring-0"
       >
         <SpaceSwitcherMotion
           ref={motion}

@@ -95,9 +95,11 @@ it("收起立即禁用原展示树，动画结束才移除，后续行同步位�
   render(false);
   expect(host.querySelector("input")).toBe(input);
   expect(input?.closest("[inert]")).not.toBeNull();
-  expect(animate.mock.contexts).toContain(
-    host.querySelector("[data-space-motion-row]"),
-  );
+  const row = host.querySelector("[data-space-motion-row]");
+  expect(animate.mock.calls[animate.mock.contexts.indexOf(row)]?.[0]).toEqual([
+    { transform: "translateY(100px)" },
+    { transform: "translateY(0px)" },
+  ]);
   finish();
   expect(host.querySelector("input")).toBeNull();
   expect(
@@ -123,13 +125,36 @@ it("快速反向切换接住可见边界，保留实例并恢复最终展开高�
     expect(animation.cancel).toHaveBeenCalledOnce();
   expect(host.querySelector("input")).toBe(input);
   expect(animate.mock.calls).toContainEqual([
-    [{ translate: "0 -55px" }, { translate: "0 0px" }],
+    [{ transform: "translateY(-55px)" }, { transform: "translateY(0px)" }],
     expect.anything(),
   ]);
   finish();
   expect(
     host.querySelector<HTMLElement>("[data-space-reveal]")?.style.height,
   ).toBe("");
+});
+
+it("长内容的裁剪外壳和正文使用反向 transform 位移", () => {
+  vi.stubGlobal("innerHeight", 60);
+  render(false);
+  render(true);
+
+  const viewport = host.querySelector("[data-viewport]");
+  const content = host.querySelector("[data-body]");
+  expect(
+    animate.mock.calls[animate.mock.contexts.indexOf(viewport)]?.[0],
+  ).toEqual([
+    { offset: 0, transform: "translateY(-60px)" },
+    { offset: 0.6, transform: "translateY(0px)" },
+    { offset: 1, transform: "translateY(0px)" },
+  ]);
+  expect(
+    animate.mock.calls[animate.mock.contexts.indexOf(content)]?.[0],
+  ).toEqual([
+    { offset: 0, transform: "translateY(60px)" },
+    { offset: 0.6, transform: "translateY(0px)" },
+    { offset: 1, transform: "translateY(0px)" },
+  ]);
 });
 
 it.each(["wheel", "close", "unmount"])("%s 清理过渡及临时尺寸", (reason) => {
@@ -236,7 +261,7 @@ it("Space 整组以 surface 节奏归位，内部工作页不重复叠加位移"
   renderRows([b, a]);
   expect(animate).toHaveBeenCalledTimes(2);
   expect(animate.mock.calls[0]).toEqual([
-    [{ translate: "0 100px" }, { translate: "0 0px" }],
+    [{ transform: "translateY(100px)" }, { transform: "translateY(0px)" }],
     expect.objectContaining({ duration: 240 }),
   ]);
   expect(
@@ -273,7 +298,7 @@ it("组内排序和跨 Space 移动按稳定工作页 ID 衔接，未授权的�
     host.querySelector('[data-space-position="tab:1"]'),
   );
   expect(animate).toHaveBeenCalledWith(
-    [{ translate: "0 -100px" }, { translate: "0 0px" }],
+    [{ transform: "translateY(-100px)" }, { transform: "translateY(0px)" }],
     expect.objectContaining({ duration: 240 }),
   );
   finish();
