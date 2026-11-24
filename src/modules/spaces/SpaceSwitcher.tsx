@@ -346,7 +346,7 @@ export function SpaceSwitcher({
                 <span
                   ref={headingRef}
                   tabIndex={-1}
-                  className="text-xs font-semibold text-foreground"
+                  className="text-xs font-semibold text-foreground outline-hidden"
                 >
                   {t("heading")}
                 </span>
