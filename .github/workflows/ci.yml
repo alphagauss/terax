@@ -81,7 +81,7 @@ jobs:
         with:
           workspaces: . -> target
 
-      - uses: taiki-e/install-action@v2.85.12
+      - uses: taiki-e/install-action@v2.90.7
         with:
           tool: cargo-nextest,cargo-machete
 
@@ -120,7 +120,7 @@ jobs:
         with:
           workspaces: . -> target
 
-      - uses: taiki-e/install-action@v2.85.12
+      - uses: taiki-e/install-action@v2.90.7
         with:
           tool: cargo-nextest
 
@@ -156,7 +156,7 @@ jobs:
           workspaces: . -> target
           key: coverage
 
-      - uses: taiki-e/install-action@v2.85.12
+      - uses: taiki-e/install-action@v2.90.7
         with:
           tool: cargo-llvm-cov,cargo-nextest
 
